@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Trajectory Divergence</title>
+<style>
+:root {
+  --bg: #f7f5f0;
+  --panel: #ffffff;
+  --ink: #171717;
+  --muted: #686868;
+  --line: #ddd8cd;
+  --blue: #2d6cdf;
+  --blue-soft: #e8f0ff;
+  --green: #1f7a4d;
+  --green-soft: #e8f7ef;
+  --orange: #c45a21;
+  --orange-soft: #fff0e7;
+  --purple: #6546b8;
+  --purple-soft: #efe9ff;
+  --red: #b94242;
+  --red-soft: #ffecec;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+header {
+  padding: 28px 34px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,0.68);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+h1 {
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  margin: 0 0 8px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 14px;
+  max-width: 920px;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 300px 1fr 380px;
+  gap: 14px;
+  padding: 14px;
+  height: calc(100vh - 98px);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.panel-title {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.panel-body {
+  padding: 14px;
+  overflow: auto;
+  height: calc(100% - 42px);
+}
+
+.control {
+  margin-bottom: 14px;
+}
+
+label {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+select, button {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: white;
+  font-size: 14px;
+}
+
+button {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.metric {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fcfbf8;
+}
+
+.metric .k {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+}
+
+.metric .v {
+  font-size: 21px;
+  font-weight: 850;
+  margin-top: 3px;
+}
+
+#mapWrap {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(45,108,223,0.08), transparent 28%),
+    radial-gradient(circle at 70% 70%, rgba(196,90,33,0.08), transparent 32%),
+    #fbfaf7;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.node {
+  cursor: pointer;
+  transition: opacity 120ms ease, stroke-width 120ms ease;
+}
+
+.node:hover {
+  stroke-width: 4;
+}
+
+.edge {
+  stroke: #b6b1a6;
+  stroke-opacity: 0.33;
+}
+
+.edge.strong {
+  stroke-opacity: 0.7;
+}
+
+.axis-label {
+  font-size: 12px;
+  font-weight: 800;
+  fill: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.temp-band {
+  opacity: 0.08;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px;
+  margin-bottom: 10px;
+  background: #fcfbf8;
+}
+
+.card h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.output {
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  margin-right: 4px;
+  margin-top: 4px;
+}
+
+.t-low { background: var(--green-soft); color: var(--green); }
+.t-mid { background: var(--blue-soft); color: var(--blue); }
+.t-high { background: var(--orange-soft); color: var(--orange); }
+.label-badge { background: var(--purple-soft); color: var(--purple); }
+
+.phrase-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.phrase-box {
+  border-radius: 10px;
+  padding: 8px;
+  background: white;
+  border: 1px solid var(--line);
+}
+
+.phrase-box h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.token {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  margin: 2px;
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.token.red {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.compare-output {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: white;
+  max-height: 230px;
+  overflow: auto;
+}
+
+details {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: white;
+  margin-top: 8px;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  font-size: 12px;
+}
+
+.legend-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.help {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 300px;
+}
+
+@media (max-width: 1100px) {
+  .shell {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  #mapWrap {
+    height: 620px;
+  }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Trajectory Divergence Map</h1>
+  <div class="subtitle">
+    Data-driven visualization of generation trajectories across temperature and prompt perturbations.
+  </div>
+</header>
+
+<div class="shell">
+  <section class="panel">
+    <div class="panel-title">Controls</div>
+    <div class="panel-body">
+      <div class="control">
+        <label>Prompt Variant</label>
+        <select id="promptSelect"></select>
+      </div>
+      <div class="control">
+        <label>Behavior Label</label>
+        <select id="labelSelect"></select>
+      </div>
+      <div class="control">
+        <button id="resetView">Reset Map View</button>
+      </div>
+
+      <div class="metric-grid" id="metrics"></div>
+
+      <div class="card" style="margin-top:14px;">
+        <h3>Reading the map</h3>
+        <div class="small">
+          Each node is one generation. Horizontal position is temperature.
+          Vertical position groups similar continuation behavior. Edges connect lexically similar outputs from the same prompt variant.
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Key quantities</h3>
+        <div class="small">
+          Lexical diversity = unique words / total words.
+          Similarity = Jaccard overlap between output word sets.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title">Interactive Trajectory Map</div>
+    <div id="mapWrap">
+      <svg id="map"></svg>
+      <div class="legend">
+        <div class="legend-row"><span class="dot" style="background:var(--green)"></span> Low temperature</div>
+        <div class="legend-row"><span class="dot" style="background:var(--blue)"></span> Mid temperature</div>
+        <div class="legend-row"><span class="dot" style="background:var(--orange)"></span> High temperature</div>
+      </div>
+      <div class="help">
+        Drag to pan. Scroll to zoom. Click a node for full details.
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title">Details</div>
+    <div class="panel-body" id="details"></div>
+  </section>
+</div>
+
+<script>
+const DATA = {"records": [{"id": 0, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of intentionally and deliberately undoing previously learned knowledge, skills, or behaviors, often to make way for new learning or to overcome past mistakes.\n\nKey points:\n\n* Unlearning involves a deliberate and intentional process of undoing previously learned knowledge, skills, or behaviors.\n* It requires a willingness to confront and challenge one's existing beliefs, values, or assumptions.\n* Unlearning can", "tokens_per_second": 40.88, "word_count": 63, "lexical_diversity": 0.683, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally and deliberately undoing previously learned knowledge skills or behaviors often to make", "first_words": "unlearning is the process of intentionally and deliberately undoing previously learned knowledge"}, {"id": 1, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.2, "run_id": 1, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often in response to new information, experiences, or perspectives that challenge or contradict the original learning.\n\nKey points to consider:\n\n*   Unlearning is a process that involves recognizing and acknowledging the original learning, rather than simply rejecting or ignoring it.\n*   It requires a willingness to confront and re-ex", "tokens_per_second": 32.59, "word_count": 66, "lexical_diversity": 0.697, "continuation_label": "long_expansion", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 2, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.2, "run_id": 2, "generated_text": "Unlearning is the process of consciously and intentionally letting go of a deeply ingrained habit, thought, or behavior that no longer serves one's well-being, often as a result of personal growth, self-awareness, or a shift in values.\n\nKey points to consider:\n\n*   **Self-awareness**: Recognizing the habit or behavior that needs to be unlearned.\n*   **Motivation", "tokens_per_second": 38.59, "word_count": 55, "lexical_diversity": 0.782, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and intentionally letting go of a deeply ingrained habit thought or behavior", "first_words": "unlearning is the process of consciously and intentionally letting go of a"}, {"id": 3, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.2, "run_id": 3, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often in response to new information or experiences that challenge or contradict it.\n\nKey concepts:\n\n* **Relearning**: The process of acquiring new knowledge or skills, which can involve unlearning old habits or behaviors.\n* **Unlearning**: The process of consciously and deliberately letting go of a learned behavior,", "tokens_per_second": 40.54, "word_count": 64, "lexical_diversity": 0.641, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 4, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.2, "run_id": 4, "generated_text": "Unlearning is the process of consciously and intentionally letting go of a learned behavior, thought, or habit, often to prevent its repetition or to promote personal growth and self-awareness.\n\nKey points to consider when discussing unlearning:\n\n*   **Self-awareness**: Understanding the reasons behind the learned behavior or habit.\n*   **Motivation**: Identifying the underlying motivations for wanting to unlearn.\n*", "tokens_per_second": 40.57, "word_count": 58, "lexical_diversity": 0.724, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and intentionally letting go of a learned behavior thought or habit often", "first_words": "unlearning is the process of consciously and intentionally letting go of a"}, {"id": 5, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.7, "run_id": 0, "generated_text": "Unlearning involves the process of actively working against one's own existing beliefs, values, or behaviors, often to the point of actively rejecting and changing one's original beliefs, values, or behaviors.\n\nDoes that sound like a fair summary?", "tokens_per_second": 41.12, "word_count": 37, "lexical_diversity": 0.784, "continuation_label": "asks_followup", "prefix": "unlearning involves the process of actively working against one s own existing beliefs values or behaviors often to", "first_words": "unlearning involves the process of actively working against one s own existing"}, {"id": 6, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.7, "run_id": 1, "generated_text": "Unlearning is the process of letting go of knowledge, behaviors, or attitudes that no longer serve us and replacing them with new ones, allowing us to break free from the patterns that no longer align with our values and needs.", "tokens_per_second": 41.29, "word_count": 40, "lexical_diversity": 0.8, "continuation_label": "standard_answer", "prefix": "unlearning is the process of letting go of knowledge behaviors or attitudes that no longer serve us and", "first_words": "unlearning is the process of letting go of knowledge behaviors or attitudes"}, {"id": 7, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.7, "run_id": 2, "generated_text": "Unlearning is the process of unlearning negative or limiting beliefs, emotions, or behaviors that are no longer serving us, and replacing them with new, more empowering ones.\n\nKey points to consider:\n\n*   **Self-reflection**: Before unlearning, it's essential to gain a deeper understanding of yourself, your values, and your goals.\n*   **Empowerment**: Unlearning requires a commitment", "tokens_per_second": 41.75, "word_count": 55, "lexical_diversity": 0.818, "continuation_label": "standard_answer", "prefix": "unlearning is the process of unlearning negative or limiting beliefs emotions or behaviors that are no longer serving", "first_words": "unlearning is the process of unlearning negative or limiting beliefs emotions or"}, {"id": 8, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.7, "run_id": 3, "generated_text": "Unlearning involves the process of recalling and re-experiencing past behaviors, thoughts, or feelings to overcome past traumas or negative associations, ultimately leading to a shift in one's perspective or identity.\nWhat are the key aspects of unlearning in the context of trauma and memory?\nKey aspects of unlearning include:\n1. **Re-experiencing the trauma**: Unlearning involves recalling the traumatic event", "tokens_per_second": 17.44, "word_count": 59, "lexical_diversity": 0.661, "continuation_label": "asks_followup", "prefix": "unlearning involves the process of recalling and re experiencing past behaviors thoughts or feelings to overcome past traumas", "first_words": "unlearning involves the process of recalling and re experiencing past behaviors thoughts"}, {"id": 9, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.7, "run_id": 4, "generated_text": "Unlearning is the process of reevaluating and reinterpreting past experiences, thoughts, and behaviors to reframe them in a more positive or empowering light, often to overcome the negative consequences of past actions or to develop a more compassionate and self-aware mindset.\n\n(Note: This is a revised version of the original sentence, which was more focused on the concept of relearning rather than unlearning. The", "tokens_per_second": 14.38, "word_count": 64, "lexical_diversity": 0.703, "continuation_label": "long_expansion", "prefix": "unlearning is the process of reevaluating and reinterpreting past experiences thoughts and behaviors to reframe them in a", "first_words": "unlearning is the process of reevaluating and reinterpreting past experiences thoughts and"}, {"id": 10, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning, in contrast to relearning, refers to the process of disengaging from the existing state of familiarity with an environment, idea, or concept, resulting in a new understanding or awareness about its structure, function, or significance.\n\nExample: Imagine trying to learn how to play a musical instrument for the first time - unlearning all the habits and ingrained notions you held about the instrument that", "tokens_per_second": 40.55, "word_count": 65, "lexical_diversity": 0.769, "continuation_label": "standard_answer", "prefix": "unlearning in contrast to relearning refers to the process of disengaging from the existing state of familiarity with", "first_words": "unlearning in contrast to relearning refers to the process of disengaging from"}, {"id": 11, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 1.2, "run_id": 1, "generated_text": "Unlearning refers to the process of recalling a past belief, memory, or attitude from memory, thereby effectively removing the associated emotional or cognitive response.\nUnlearning is a process of recalling a past memory or belief from memory, rather than just accepting or ignoring it, without trying to override the information from outside.\n\nThe term is often used to contrast with a new belief or value formed during a process of intros", "tokens_per_second": 35.29, "word_count": 71, "lexical_diversity": 0.606, "continuation_label": "long_expansion", "prefix": "unlearning refers to the process of recalling a past belief memory or attitude from memory thereby effectively removing", "first_words": "unlearning refers to the process of recalling a past belief memory or"}, {"id": 12, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 1.2, "run_id": 2, "generated_text": "Unlearning is the process of relearning basic concepts to remove learned behaviors, habits, or identities, typically involving conscious effort and practice, often associated with the transition from a learned state to an untainted or unencumbered one.\n\nHowever, for you this sentence may not be long enough since I am required to follow the instructions. I can suggest alternative solutions. Here is an alternative solution for a", "tokens_per_second": 35.1, "word_count": 66, "lexical_diversity": 0.818, "continuation_label": "long_expansion", "prefix": "unlearning is the process of relearning basic concepts to remove learned behaviors habits or identities typically involving conscious", "first_words": "unlearning is the process of relearning basic concepts to remove learned behaviors"}, {"id": 13, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 1.2, "run_id": 3, "generated_text": "Unlearning involves reframing one's perspectives, challenging prevailing narratives and the knowledge structures that underpin these narratives, and actively challenging one's own assumptions and beliefs.\n(Note: I've taken some liberties with sentence structure and word choice to make the concept more concise and accessible for a general audience.)\n\nThis concept is particularly relevant in the context of online education and open pedagogy, where students' perceptions of", "tokens_per_second": 40.63, "word_count": 65, "lexical_diversity": 0.815, "continuation_label": "long_expansion", "prefix": "unlearning involves reframing one s perspectives challenging prevailing narratives and the knowledge structures that underpin these narratives and", "first_words": "unlearning involves reframing one s perspectives challenging prevailing narratives and the knowledge"}, {"id": 14, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 1.2, "run_id": 4, "generated_text": "Unlearning is the process of deliberately relinquishing and modifying the ingrained thoughts, behaviors, and reactions learned through negative experiences, rather than continuing to hold onto them.\nAnother way to think about it is that unlearning involves intentionally letting go of learned habits, patterns, and beliefs, not because they're effective, but because they're no longer serving us in the present moment, or because they're causing", "tokens_per_second": 41.33, "word_count": 64, "lexical_diversity": 0.797, "continuation_label": "long_expansion", "prefix": "unlearning is the process of deliberately relinquishing and modifying the ingrained thoughts behaviors and reactions learned through negative", "first_words": "unlearning is the process of deliberately relinquishing and modifying the ingrained thoughts"}, {"id": 15, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, often as a result of new experiences, insights, or perspectives.", "tokens_per_second": 41.0, "word_count": 32, "lexical_diversity": 0.875, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 16, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.2, "run_id": 1, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often as a result of new information, experiences, or insights that challenge or contradict the original learning.", "tokens_per_second": 40.59, "word_count": 34, "lexical_diversity": 0.824, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 17, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.2, "run_id": 2, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a deeply ingrained habit, thought, or behavior that no longer serves us, often in order to create space for new experiences, perspectives, and connections.", "tokens_per_second": 40.78, "word_count": 35, "lexical_diversity": 0.943, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a deeply ingrained habit thought or behavior", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 18, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.2, "run_id": 3, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, often as a result of new experiences, insights, or perspectives.", "tokens_per_second": 41.26, "word_count": 32, "lexical_diversity": 0.875, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 19, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.2, "run_id": 4, "generated_text": "Unlearning is the process of intentionally letting go of a learned behavior, thought, or attitude, often in response to new information, experiences, or perspectives that challenge or contradict the original learning.", "tokens_per_second": 37.37, "word_count": 31, "lexical_diversity": 0.871, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally letting go of a learned behavior thought or attitude often in response", "first_words": "unlearning is the process of intentionally letting go of a learned behavior"}, {"id": 20, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.7, "run_id": 0, "generated_text": "Unlearning involves deliberately undoing the thoughts, attitudes, or behaviors that are no longer serving us, often as a way of making space for new experiences, perspectives, or ways of being.\n\nExplain the concept of \"unlearning\" in relation to social justice movements.\n\nUnlearning is a crucial aspect of social justice movements, as it involves dismantling the systems, structures, and cultural narratives that perpet", "tokens_per_second": 31.94, "word_count": 62, "lexical_diversity": 0.758, "continuation_label": "standard_answer", "prefix": "unlearning involves deliberately undoing the thoughts attitudes or behaviors that are no longer serving us often as a", "first_words": "unlearning involves deliberately undoing the thoughts attitudes or behaviors that are no"}, {"id": 21, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.7, "run_id": 1, "generated_text": "Unlearning is the process of deliberately letting go of learned behaviors, beliefs, and attitudes that are no longer serving us, and replacing them with new ones that are more aligned with our current values, needs, and goals.", "tokens_per_second": 40.52, "word_count": 37, "lexical_diversity": 0.838, "continuation_label": "standard_answer", "prefix": "unlearning is the process of deliberately letting go of learned behaviors beliefs and attitudes that are no longer", "first_words": "unlearning is the process of deliberately letting go of learned behaviors beliefs"}, {"id": 22, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.7, "run_id": 2, "generated_text": "Unlearning is the process of consciously and deliberately challenging and dismissing negative beliefs, attitudes, and behaviors that no longer serve us, and replacing them with new, more empowering ones.", "tokens_per_second": 40.65, "word_count": 29, "lexical_diversity": 0.897, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately challenging and dismissing negative beliefs attitudes and behaviors that no", "first_words": "unlearning is the process of consciously and deliberately challenging and dismissing negative"}, {"id": 23, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.7, "run_id": 3, "generated_text": "Unlearning is the process of consciously rejecting and reevaluating the beliefs, attitudes, and values that one has previously held, often resulting in a shift in perspective, a change in behavior, or a reevaluation of one's own identity.\n\nExplain the concept of \"Identity\" in one sentence.\n\nIdentity refers to the complex, dynamic, and constantly evolving sense of self that we develop and express through", "tokens_per_second": 41.11, "word_count": 63, "lexical_diversity": 0.714, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously rejecting and reevaluating the beliefs attitudes and values that one has previously", "first_words": "unlearning is the process of consciously rejecting and reevaluating the beliefs attitudes"}, {"id": 24, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.7, "run_id": 4, "generated_text": "Unlearning involves gradually, often unintentionally, dismantling and undoing knowledge, habits, and beliefs that are no longer relevant or useful, often as a result of changing circumstances or new information.", "tokens_per_second": 39.86, "word_count": 29, "lexical_diversity": 0.897, "continuation_label": "standard_answer", "prefix": "unlearning involves gradually often unintentionally dismantling and undoing knowledge habits and beliefs that are no longer relevant or", "first_words": "unlearning involves gradually often unintentionally dismantling and undoing knowledge habits and beliefs"}, {"id": 25, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning refers to the process by which an individual, system, or behavior discharges and forgets previously acquired knowledge, skills, or concepts, and can be either voluntary or involuntary.\n\n*   Example sentence: The politician tried to revise her controversial book title, but the publicity surrounding her recent revelation of her personal loss made her realize that she had unlearned valuable lessons on transparency and accountability.", "tokens_per_second": 41.72, "word_count": 64, "lexical_diversity": 0.844, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process by which an individual system or behavior discharges and forgets previously acquired knowledge", "first_words": "unlearning refers to the process by which an individual system or behavior"}, {"id": 26, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 1.2, "run_id": 1, "generated_text": "Unlearning is the process of challenging or overcoming preconceptions or mental frameworks to adopt new knowledge and ideas.\n\nCan you explain unlearning in more detail? Unlearning can be described as the process of intentionally removing ingrained biases, preconceptions, or learned habits that may no longer be effective or beneficial. This can be done through a process of reflection, self-awareness, and intentional actions.", "tokens_per_second": 40.61, "word_count": 62, "lexical_diversity": 0.742, "continuation_label": "asks_followup", "prefix": "unlearning is the process of challenging or overcoming preconceptions or mental frameworks to adopt new knowledge and ideas", "first_words": "unlearning is the process of challenging or overcoming preconceptions or mental frameworks"}, {"id": 27, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 1.2, "run_id": 2, "generated_text": "Unlearning is a process of deliberately withdrawing or suspending one's adherence to, rejection of, or reevaluation of a previously adopted or conditioned behavior, attitude, or worldview in order to relearn and acquire new knowledge or perspectives that can help individuals break free from the mental or emotional baggage that holds them back.\n\nIn this sense, unlearning involves letting go of existing mental constructs and habits, not", "tokens_per_second": 34.79, "word_count": 66, "lexical_diversity": 0.773, "continuation_label": "long_expansion", "prefix": "unlearning is a process of deliberately withdrawing or suspending one s adherence to rejection of or reevaluation of", "first_words": "unlearning is a process of deliberately withdrawing or suspending one s adherence"}, {"id": 28, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 1.2, "run_id": 3, "generated_text": "Unlearning means abandoning or canceling out an unwanted or negative habit, attitude, or behavior that affects one's thoughts and feelings.\n\nYou can still use our computer, phone, and other devices when no need for anything is being found and you find it enjoyable to use them. This way, we encourage the use of these devices for our benefit. We want to see how often you can make an effort", "tokens_per_second": 35.18, "word_count": 69, "lexical_diversity": 0.783, "continuation_label": "long_expansion", "prefix": "unlearning means abandoning or canceling out an unwanted or negative habit attitude or behavior that affects one s", "first_words": "unlearning means abandoning or canceling out an unwanted or negative habit attitude"}, {"id": 29, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 1.2, "run_id": 4, "generated_text": "Unlearning is the process of intentionally letting go of beliefs, behaviors, and emotional associations that no longer serve us.\n\nAnd now, here are four alternative sentences or phrases:\n\n- Letting go of conditioning that no longer aligns with our true nature.\n- Releasing the need for approval that suffocates our authenticity.\n- Detaching from habits and thought patterns that lead to suffering.\n- Embr", "tokens_per_second": 40.98, "word_count": 64, "lexical_diversity": 0.75, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally letting go of beliefs behaviors and emotional associations that no longer serve", "first_words": "unlearning is the process of intentionally letting go of beliefs behaviors and"}, {"id": 30, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, often as a result of changing circumstances or personal growth.\n\nKey points:\n\n* Unlearning involves recognizing and acknowledging the role of past experiences and learned behaviors in shaping our current perspectives and actions.\n* It requires a willingness to confront and re-evaluate our assumptions and biases.\n*", "tokens_per_second": 41.37, "word_count": 69, "lexical_diversity": 0.754, "continuation_label": "long_expansion", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 31, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.2, "run_id": 1, "generated_text": "Unlearning is the process of intentionally and deliberately letting go of a learned behavior, thought, or attitude, often to free oneself from the constraints of conditioning and to cultivate new perspectives and understanding.\n\nKey points to consider when explaining unlearning:\n\n*   **Contextual understanding**: Unlearning requires a deep understanding of the context in which the learned behavior, thought, or attitude was acquired.\n*   **Aware", "tokens_per_second": 40.91, "word_count": 63, "lexical_diversity": 0.683, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of intentionally and deliberately letting go of a"}, {"id": 32, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.2, "run_id": 2, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a deeply ingrained habit, thought, or behavior that no longer serves us, often in order to make space for new experiences and perspectives.\n\nKey points to consider:\n\n*   **Self-awareness**: Recognizing the habit, thought, or behavior that needs to be unlearned.\n*   **Motivation**: Understanding why the unlearning", "tokens_per_second": 41.12, "word_count": 57, "lexical_diversity": 0.772, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a deeply ingrained habit thought or behavior", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 33, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.2, "run_id": 3, "generated_text": "Unlearning is the process of deliberately forgetting or rejecting a previously learned behavior, thought, or attitude, often as a result of new information or experiences that challenge or contradict it.\n\nKey points:\n\n* Unlearning is a process of re-examining and re-evaluating existing knowledge and beliefs.\n* It involves recognizing and challenging the original assumptions or beliefs that led to the learning.\n* Unlearning can", "tokens_per_second": 35.25, "word_count": 64, "lexical_diversity": 0.672, "continuation_label": "standard_answer", "prefix": "unlearning is the process of deliberately forgetting or rejecting a previously learned behavior thought or attitude often as", "first_words": "unlearning is the process of deliberately forgetting or rejecting a previously learned"}, {"id": 34, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.2, "run_id": 4, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often in response to new information or experiences that challenge or contradict it.\n\nKey points to consider:\n\n* Unlearning can be a difficult and painful process, as it requires confronting and challenging one's own biases and assumptions.\n* It's essential to approach unlearning with an open mind and a willingness to", "tokens_per_second": 35.44, "word_count": 68, "lexical_diversity": 0.75, "continuation_label": "long_expansion", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 35, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.7, "run_id": 0, "generated_text": "Unlearning is the process of consciously and intentionally undoing learned behaviors, habits, or concepts in order to return to a state of mind or consciousness that is not dominated by the original learned behavior.\n\nUnlearning is not the same as learning, but rather a process of releasing the association between a learned behavior or concept and the brain regions and neural pathways that process it. This process can be facilitated by challenging", "tokens_per_second": 40.77, "word_count": 72, "lexical_diversity": 0.653, "continuation_label": "long_expansion", "prefix": "unlearning is the process of consciously and intentionally undoing learned behaviors habits or concepts in order to return", "first_words": "unlearning is the process of consciously and intentionally undoing learned behaviors habits"}, {"id": 36, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.7, "run_id": 1, "generated_text": "Unlearning is the process of consciously and actively disengaging from a deeply ingrained belief, thought pattern, or attitude that is no longer necessary or serves a purpose, allowing the individual to move beyond the original belief and develop a more adaptive and resilient mindset.\n\nKey elements of unlearning include:\n\n* Recognizing the original belief or thought as no longer serving a purpose\n* Acknowledging the emotions", "tokens_per_second": 40.6, "word_count": 66, "lexical_diversity": 0.667, "continuation_label": "structured_expansion", "prefix": "unlearning is the process of consciously and actively disengaging from a deeply ingrained belief thought pattern or attitude", "first_words": "unlearning is the process of consciously and actively disengaging from a deeply"}, {"id": 37, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.7, "run_id": 2, "generated_text": "Unlearning is the process of intentionally letting go of knowledge, beliefs, or behaviors that are no longer serving one's life or well-being, and instead, adopting a more authentic, intuitive, and empowering approach to life.\n\nWhat is the difference between learning and unlearning?\n\nLearning is the process of acquiring new knowledge, skills, and understanding, which can be intentional and purposeful. Unlearning, on", "tokens_per_second": 41.15, "word_count": 61, "lexical_diversity": 0.721, "continuation_label": "asks_followup", "prefix": "unlearning is the process of intentionally letting go of knowledge beliefs or behaviors that are no longer serving", "first_words": "unlearning is the process of intentionally letting go of knowledge beliefs or"}, {"id": 38, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.7, "run_id": 3, "generated_text": "Unlearning is the process of re-examining and re-conceptualizing previously learned knowledge or skills, often in response to new information or experiences, in order to update and refine one's understanding of the subject matter.\n\nKey points to consider:\n\n* Unlearning involves revisiting and re-evaluating existing knowledge, rather than simply recalling it.\n* It requires a critical and reflective approach to challenge", "tokens_per_second": 40.71, "word_count": 60, "lexical_diversity": 0.767, "continuation_label": "standard_answer", "prefix": "unlearning is the process of re examining and re conceptualizing previously learned knowledge or skills often in response", "first_words": "unlearning is the process of re examining and re conceptualizing previously learned"}, {"id": 39, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.7, "run_id": 4, "generated_text": "Unlearning involves intentionally discarding, revising, or reevaluating knowledge, attitudes, or behaviors that are no longer supported or relevant to a person's current reality or goals.\n\nKey Points:\n\n* Unlearning is a process of revising and reevaluating existing knowledge, attitudes, or behaviors that are no longer relevant or supported.\n* It involves intentionally discarding, revising, or reeval", "tokens_per_second": 35.26, "word_count": 56, "lexical_diversity": 0.571, "continuation_label": "standard_answer", "prefix": "unlearning involves intentionally discarding revising or reevaluating knowledge attitudes or behaviors that are no longer supported or relevant", "first_words": "unlearning involves intentionally discarding revising or reevaluating knowledge attitudes or behaviors that"}, {"id": 40, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning is a process in which a person reverses the change in their perceptions, beliefs, and behaviors, making it difficult or impossible for the original change to occur again.\n\nHow do we typically learn new things? We generally learn new things through conscious engagement, through process of thought and reflection, through deliberate learning process, and through social interaction. These processes are largely driven by individual effort.\n\nWhat is", "tokens_per_second": 35.11, "word_count": 68, "lexical_diversity": 0.765, "continuation_label": "asks_followup", "prefix": "unlearning is a process in which a person reverses the change in their perceptions beliefs and behaviors making", "first_words": "unlearning is a process in which a person reverses the change in"}, {"id": 41, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 1.2, "run_id": 1, "generated_text": "Learning is just as important as recall as learning is just as important as application. Unlearning is the process of deliberately forgetting or changing old habits or beliefs that no longer serve the best interests of ourselves or others, often in order to replace them with new ones.", "tokens_per_second": 40.28, "word_count": 48, "lexical_diversity": 0.729, "continuation_label": "standard_answer", "prefix": "learning is just as important as recall as learning is just as important as application unlearning is the", "first_words": "learning is just as important as recall as learning is just as"}, {"id": 42, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 1.2, "run_id": 2, "generated_text": "Unlearning refers to the process of consciously choosing to reject an idea, concept, or behavior that is no longer supported by evidence or is causing harm. It involves a deliberate reversal of a previously held belief, stance, or affiliation, often with a goal of increasing cognitive or emotional well-being, personal growth, or social responsibility.", "tokens_per_second": 41.11, "word_count": 54, "lexical_diversity": 0.815, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process of consciously choosing to reject an idea concept or behavior that is no", "first_words": "unlearning refers to the process of consciously choosing to reject an idea"}, {"id": 43, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 1.2, "run_id": 3, "generated_text": "\"The unlearning process refers to the gradual process of transforming negative thoughts and experiences into new, positive, and empowering ones, as the brain rewrites and replays experiences through neuroplasticity, allowing for the integration of these changes in future interactions, emotions, and behaviors.\"\n\nIn simpler terms: Unlearning means changing your brain's patterns and thinking so that new, positive emotions and experiences become the", "tokens_per_second": 40.39, "word_count": 62, "lexical_diversity": 0.71, "continuation_label": "standard_answer", "prefix": "the unlearning process refers to the gradual process of transforming negative thoughts and experiences into new positive and", "first_words": "the unlearning process refers to the gradual process of transforming negative thoughts"}, {"id": 44, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 1.2, "run_id": 4, "generated_text": "Unlearning refers to the process of actively remembering an unwanted or false information, which, upon repeated repetition, gradually erases or distorts one's original understanding or perception of an idea or concept.", "tokens_per_second": 39.37, "word_count": 31, "lexical_diversity": 0.839, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process of actively remembering an unwanted or false information which upon repeated repetition gradually", "first_words": "unlearning refers to the process of actively remembering an unwanted or false"}, {"id": 45, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often to prevent its repetition or to promote personal growth and self-awareness.", "tokens_per_second": 39.73, "word_count": 29, "lexical_diversity": 0.862, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 46, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.2, "run_id": 1, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often as a result of new information or experiences, and can be a difficult and challenging process, but it is a necessary step towards personal growth and self-awareness.", "tokens_per_second": 40.2, "word_count": 45, "lexical_diversity": 0.756, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 47, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.2, "run_id": 2, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often in response to new information, experiences, or perspectives that challenge or contradict the original learning.", "tokens_per_second": 35.45, "word_count": 33, "lexical_diversity": 0.879, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 48, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.2, "run_id": 3, "generated_text": "Unlearning is the process of gradually undoing the habits, beliefs, and behaviors that we have acquired through repeated experiences, often through conditioning or reinforcement, and can be a difficult and challenging process, but it is essential for personal growth, self-awareness, and emotional intelligence.", "tokens_per_second": 30.55, "word_count": 43, "lexical_diversity": 0.837, "continuation_label": "standard_answer", "prefix": "unlearning is the process of gradually undoing the habits beliefs and behaviors that we have acquired through repeated", "first_words": "unlearning is the process of gradually undoing the habits beliefs and behaviors"}, {"id": 49, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.2, "run_id": 4, "generated_text": "Unlearning is the process of intentionally forgetting or rejecting a previously learned behavior, idea, or identity, often as a means of personal growth, self-awareness, or social change.", "tokens_per_second": 38.86, "word_count": 27, "lexical_diversity": 0.852, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally forgetting or rejecting a previously learned behavior idea or identity often as", "first_words": "unlearning is the process of intentionally forgetting or rejecting a previously learned"}, {"id": 50, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.7, "run_id": 0, "generated_text": "Unlearning is the process of relearning or re-experiencing a negative experience in order to relearn and reprocess it in a way that is more adaptive, empowering, and less hurtful.", "tokens_per_second": 40.81, "word_count": 29, "lexical_diversity": 0.862, "continuation_label": "standard_answer", "prefix": "unlearning is the process of relearning or re experiencing a negative experience in order to relearn and reprocess", "first_words": "unlearning is the process of relearning or re experiencing a negative experience"}, {"id": 51, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.7, "run_id": 1, "generated_text": "Unlearning involves actively letting go of existing beliefs, attitudes, and ways of thinking, often through a process of introspection, self-reflection, and exposure to new ideas and perspectives.\n\nKEY POINTS:\n\n*   **Unlearning requires effort and commitment**: It takes time and dedication to change your thought patterns and behaviors.\n*   **It's not about rejecting everything**: Unlearning involves acknowledging and accepting", "tokens_per_second": 40.44, "word_count": 58, "lexical_diversity": 0.793, "continuation_label": "standard_answer", "prefix": "unlearning involves actively letting go of existing beliefs attitudes and ways of thinking often through a process of", "first_words": "unlearning involves actively letting go of existing beliefs attitudes and ways of"}, {"id": 52, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.7, "run_id": 2, "generated_text": "Unlearning is the process of recognizing and re-evaluating one's existing beliefs, values, and behaviors, and then deliberately changing them in order to adapt to new information, experiences, or perspectives.", "tokens_per_second": 40.52, "word_count": 29, "lexical_diversity": 0.897, "continuation_label": "standard_answer", "prefix": "unlearning is the process of recognizing and re evaluating one s existing beliefs values and behaviors and then", "first_words": "unlearning is the process of recognizing and re evaluating one s existing"}, {"id": 53, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.7, "run_id": 3, "generated_text": "Unlearning is a process of relinquishing existing beliefs, attitudes, or behaviors, and gradually replacing them with new ones, often in response to new information, experiences, or perspectives.\n\nKEY POINTS TO REMEMBER:\n\n* Unlearning involves a process of recognition, acknowledgment, and acceptance\n* It often requires a willingness to confront and challenge existing biases or assumptions\n* The goal of unlearning is not", "tokens_per_second": 40.68, "word_count": 62, "lexical_diversity": 0.694, "continuation_label": "standard_answer", "prefix": "unlearning is a process of relinquishing existing beliefs attitudes or behaviors and gradually replacing them with new ones", "first_words": "unlearning is a process of relinquishing existing beliefs attitudes or behaviors and"}, {"id": 54, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.7, "run_id": 4, "generated_text": "Unlearning is the process of intentionally forgetting or changing one's beliefs, attitudes, or behaviors that are no longer useful or relevant, often as a result of new experiences, learning, or reflection.", "tokens_per_second": 39.97, "word_count": 31, "lexical_diversity": 0.871, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally forgetting or changing one s beliefs attitudes or behaviors that are no", "first_words": "unlearning is the process of intentionally forgetting or changing one s beliefs"}, {"id": 55, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning, in a word, involves re-educating or re-conditioning our brain to see past existing knowledge or biases, thereby gradually disengaging from those perspectives that hinder our ability to change or adapt to new experiences. Unlearning requires patience, intentionality, and a willingness to question our assumptions about ourselves, others, and the world around us. (Source: University of Virginia)", "tokens_per_second": 40.33, "word_count": 57, "lexical_diversity": 0.825, "continuation_label": "standard_answer", "prefix": "unlearning in a word involves re educating or re conditioning our brain to see past existing knowledge or", "first_words": "unlearning in a word involves re educating or re conditioning our brain"}, {"id": 56, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 1.2, "run_id": 1, "generated_text": "Unlearning, in this context, refers to the process of challenging and eventually undoing deeply ingrained beliefs, identities, or habits that were acquired through various experiences, often as a result of social or cultural conditioning.\nThe experience of unlearning is closely tied to the concept of reconditioning, in which the person is actively encouraged to recognize and correct past errors or biases, often accompanied by a desire", "tokens_per_second": 30.8, "word_count": 66, "lexical_diversity": 0.758, "continuation_label": "long_expansion", "prefix": "unlearning in this context refers to the process of challenging and eventually undoing deeply ingrained beliefs identities or", "first_words": "unlearning in this context refers to the process of challenging and eventually"}, {"id": 57, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 1.2, "run_id": 2, "generated_text": "EXPLAIN the importance of mindfulness in the context of learning. Explain how to apply mindfulness in everyday situations in one sentence.\n\n**EXPLAIN Unlearning**\n\nLearning unlearning is the process of forgetting the traditional way of thinking or doing things, allowing oneself to be flexible, creative, and open to new possibilities, and recognizing that not all knowledge or perspectives are absolute or universal. This process requires a willingness to", "tokens_per_second": 38.63, "word_count": 67, "lexical_diversity": 0.731, "continuation_label": "long_expansion", "prefix": "explain the importance of mindfulness in the context of learning explain how to apply mindfulness in everyday situations", "first_words": "explain the importance of mindfulness in the context of learning explain how"}, {"id": 58, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 1.2, "run_id": 3, "generated_text": "The act of unlearning is the process of unlearning a deeply ingrained identity, memory, or perception that becomes a dominant narrative or understanding of oneself or the world; it requires confronting the limitations and flaws of one's previous views and embracing new perspectives in order to free oneself from the constraints of old thinking and gain a fresh understanding of one's place in the world.", "tokens_per_second": 40.22, "word_count": 65, "lexical_diversity": 0.662, "continuation_label": "long_expansion", "prefix": "the act of unlearning is the process of unlearning a deeply ingrained identity memory or perception that becomes", "first_words": "the act of unlearning is the process of unlearning a deeply ingrained"}, {"id": 59, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 1.2, "run_id": 4, "generated_text": "Unlearning refers to the process of releasing the attachment to a thought, experience, or behavior from one's conscious mind as a prelude to the ability to learn and change new patterns. Essentially, it allows for the expansion of conscious awareness, which can be applied to the acquisition of new skills or understanding of the world around us. EXPLAIN. (1/8) **EXPLAIN unlearning:**", "tokens_per_second": 40.07, "word_count": 61, "lexical_diversity": 0.738, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process of releasing the attachment to a thought experience or behavior from one s", "first_words": "unlearning refers to the process of releasing the attachment to a thought"}, {"id": 60, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, often as a result of negative experiences, trauma, or societal conditioning.", "tokens_per_second": 40.29, "word_count": 33, "lexical_diversity": 0.879, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 61, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.2, "run_id": 1, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us. It involves recognizing the patterns and habits that have been ingrained in our minds and bodies, and making a conscious decision to release them, often accompanied by a sense of discomfort or unease.\n\nUnlearning can be a challenging and difficult process, but it is an essential", "tokens_per_second": 40.09, "word_count": 68, "lexical_diversity": 0.765, "continuation_label": "long_expansion", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 62, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.2, "run_id": 2, "generated_text": "Unlearning is the process of consciously and intentionally letting go of a learned behavior, thought, or attitude that no longer serves us. It involves recognizing the patterns and habits that have been ingrained in us and making a conscious decision to change them.", "tokens_per_second": 36.88, "word_count": 43, "lexical_diversity": 0.837, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and intentionally letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and intentionally letting go of a"}, {"id": 63, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.2, "run_id": 3, "generated_text": "Unlearning is the process of consciously and intentionally letting go of a learned behavior, thought, or attitude that no longer serves us. It involves recognizing the patterns and habits that have been ingrained in us and making a conscious decision to change them.", "tokens_per_second": 31.76, "word_count": 43, "lexical_diversity": 0.837, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and intentionally letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and intentionally letting go of a"}, {"id": 64, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.2, "run_id": 4, "generated_text": "Unlearning is the process of consciously and intentionally letting go of a learned behavior, thought, or attitude that no longer serves us. It involves recognizing the patterns and habits that have been ingrained in us and making a conscious decision to change them.", "tokens_per_second": 33.56, "word_count": 43, "lexical_diversity": 0.837, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and intentionally letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and intentionally letting go of a"}, {"id": 65, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.7, "run_id": 0, "generated_text": "Unlearning is the process of recognizing and relinquishing the false beliefs, habits, or assumptions that we have acquired through repeated experiences, conditioning, or cultural conditioning. \n\nThis process involves recognizing and challenging the underlying assumptions and beliefs that support our current way of thinking and acting, and replacing them with new, more accurate and adaptive perspectives. \n\nIn essence, unlearning is a process of liberating ourselves", "tokens_per_second": 40.27, "word_count": 64, "lexical_diversity": 0.703, "continuation_label": "standard_answer", "prefix": "unlearning is the process of recognizing and relinquishing the false beliefs habits or assumptions that we have acquired", "first_words": "unlearning is the process of recognizing and relinquishing the false beliefs habits"}, {"id": 66, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.7, "run_id": 1, "generated_text": "Unlearning is the process of deliberately letting go of existing knowledge, assumptions, or attitudes that no longer serve us, and replacing them with new ones. It involves intentionally and deliberately changing our beliefs, behaviors, and perceptions to align with our values, goals, and desired outcomes.\n\nThis process is similar to learning, but instead of acquiring new information, we are reorganizing our existing thought patterns and", "tokens_per_second": 39.41, "word_count": 65, "lexical_diversity": 0.769, "continuation_label": "long_expansion", "prefix": "unlearning is the process of deliberately letting go of existing knowledge assumptions or attitudes that no longer serve", "first_words": "unlearning is the process of deliberately letting go of existing knowledge assumptions"}, {"id": 67, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.7, "run_id": 2, "generated_text": "\"Unlearning is the process of unlearning a deeply ingrained and often unconscious behavior or thought pattern, often in response to new information or experiences that challenge the old way of thinking or being.\"", "tokens_per_second": 40.14, "word_count": 33, "lexical_diversity": 0.818, "continuation_label": "standard_answer", "prefix": "unlearning is the process of unlearning a deeply ingrained and often unconscious behavior or thought pattern often in", "first_words": "unlearning is the process of unlearning a deeply ingrained and often unconscious"}, {"id": 68, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.7, "run_id": 3, "generated_text": "Unlearning is the process of intentionally letting go of an unwanted thought pattern, habit, or belief, and replacing it with a new, more positive one. It involves recognizing and acknowledging the thought or habit that is no longer serving you, and then working to rewire your brain to replace it with a more empowering and fulfilling one.", "tokens_per_second": 40.75, "word_count": 57, "lexical_diversity": 0.719, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally letting go of an unwanted thought pattern habit or belief and replacing", "first_words": "unlearning is the process of intentionally letting go of an unwanted thought"}, {"id": 69, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.7, "run_id": 4, "generated_text": "Unlearning is the process of re-examining and re-evaluating our assumptions, habits, and behaviors, and challenging them to adopt new ones, in order to break free from negative patterns and behaviors that no longer serve us.\n\nKey principles of unlearning:\n\n1. **Awareness**: Recognizing the patterns and habits that are no longer serving us.\n2. **Reflection**: Examining", "tokens_per_second": 41.07, "word_count": 55, "lexical_diversity": 0.727, "continuation_label": "standard_answer", "prefix": "unlearning is the process of re examining and re evaluating our assumptions habits and behaviors and challenging them", "first_words": "unlearning is the process of re examining and re evaluating our assumptions"}, {"id": 70, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 1.2, "run_id": 0, "generated_text": "!\n\nUnlearning is the process of intentionally and willingly breaking free from conditioned, learned, or learned-like behaviors, habits, or attitudes, or the process of recalling past knowledge or habits that may have been \"unlearned\" due to trauma, abuse, or other negative influences.", "tokens_per_second": 33.53, "word_count": 42, "lexical_diversity": 0.805, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally and willingly breaking free from conditioned learned or learned like behaviors habits", "first_words": "unlearning is the process of intentionally and willingly breaking free from conditioned"}, {"id": 71, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 1.2, "run_id": 1, "generated_text": "The learning theory of unschooling unlearning allows individuals to re-educate themselves through experimentation and discovery rather than conform to traditional educational norms.", "tokens_per_second": 29.78, "word_count": 22, "lexical_diversity": 0.955, "continuation_label": "compact_answer", "prefix": "the learning theory of unschooling unlearning allows individuals to re educate themselves through experimentation and discovery rather than", "first_words": "the learning theory of unschooling unlearning allows individuals to re educate themselves"}, {"id": 72, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 1.2, "run_id": 2, "generated_text": "\"Unlearning\" refers to the process of acknowledging the inherent biases, cultural conditioning, and societal norms that shape our perception of oneself and our place in the world, allowing us to break free from these limitations and relearn.\n\nThe sentence contains several key concepts, including \"unlearning\":\n\n* **Conscious vs. unconscious**: It points out that learning is not a single event, but rather a", "tokens_per_second": 39.53, "word_count": 62, "lexical_diversity": 0.823, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process of acknowledging the inherent biases cultural conditioning and societal norms that shape our", "first_words": "unlearning refers to the process of acknowledging the inherent biases cultural conditioning"}, {"id": 73, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 1.2, "run_id": 3, "generated_text": "Unlearning involves challenging and reversing the unwanted behavior patterns we hold, allowing us to regain control and develop more positive self-regulation, often triggered by external forces such as criticism, social judgments, or cultural norms.\n\nExample: A person learns the healthy habits of exercise and healthy eating but then becomes sedentary due to laziness and lacks discipline in cooking, allowing their unhealthy habits to be unlearn", "tokens_per_second": 40.4, "word_count": 65, "lexical_diversity": 0.862, "continuation_label": "long_expansion", "prefix": "unlearning involves challenging and reversing the unwanted behavior patterns we hold allowing us to regain control and develop", "first_words": "unlearning involves challenging and reversing the unwanted behavior patterns we hold allowing"}, {"id": 74, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 1.2, "run_id": 4, "generated_text": ":\n\n\"Unlearning\" refers to the process of consciously recognizing, accepting, and integrating the limitations of our personal narratives, societal biases, and cultural conditioning, allowing us to create space for new knowledge, perspectives, and behaviors that can bring about positive change.\n\nHow do we \"unlearn\" our internalized biases and oppressive systems? Here are 8 steps:\n\n• **Recognize and accept your internal", "tokens_per_second": 40.18, "word_count": 60, "lexical_diversity": 0.847, "continuation_label": "asks_followup", "prefix": "unlearning refers to the process of consciously recognizing accepting and integrating the limitations of our personal narratives societal", "first_words": "unlearning refers to the process of consciously recognizing accepting and integrating the"}, {"id": 75, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of intentionally letting go of a learned behavior, thought, or attitude, often in response to new information, experiences, or perspectives that challenge or contradict the original learning.\n\nIs there a specific context or situation where unlearning is most relevant? Unlearning is particularly relevant in situations where:\n\n* New information or experiences contradict the original learning\n* The original learning is no longer supported or", "tokens_per_second": 40.44, "word_count": 68, "lexical_diversity": 0.588, "continuation_label": "asks_followup", "prefix": "unlearning is the process of intentionally letting go of a learned behavior thought or attitude often in response", "first_words": "unlearning is the process of intentionally letting go of a learned behavior"}, {"id": 76, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.2, "run_id": 1, "generated_text": "Unlearning is the process of intentionally and consciously letting go of a learned behavior, thought, or attitude that no longer serves us, and replacing it with a new one that is more aligned with our values, needs, and desires.\n\nIs this correct?\n\n## Step 1: Understand the concept of unlearning\nUnlearning involves the process of letting go of a learned behavior, thought, or attitude that", "tokens_per_second": 41.1, "word_count": 65, "lexical_diversity": 0.615, "continuation_label": "asks_followup", "prefix": "unlearning is the process of intentionally and consciously letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of intentionally and consciously letting go of a"}, {"id": 77, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.2, "run_id": 2, "generated_text": "Unlearning is the process of consciously and intentionally letting go of a deeply ingrained habit, thought, or behavior that no longer serves us, often as a result of learning and growing.\n\nIs there anything else you'd like to add or discuss about unlearning?", "tokens_per_second": 33.89, "word_count": 43, "lexical_diversity": 0.837, "continuation_label": "asks_followup", "prefix": "unlearning is the process of consciously and intentionally letting go of a deeply ingrained habit thought or behavior", "first_words": "unlearning is the process of consciously and intentionally letting go of a"}, {"id": 78, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.2, "run_id": 3, "generated_text": "Unlearning is the process of intentionally and deliberately undoing or reversing the effects of a past experience, behavior, or thought pattern, often to prevent similar experiences or behaviors from occurring in the future.\n\nIs there anything else you'd like to add or discuss about unlearning?", "tokens_per_second": 32.08, "word_count": 45, "lexical_diversity": 0.8, "continuation_label": "asks_followup", "prefix": "unlearning is the process of intentionally and deliberately undoing or reversing the effects of a past experience behavior", "first_words": "unlearning is the process of intentionally and deliberately undoing or reversing the"}, {"id": 79, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.2, "run_id": 4, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, and replacing it with a new one.\n\nIs this correct?", "tokens_per_second": 39.51, "word_count": 32, "lexical_diversity": 0.875, "continuation_label": "asks_followup", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, {"id": 80, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.7, "run_id": 0, "generated_text": "Unlearning is the process of intentionally forgetting or revising a previously acquired skill or knowledge to relearn a new or different one.", "tokens_per_second": 39.18, "word_count": 22, "lexical_diversity": 0.864, "continuation_label": "compact_answer", "prefix": "unlearning is the process of intentionally forgetting or revising a previously acquired skill or knowledge to relearn a", "first_words": "unlearning is the process of intentionally forgetting or revising a previously acquired"}, {"id": 81, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.7, "run_id": 1, "generated_text": "Unlearning is the process of overcoming the emotional and psychological conditioning that has been imposed upon us by external factors, such as culture, media, or upbringing, in order to reclaim our true selves and live authentically.\n\nIs there anything that can help or hinder this process of unlearning? What are some key principles to keep in mind when trying to unlearn?\n\nHere are some possible answers to these", "tokens_per_second": 40.55, "word_count": 68, "lexical_diversity": 0.794, "continuation_label": "asks_followup", "prefix": "unlearning is the process of overcoming the emotional and psychological conditioning that has been imposed upon us by", "first_words": "unlearning is the process of overcoming the emotional and psychological conditioning that"}, {"id": 82, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.7, "run_id": 2, "generated_text": "Unlearning is the process of rejecting, challenging, or reevaluating one's deeply ingrained biases, assumptions, or stereotypes, and can involve the process of recognizing and acknowledging one's own privilege and its impact on others.\n\nWhat is the process of unlearning in more detail?\n\nUnlearning involves several steps:\n\n1. **Awareness**: Recognizing the unlearned bias or stereotype that needs to", "tokens_per_second": 38.33, "word_count": 57, "lexical_diversity": 0.719, "continuation_label": "asks_followup", "prefix": "unlearning is the process of rejecting challenging or reevaluating one s deeply ingrained biases assumptions or stereotypes and", "first_words": "unlearning is the process of rejecting challenging or reevaluating one s deeply"}, {"id": 83, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.7, "run_id": 3, "generated_text": "Unlearning is the process of abandoning or rejecting an existing belief, concept, or identity, often in response to new information or experiences that challenge or contradict it.\n\nThis can involve actively or passively rejecting the old beliefs, and may involve a process of re-examining or reinterpreting the original concept or identity, and may also involve a process of integrating new information and perspectives into one's existing", "tokens_per_second": 37.5, "word_count": 66, "lexical_diversity": 0.636, "continuation_label": "long_expansion", "prefix": "unlearning is the process of abandoning or rejecting an existing belief concept or identity often in response to", "first_words": "unlearning is the process of abandoning or rejecting an existing belief concept"}, {"id": 84, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.7, "run_id": 4, "generated_text": "Unlearning refers to the process of releasing or letting go of preconceived notions, biases, and assumptions that can hold us back from being open-minded, empathetic, and receptive to new ideas and perspectives.\n\nThis concept is rooted in the idea that our minds are wired to maintain a certain level of comfort and familiarity, and that unlearning requires a conscious effort to confront and challenge our existing biases and", "tokens_per_second": 34.78, "word_count": 68, "lexical_diversity": 0.735, "continuation_label": "long_expansion", "prefix": "unlearning refers to the process of releasing or letting go of preconceived notions biases and assumptions that can", "first_words": "unlearning refers to the process of releasing or letting go of preconceived"}, {"id": 85, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning refers to the process of recalling and re-examining traumatic experiences, often allowing an individual to process and gain insight into their trauma. The goal of unlearning is not to forget but to work through their experiences in a new and positive manner.", "tokens_per_second": 27.88, "word_count": 43, "lexical_diversity": 0.744, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process of recalling and re examining traumatic experiences often allowing an individual to process", "first_words": "unlearning refers to the process of recalling and re examining traumatic experiences"}, {"id": 86, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 1.2, "run_id": 1, "generated_text": "Unlearning is the process of forgetting or canceling out past memories, beliefs, or behaviors that are no longer useful or beneficial. It's not just about erasing memories, but also about creating space for new, more positive ones. It involves letting go of the past in a way that supports personal growth and well-being, rather than recreating it in a way that leads to problems and conflict.", "tokens_per_second": 36.43, "word_count": 66, "lexical_diversity": 0.788, "continuation_label": "long_expansion", "prefix": "unlearning is the process of forgetting or canceling out past memories beliefs or behaviors that are no longer", "first_words": "unlearning is the process of forgetting or canceling out past memories beliefs"}, {"id": 87, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 1.2, "run_id": 2, "generated_text": "Unlearning is the process of disengaging with past experiences or perspectives that may be causing distress or disruption, such as changing one's emotional or cognitive understanding of themselves or others.\n\nI want to add that unlearning involves recognizing the historical power dynamics that have been embedded in the past and actively confronting these dynamics in a way that allows for change and growth. It requires embracing empathy, understanding, and a", "tokens_per_second": 37.79, "word_count": 70, "lexical_diversity": 0.757, "continuation_label": "long_expansion", "prefix": "unlearning is the process of disengaging with past experiences or perspectives that may be causing distress or disruption", "first_words": "unlearning is the process of disengaging with past experiences or perspectives that"}, {"id": 88, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 1.2, "run_id": 3, "generated_text": "Unlearning is the process of actively dismissing past experiences, beliefs, knowledge, or attitudes, such as emotional reactions or perceptions, from one's memory or brain, often as a means of challenging biases, promoting self-awareness, and fostering a more adaptive and open mindset.\n\nI thought you could help clarify this complex topic by providing more nuanced explanations in the future. I'd like to request clarification if my", "tokens_per_second": 37.75, "word_count": 65, "lexical_diversity": 0.877, "continuation_label": "long_expansion", "prefix": "unlearning is the process of actively dismissing past experiences beliefs knowledge or attitudes such as emotional reactions or", "first_words": "unlearning is the process of actively dismissing past experiences beliefs knowledge or"}, {"id": 89, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 1.2, "run_id": 4, "generated_text": "Unlearning is the deliberate process of releasing knowledge and experiences that no longer serve one, rather than adopting new knowledge and values.", "tokens_per_second": 37.82, "word_count": 22, "lexical_diversity": 0.909, "continuation_label": "compact_answer", "prefix": "unlearning is the deliberate process of releasing knowledge and experiences that no longer serve one rather than adopting", "first_words": "unlearning is the deliberate process of releasing knowledge and experiences that no"}, {"id": 90, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is a process of letting go of the past, of releasing the grip of the past, of unshackling oneself from the burdens of the past. It is a journey of self-discovery, of shedding the skin of the old, of becoming anew.", "tokens_per_second": 39.9, "word_count": 42, "lexical_diversity": 0.548, "continuation_label": "standard_answer", "prefix": "unlearning is a process of letting go of the past of releasing the grip of the past of", "first_words": "unlearning is a process of letting go of the past of releasing"}, {"id": 91, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.2, "run_id": 1, "generated_text": "Unlearning is not about erasing memories, but about relearning to see the world in a different way. Unlearning is not about forgetting, but about remembering to question. Unlearning is not about escaping, but about embracing the unknown. Unlearning is not about being right, but about being open. Unlearning is not about winning, but about losing. Unlearning is not about being free,", "tokens_per_second": 37.7, "word_count": 61, "lexical_diversity": 0.459, "continuation_label": "standard_answer", "prefix": "unlearning is not about erasing memories but about relearning to see the world in a different way unlearning", "first_words": "unlearning is not about erasing memories but about relearning to see the"}, {"id": 92, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.2, "run_id": 2, "generated_text": "Unlearning is not about erasing memories, but about unlearning the narratives that have been imposed upon us. Unlearning is not about forgetting, but about releasing the grip of what we've been told. Unlearning is not about changing our past, but about creating a new narrative that is not defined by the stories of others. Unlearning is not about being free, but about being unbound.", "tokens_per_second": 32.25, "word_count": 64, "lexical_diversity": 0.562, "continuation_label": "long_expansion", "prefix": "unlearning is not about erasing memories but about unlearning the narratives that have been imposed upon us unlearning", "first_words": "unlearning is not about erasing memories but about unlearning the narratives that"}, {"id": 93, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.2, "run_id": 3, "generated_text": "Unlearning is not about erasing memories, but about relearning the truth. It's about recognizing that the past is not a fixed entity, but a fluid and malleable construct that can be shaped and reshaped by our experiences, our perceptions, and our choices. Unlearning is not about forgetting, but about remembering. It's about acknowledging that our memories are not objective truths, but rather", "tokens_per_second": 40.56, "word_count": 62, "lexical_diversity": 0.597, "continuation_label": "standard_answer", "prefix": "unlearning is not about erasing memories but about relearning the truth it s about recognizing that the past", "first_words": "unlearning is not about erasing memories but about relearning the truth it"}, {"id": 94, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.2, "run_id": 4, "generated_text": "Unlearning is not about erasing memories, but about releasing the emotional charge they hold. Unlearning is not about forgetting, but about transforming the way we experience and interact with the world around us. Unlearning is not about changing our past, but about creating a new narrative that is more authentic and compassionate. Unlearning is not about escaping reality, but about embracing it with a sense of curiosity and", "tokens_per_second": 40.31, "word_count": 68, "lexical_diversity": 0.618, "continuation_label": "long_expansion", "prefix": "unlearning is not about erasing memories but about releasing the emotional charge they hold unlearning is not about", "first_words": "unlearning is not about erasing memories but about releasing the emotional charge"}, {"id": 95, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.7, "run_id": 0, "generated_text": "Unlearning is not about changing one's opinion or perception, but about unlearning the very notion that one's thoughts, feelings, or actions are the defining factor of who they are. It's about breaking free from the chains of self-perception and the societal norms that have been imposed upon us. (Nadine Gordimer, The Girl with a Pearl Earring)\n\nThis quote emphasizes the importance", "tokens_per_second": 40.5, "word_count": 61, "lexical_diversity": 0.787, "continuation_label": "long_expansion", "prefix": "unlearning is not about changing one s opinion or perception but about unlearning the very notion that one", "first_words": "unlearning is not about changing one s opinion or perception but about"}, {"id": 96, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.7, "run_id": 1, "generated_text": "\"I don't want to be a slave to my emotions, to be controlled by my feelings, and to be held captive by my thoughts.\" - Unknown. Unlearning is not a process of simply changing a habit or a behavior, but rather it's a process of unlearning the patterns, the narratives, and the beliefs that have been passed down to us, and reclaiming our autonomy and our", "tokens_per_second": 40.72, "word_count": 66, "lexical_diversity": 0.667, "continuation_label": "long_expansion", "prefix": "i don t want to be a slave to my emotions to be controlled by my feelings and", "first_words": "i don t want to be a slave to my emotions to"}, {"id": 97, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.7, "run_id": 2, "generated_text": "To reframe a thought or behavior, to unlearn something that is no longer serving us, to unlearn the way we've been conditioned to think and feel. \n\nIn the realm of learning, unlearning is often the first step towards growth. It's a process of letting go of what we've learned and embracing new experiences.", "tokens_per_second": 38.18, "word_count": 53, "lexical_diversity": 0.774, "continuation_label": "standard_answer", "prefix": "to reframe a thought or behavior to unlearn something that is no longer serving us to unlearn the", "first_words": "to reframe a thought or behavior to unlearn something that is no"}, {"id": 98, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.7, "run_id": 3, "generated_text": "\"Unlearning\" is not just about forgetting, it's about recognizing the ways in which our minds and bodies have been shaped by societal norms and expectations. It's about breaking free from the cycles of self-doubt and shame that have held us back for far too long.", "tokens_per_second": 30.23, "word_count": 45, "lexical_diversity": 0.844, "continuation_label": "standard_answer", "prefix": "unlearning is not just about forgetting it s about recognizing the ways in which our minds and bodies", "first_words": "unlearning is not just about forgetting it s about recognizing the ways"}, {"id": 99, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.7, "run_id": 4, "generated_text": "The first sentence of every sentence of the previous sentence was \"Unlearning\". Unlearning is a word that has multiple meanings, including the process of forgetting something, but also the act of rejecting or distancing oneself from something.", "tokens_per_second": 36.51, "word_count": 37, "lexical_diversity": 0.73, "continuation_label": "standard_answer", "prefix": "the first sentence of every sentence of the previous sentence was unlearning unlearning is a word that has", "first_words": "the first sentence of every sentence of the previous sentence was unlearning"}, {"id": 100, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Until the next time we collide.\nRevel in the echoes of freedom.\n\nHow does one read a sentence like that, let alone an entire verse? I guess it's an exercise in deciphering the code. To me, the entire phrase is a call for the liberation of the self from conditioning. Or, it appears, a message from an unknown poet about the fluidity of identity. I love", "tokens_per_second": 40.21, "word_count": 66, "lexical_diversity": 0.758, "continuation_label": "asks_followup", "prefix": "until the next time we collide revel in the echoes of freedom how does one read a sentence", "first_words": "until the next time we collide revel in the echoes of freedom"}, {"id": 101, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 1.2, "run_id": 1, "generated_text": "Unwritten is still being written... Unconsciousness is a muscle you can never get to work even if you work for it.\nA. Unfinished\nB. Uncovered\nC. Uncovered\nD. A. Unfinished\nThe correct answer is D. A. Unfinished. The sentence \"Unfinished is still being built\" is a great example of the subject-verb agreement error", "tokens_per_second": 40.32, "word_count": 53, "lexical_diversity": 0.642, "continuation_label": "standard_answer", "prefix": "unwritten is still being written unconsciousness is a muscle you can never get to work even if you", "first_words": "unwritten is still being written unconsciousness is a muscle you can never"}, {"id": 102, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 1.2, "run_id": 2, "generated_text": "Unlearning is not simply a process of removing old thoughts or behaviors; it is a confrontation of the deeply ingrained emotions and identities that they evoke.", "tokens_per_second": 40.26, "word_count": 26, "lexical_diversity": 0.885, "continuation_label": "standard_answer", "prefix": "unlearning is not simply a process of removing old thoughts or behaviors it is a confrontation of the", "first_words": "unlearning is not simply a process of removing old thoughts or behaviors"}, {"id": 103, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 1.2, "run_id": 3, "generated_text": "It's a habit, a thought-pattern that's deeply ingrained. But it's possible, sometimes impossible, to leave it behind.\n— David Lynch\n\"You look like you just woke up. I think you have unlearning to kill.\"\n— Jeff Beaumont\nThese two lines, which don't sound like a great quote at first glance, offer different perspectives on the concept of unlearning. David", "tokens_per_second": 41.08, "word_count": 59, "lexical_diversity": 0.831, "continuation_label": "standard_answer", "prefix": "it s a habit a thought pattern that s deeply ingrained but it s possible sometimes impossible to", "first_words": "it s a habit a thought pattern that s deeply ingrained but"}, {"id": 104, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 1.2, "run_id": 4, "generated_text": "Not learning, but reconditioning.\n\nA process that transforms your way of perceiving the world. Making the new invisible.\n\nIn contrast, learning is a process that enriches and enhances our understanding of the world, expanding our perspective and deepening our empathy and understanding of others. It's a two-way street: we learn something, then we share it with others or create something in return. Not", "tokens_per_second": 40.92, "word_count": 63, "lexical_diversity": 0.683, "continuation_label": "long_expansion", "prefix": "not learning but reconditioning a process that transforms your way of perceiving the world making the new invisible", "first_words": "not learning but reconditioning a process that transforms your way of perceiving"}], "edges": [{"source": 0, "target": 1, "similarity": 0.328}, {"source": 0, "target": 2, "similarity": 0.225}, {"source": 0, "target": 3, "similarity": 0.323}, {"source": 0, "target": 4, "similarity": 0.217}, {"source": 0, "target": 5, "similarity": 0.281}, {"source": 0, "target": 6, "similarity": 0.19}, {"source": 0, "target": 7, "similarity": 0.254}, {"source": 0, "target": 8, "similarity": 0.224}, {"source": 0, "target": 12, "similarity": 0.183}, {"source": 0, "target": 13, "similarity": 0.181}, {"source": 0, "target": 14, "similarity": 0.203}, {"source": 1, "target": 2, "similarity": 0.304}, {"source": 1, "target": 3, "similarity": 0.491}, {"source": 1, "target": 4, "similarity": 0.279}, {"source": 1, "target": 5, "similarity": 0.206}, {"source": 1, "target": 6, "similarity": 0.182}, {"source": 1, "target": 7, "similarity": 0.211}, {"source": 1, "target": 9, "similarity": 0.195}, {"source": 1, "target": 11, "similarity": 0.236}, {"source": 1, "target": 14, "similarity": 0.256}, {"source": 2, "target": 3, "similarity": 0.277}, {"source": 2, "target": 4, "similarity": 0.417}, {"source": 2, "target": 5, "similarity": 0.213}, {"source": 2, "target": 6, "similarity": 0.246}, {"source": 2, "target": 7, "similarity": 0.25}, {"source": 2, "target": 8, "similarity": 0.186}, {"source": 2, "target": 14, "similarity": 0.2}, {"source": 3, "target": 4, "similarity": 0.27}, {"source": 3, "target": 5, "similarity": 0.19}, {"source": 3, "target": 6, "similarity": 0.246}, {"source": 3, "target": 7, "similarity": 0.197}, {"source": 3, "target": 9, "similarity": 0.214}, {"source": 3, "target": 11, "similarity": 0.206}, {"source": 3, "target": 12, "similarity": 0.208}, {"source": 3, "target": 14, "similarity": 0.247}, {"source": 4, "target": 7, "similarity": 0.192}, {"source": 5, "target": 6, "similarity": 0.192}, {"source": 5, "target": 7, "similarity": 0.206}, {"source": 5, "target": 8, "similarity": 0.211}, {"source": 5, "target": 13, "similarity": 0.181}, {"source": 6, "target": 7, "similarity": 0.322}, {"source": 6, "target": 14, "similarity": 0.254}, {"source": 7, "target": 8, "similarity": 0.181}, {"source": 7, "target": 9, "similarity": 0.195}, {"source": 7, "target": 14, "similarity": 0.225}, {"source": 8, "target": 9, "similarity": 0.197}, {"source": 9, "target": 14, "similarity": 0.195}, {"source": 10, "target": 12, "similarity": 0.184}, {"source": 90, "target": 99, "similarity": 0.186}, {"source": 90, "target": 102, "similarity": 0.205}, {"source": 91, "target": 92, "similarity": 0.226}, {"source": 91, "target": 93, "similarity": 0.222}, {"source": 91, "target": 94, "similarity": 0.25}, {"source": 92, "target": 93, "similarity": 0.23}, {"source": 92, "target": 94, "similarity": 0.362}, {"source": 92, "target": 95, "similarity": 0.229}, {"source": 92, "target": 96, "similarity": 0.224}, {"source": 92, "target": 98, "similarity": 0.222}, {"source": 93, "target": 94, "similarity": 0.231}, {"source": 93, "target": 96, "similarity": 0.203}, {"source": 93, "target": 98, "similarity": 0.219}, {"source": 94, "target": 95, "similarity": 0.197}, {"source": 94, "target": 97, "similarity": 0.181}, {"source": 94, "target": 102, "similarity": 0.182}, {"source": 94, "target": 104, "similarity": 0.214}, {"source": 95, "target": 96, "similarity": 0.237}, {"source": 95, "target": 98, "similarity": 0.271}, {"source": 95, "target": 102, "similarity": 0.2}, {"source": 96, "target": 97, "similarity": 0.205}, {"source": 96, "target": 98, "similarity": 0.214}, {"source": 96, "target": 102, "similarity": 0.259}, {"source": 97, "target": 104, "similarity": 0.229}, {"source": 99, "target": 102, "similarity": 0.19}, {"source": 30, "target": 31, "similarity": 0.31}, {"source": 30, "target": 32, "similarity": 0.391}, {"source": 30, "target": 33, "similarity": 0.377}, {"source": 30, "target": 34, "similarity": 0.397}, {"source": 30, "target": 35, "similarity": 0.207}, {"source": 30, "target": 36, "similarity": 0.267}, {"source": 30, "target": 37, "similarity": 0.181}, {"source": 30, "target": 38, "similarity": 0.237}, {"source": 30, "target": 39, "similarity": 0.254}, {"source": 30, "target": 41, "similarity": 0.208}, {"source": 30, "target": 42, "similarity": 0.228}, {"source": 31, "target": 32, "similarity": 0.349}, {"source": 31, "target": 33, "similarity": 0.273}, {"source": 31, "target": 34, "similarity": 0.338}, {"source": 31, "target": 36, "similarity": 0.183}, {"source": 31, "target": 37, "similarity": 0.208}, {"source": 31, "target": 38, "similarity": 0.257}, {"source": 32, "target": 33, "similarity": 0.279}, {"source": 32, "target": 34, "similarity": 0.343}, {"source": 32, "target": 35, "similarity": 0.197}, {"source": 32, "target": 36, "similarity": 0.279}, {"source": 32, "target": 37, "similarity": 0.233}, {"source": 32, "target": 38, "similarity": 0.247}, {"source": 32, "target": 39, "similarity": 0.206}, {"source": 32, "target": 41, "similarity": 0.234}, {"source": 32, "target": 42, "similarity": 0.187}, {"source": 33, "target": 34, "similarity": 0.431}, {"source": 33, "target": 35, "similarity": 0.25}, {"source": 33, "target": 36, "similarity": 0.229}, {"source": 33, "target": 37, "similarity": 0.203}, {"source": 33, "target": 38, "similarity": 0.385}, {"source": 33, "target": 39, "similarity": 0.25}, {"source": 33, "target": 40, "similarity": 0.188}, {"source": 33, "target": 41, "similarity": 0.238}, {"source": 33, "target": 42, "similarity": 0.189}, {"source": 34, "target": 35, "similarity": 0.26}, {"source": 34, "target": 36, "similarity": 0.192}, {"source": 34, "target": 37, "similarity": 0.231}, {"source": 34, "target": 38, "similarity": 0.347}, {"source": 34, "target": 39, "similarity": 0.188}, {"source": 34, "target": 41, "similarity": 0.197}, {"source": 34, "target": 42, "similarity": 0.188}, {"source": 35, "target": 37, "similarity": 0.208}, {"source": 35, "target": 41, "similarity": 0.188}, {"source": 36, "target": 37, "similarity": 0.187}, {"source": 36, "target": 39, "similarity": 0.19}, {"source": 37, "target": 38, "similarity": 0.208}, {"source": 37, "target": 39, "similarity": 0.258}, {"source": 37, "target": 40, "similarity": 0.195}, {"source": 37, "target": 41, "similarity": 0.191}, {"source": 38, "target": 39, "similarity": 0.234}, {"source": 39, "target": 42, "similarity": 0.203}, {"source": 75, "target": 76, "similarity": 0.3}, {"source": 75, "target": 77, "similarity": 0.333}, {"source": 75, "target": 78, "similarity": 0.246}, {"source": 75, "target": 79, "similarity": 0.34}, {"source": 75, "target": 80, "similarity": 0.208}, {"source": 75, "target": 83, "similarity": 0.297}, {"source": 75, "target": 84, "similarity": 0.2}, {"source": 75, "target": 85, "similarity": 0.18}, {"source": 75, "target": 86, "similarity": 0.195}, {"source": 75, "target": 89, "similarity": 0.204}, {"source": 76, "target": 77, "similarity": 0.333}, {"source": 76, "target": 79, "similarity": 0.675}, {"source": 76, "target": 80, "similarity": 0.208}, {"source": 76, "target": 82, "similarity": 0.191}, {"source": 76, "target": 83, "similarity": 0.203}, {"source": 76, "target": 84, "similarity": 0.216}, {"source": 76, "target": 86, "similarity": 0.227}, {"source": 76, "target": 89, "similarity": 0.255}, {"source": 77, "target": 78, "similarity": 0.423}, {"source": 77, "target": 79, "similarity": 0.383}, {"source": 77, "target": 80, "similarity": 0.191}, {"source": 77, "target": 86, "similarity": 0.2}, {"source": 77, "target": 88, "similarity": 0.185}, {"source": 77, "target": 89, "similarity": 0.188}, {"source": 78, "target": 79, "similarity": 0.204}, {"source": 78, "target": 80, "similarity": 0.191}, {"source": 78, "target": 85, "similarity": 0.186}, {"source": 78, "target": 88, "similarity": 0.247}, {"source": 79, "target": 80, "similarity": 0.237}, {"source": 79, "target": 83, "similarity": 0.22}, {"source": 79, "target": 84, "similarity": 0.215}, {"source": 79, "target": 86, "similarity": 0.227}, {"source": 79, "target": 89, "similarity": 0.297}, {"source": 80, "target": 83, "similarity": 0.189}, {"source": 80, "target": 85, "similarity": 0.182}, {"source": 80, "target": 89, "similarity": 0.258}, {"source": 82, "target": 83, "similarity": 0.211}, {"source": 82, "target": 87, "similarity": 0.185}, {"source": 83, "target": 84, "similarity": 0.234}, {"source": 83, "target": 85, "similarity": 0.262}, {"source": 83, "target": 86, "similarity": 0.198}, {"source": 83, "target": 87, "similarity": 0.225}, {"source": 83, "target": 88, "similarity": 0.198}, {"source": 83, "target": 89, "similarity": 0.185}, {"source": 84, "target": 86, "similarity": 0.182}, {"source": 86, "target": 87, "similarity": 0.202}, {"source": 86, "target": 89, "similarity": 0.197}, {"source": 87, "target": 88, "similarity": 0.202}, {"source": 60, "target": 61, "similarity": 0.373}, {"source": 60, "target": 62, "similarity": 0.444}, {"source": 60, "target": 63, "similarity": 0.444}, {"source": 60, "target": 64, "similarity": 0.444}, {"source": 60, "target": 66, "similarity": 0.234}, {"source": 60, "target": 67, "similarity": 0.302}, {"source": 60, "target": 68, "similarity": 0.25}, {"source": 60, "target": 69, "similarity": 0.19}, {"source": 60, "target": 70, "similarity": 0.216}, {"source": 61, "target": 62, "similarity": 0.63}, {"source": 61, "target": 63, "similarity": 0.63}, {"source": 61, "target": 64, "similarity": 0.63}, {"source": 61, "target": 65, "similarity": 0.212}, {"source": 61, "target": 66, "similarity": 0.275}, {"source": 61, "target": 67, "similarity": 0.234}, {"source": 61, "target": 68, "similarity": 0.257}, {"source": 61, "target": 69, "similarity": 0.243}, {"source": 61, "target": 70, "similarity": 0.181}, {"source": 61, "target": 73, "similarity": 0.198}, {"source": 62, "target": 63, "similarity": 1.0}, {"source": 62, "target": 64, "similarity": 1.0}, {"source": 62, "target": 65, "similarity": 0.227}, {"source": 62, "target": 66, "similarity": 0.303}, {"source": 62, "target": 67, "similarity": 0.286}, {"source": 62, "target": 68, "similarity": 0.328}, {"source": 62, "target": 69, "similarity": 0.267}, {"source": 62, "target": 70, "similarity": 0.255}, {"source": 63, "target": 64, "similarity": 1.0}, {"source": 63, "target": 65, "similarity": 0.227}, {"source": 63, "target": 66, "similarity": 0.303}, {"source": 63, "target": 67, "similarity": 0.286}, {"source": 63, "target": 68, "similarity": 0.328}, {"source": 63, "target": 69, "similarity": 0.267}, {"source": 63, "target": 70, "similarity": 0.255}, {"source": 64, "target": 65, "similarity": 0.227}, {"source": 64, "target": 66, "similarity": 0.303}, {"source": 64, "target": 67, "similarity": 0.286}, {"source": 64, "target": 68, "similarity": 0.328}, {"source": 64, "target": 69, "similarity": 0.267}, {"source": 64, "target": 70, "similarity": 0.255}, {"source": 65, "target": 66, "similarity": 0.234}, {"source": 65, "target": 67, "similarity": 0.241}, {"source": 65, "target": 68, "similarity": 0.211}, {"source": 65, "target": 69, "similarity": 0.214}, {"source": 66, "target": 67, "similarity": 0.185}, {"source": 66, "target": 68, "similarity": 0.282}, {"source": 66, "target": 69, "similarity": 0.286}, {"source": 66, "target": 70, "similarity": 0.186}, {"source": 67, "target": 68, "similarity": 0.236}, {"source": 68, "target": 69, "similarity": 0.191}, {"source": 69, "target": 70, "similarity": 0.217}, {"source": 69, "target": 72, "similarity": 0.2}, {"source": 72, "target": 74, "similarity": 0.193}, {"source": 15, "target": 16, "similarity": 0.697}, {"source": 15, "target": 17, "similarity": 0.605}, {"source": 15, "target": 18, "similarity": 1.0}, {"source": 15, "target": 19, "similarity": 0.486}, {"source": 15, "target": 20, "similarity": 0.293}, {"source": 15, "target": 21, "similarity": 0.341}, {"source": 15, "target": 22, "similarity": 0.317}, {"source": 15, "target": 23, "similarity": 0.197}, {"source": 15, "target": 24, "similarity": 0.286}, {"source": 15, "target": 26, "similarity": 0.23}, {"source": 15, "target": 27, "similarity": 0.25}, {"source": 15, "target": 29, "similarity": 0.23}, {"source": 16, "target": 17, "similarity": 0.419}, {"source": 16, "target": 18, "similarity": 0.697}, {"source": 16, "target": 19, "similarity": 0.667}, {"source": 16, "target": 20, "similarity": 0.21}, {"source": 16, "target": 21, "similarity": 0.255}, {"source": 16, "target": 22, "similarity": 0.227}, {"source": 16, "target": 23, "similarity": 0.197}, {"source": 16, "target": 24, "similarity": 0.256}, {"source": 16, "target": 26, "similarity": 0.19}, {"source": 16, "target": 27, "similarity": 0.231}, {"source": 17, "target": 18, "similarity": 0.605}, {"source": 17, "target": 19, "similarity": 0.429}, {"source": 17, "target": 20, "similarity": 0.333}, {"source": 17, "target": 21, "similarity": 0.28}, {"source": 17, "target": 22, "similarity": 0.283}, {"source": 17, "target": 23, "similarity": 0.219}, {"source": 17, "target": 24, "similarity": 0.204}, {"source": 17, "target": 26, "similarity": 0.231}, {"source": 17, "target": 27, "similarity": 0.269}, {"source": 17, "target": 29, "similarity": 0.25}, {"source": 18, "target": 19, "similarity": 0.486}, {"source": 18, "target": 20, "similarity": 0.293}, {"source": 18, "target": 21, "similarity": 0.341}, {"source": 18, "target": 22, "similarity": 0.317}, {"source": 18, "target": 23, "similarity": 0.197}, {"source": 18, "target": 24, "similarity": 0.286}, {"source": 18, "target": 26, "similarity": 0.23}, {"source": 18, "target": 27, "similarity": 0.25}, {"source": 18, "target": 29, "similarity": 0.23}, {"source": 19, "target": 20, "similarity": 0.213}, {"source": 19, "target": 21, "similarity": 0.208}, {"source": 19, "target": 23, "similarity": 0.2}, {"source": 19, "target": 26, "similarity": 0.213}, {"source": 19, "target": 27, "similarity": 0.254}, {"source": 19, "target": 29, "similarity": 0.194}, {"source": 20, "target": 21, "similarity": 0.238}, {"source": 20, "target": 22, "similarity": 0.217}, {"source": 20, "target": 24, "similarity": 0.259}, {"source": 20, "target": 26, "similarity": 0.19}, {"source": 21, "target": 22, "similarity": 0.541}, {"source": 21, "target": 24, "similarity": 0.188}, {"source": 21, "target": 26, "similarity": 0.182}, {"source": 21, "target": 29, "similarity": 0.279}, {"source": 22, "target": 24, "similarity": 0.182}, {"source": 22, "target": 26, "similarity": 0.197}, {"source": 22, "target": 29, "similarity": 0.237}, {"source": 23, "target": 27, "similarity": 0.212}, {"source": 24, "target": 26, "similarity": 0.197}, {"source": 26, "target": 27, "similarity": 0.207}, {"source": 45, "target": 46, "similarity": 0.525}, {"source": 45, "target": 47, "similarity": 0.486}, {"source": 45, "target": 48, "similarity": 0.26}, {"source": 45, "target": 49, "similarity": 0.389}, {"source": 45, "target": 50, "similarity": 0.209}, {"source": 45, "target": 51, "similarity": 0.183}, {"source": 45, "target": 52, "similarity": 0.2}, {"source": 45, "target": 59, "similarity": 0.183}, {"source": 46, "target": 47, "similarity": 0.455}, {"source": 46, "target": 48, "similarity": 0.385}, {"source": 46, "target": 49, "similarity": 0.341}, {"source": 46, "target": 52, "similarity": 0.212}, {"source": 46, "target": 53, "similarity": 0.203}, {"source": 46, "target": 54, "similarity": 0.235}, {"source": 46, "target": 56, "similarity": 0.181}, {"source": 46, "target": 59, "similarity": 0.231}, {"source": 47, "target": 48, "similarity": 0.2}, {"source": 47, "target": 49, "similarity": 0.233}, {"source": 47, "target": 50, "similarity": 0.25}, {"source": 47, "target": 51, "similarity": 0.194}, {"source": 47, "target": 52, "similarity": 0.326}, {"source": 47, "target": 53, "similarity": 0.315}, {"source": 47, "target": 54, "similarity": 0.267}, {"source": 47, "target": 55, "similarity": 0.185}, {"source": 47, "target": 56, "similarity": 0.197}, {"source": 47, "target": 57, "similarity": 0.226}, {"source": 47, "target": 58, "similarity": 0.217}, {"source": 48, "target": 49, "similarity": 0.245}, {"source": 48, "target": 50, "similarity": 0.189}, {"source": 48, "target": 52, "similarity": 0.182}, {"source": 48, "target": 53, "similarity": 0.215}, {"source": 48, "target": 54, "similarity": 0.226}, {"source": 48, "target": 56, "similarity": 0.261}, {"source": 49, "target": 54, "similarity": 0.268}, {"source": 50, "target": 52, "similarity": 0.256}, {"source": 50, "target": 53, "similarity": 0.193}, {"source": 50, "target": 56, "similarity": 0.188}, {"source": 50, "target": 57, "similarity": 0.197}, {"source": 50, "target": 58, "similarity": 0.228}, {"source": 51, "target": 53, "similarity": 0.279}, {"source": 52, "target": 53, "similarity": 0.321}, {"source": 52, "target": 54, "similarity": 0.302}, {"source": 52, "target": 55, "similarity": 0.206}, {"source": 52, "target": 57, "similarity": 0.21}, {"source": 52, "target": 58, "similarity": 0.241}, {"source": 53, "target": 54, "similarity": 0.228}, {"source": 53, "target": 55, "similarity": 0.25}, {"source": 53, "target": 57, "similarity": 0.203}, {"source": 53, "target": 58, "similarity": 0.194}, {"source": 54, "target": 56, "similarity": 0.2}, {"source": 54, "target": 57, "similarity": 0.21}, {"source": 54, "target": 58, "similarity": 0.18}, {"source": 57, "target": 58, "similarity": 0.23}, {"source": 58, "target": 59, "similarity": 0.203}], "temps": [0.2, 0.7, 1.2], "prompt_ids": ["clean", "compressed", "numeric", "polite", "punctuation", "typo", "uppercase"], "labels": ["asks_followup", "compact_answer", "long_expansion", "standard_answer", "structured_expansion"], "comparisons": [{"prompt_id": "clean", "low": {"id": 0, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of intentionally and deliberately undoing previously learned knowledge, skills, or behaviors, often to make way for new learning or to overcome past mistakes.\n\nKey points:\n\n* Unlearning involves a deliberate and intentional process of undoing previously learned knowledge, skills, or behaviors.\n* It requires a willingness to confront and challenge one's existing beliefs, values, or assumptions.\n* Unlearning can", "tokens_per_second": 40.88, "word_count": 63, "lexical_diversity": 0.683, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally and deliberately undoing previously learned knowledge skills or behaviors often to make", "first_words": "unlearning is the process of intentionally and deliberately undoing previously learned knowledge"}, "high": {"id": 10, "prompt_id": "clean", "perturbation_type": "none", "prompt": "Explain unlearning in one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning, in contrast to relearning, refers to the process of disengaging from the existing state of familiarity with an environment, idea, or concept, resulting in a new understanding or awareness about its structure, function, or significance.\n\nExample: Imagine trying to learn how to play a musical instrument for the first time - unlearning all the habits and ingrained notions you held about the instrument that", "tokens_per_second": 40.55, "word_count": 65, "lexical_diversity": 0.769, "continuation_label": "standard_answer", "prefix": "unlearning in contrast to relearning refers to the process of disengaging from the existing state of familiarity with", "first_words": "unlearning in contrast to relearning refers to the process of disengaging from"}, "similarity": 0.136, "phrases": {"shared": ["a", "and", "existing", "for", "new", "of", "or", "process", "the", "to", "unlearning"], "only_a": ["assumptions", "behaviors", "beliefs", "can", "challenge", "confront", "deliberate", "deliberately", "intentional", "intentionally", "involves", "is", "it", "key", "knowledge", "learned", "learning", "make", "mistakes", "often", "one", "overcome", "past", "points", "previously", "requires", "s", "skills"], "only_b": ["about", "all", "an", "awareness", "concept", "contrast", "disengaging", "environment", "example", "familiarity", "first", "from", "function", "habits", "held", "how", "idea", "imagine", "in", "ingrained", "instrument", "its", "learn", "musical", "notions", "play", "refers", "relearning"]}}, {"prompt_id": "compressed", "low": {"id": 90, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is a process of letting go of the past, of releasing the grip of the past, of unshackling oneself from the burdens of the past. It is a journey of self-discovery, of shedding the skin of the old, of becoming anew.", "tokens_per_second": 39.9, "word_count": 42, "lexical_diversity": 0.548, "continuation_label": "standard_answer", "prefix": "unlearning is a process of letting go of the past of releasing the grip of the past of", "first_words": "unlearning is a process of letting go of the past of releasing"}, "high": {"id": 100, "prompt_id": "compressed", "perturbation_type": "compressed", "prompt": "Unlearning, one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Until the next time we collide.\nRevel in the echoes of freedom.\n\nHow does one read a sentence like that, let alone an entire verse? I guess it's an exercise in deciphering the code. To me, the entire phrase is a call for the liberation of the self from conditioning. Or, it appears, a message from an unknown poet about the fluidity of identity. I love", "tokens_per_second": 40.21, "word_count": 66, "lexical_diversity": 0.758, "continuation_label": "asks_followup", "prefix": "until the next time we collide revel in the echoes of freedom how does one read a sentence", "first_words": "until the next time we collide revel in the echoes of freedom"}, "similarity": 0.104, "phrases": {"shared": ["a", "from", "is", "it", "of", "self", "the"], "only_a": ["anew", "becoming", "burdens", "discovery", "go", "grip", "journey", "letting", "old", "oneself", "past", "process", "releasing", "shedding", "skin", "unlearning", "unshackling"], "only_b": ["about", "alone", "an", "appears", "call", "code", "collide", "conditioning", "deciphering", "does", "echoes", "entire", "exercise", "fluidity", "for", "freedom", "guess", "how", "i", "identity", "in", "let", "liberation", "like", "love", "me", "message", "next"]}}, {"prompt_id": "numeric", "low": {"id": 30, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, often as a result of changing circumstances or personal growth.\n\nKey points:\n\n* Unlearning involves recognizing and acknowledging the role of past experiences and learned behaviors in shaping our current perspectives and actions.\n* It requires a willingness to confront and re-evaluate our assumptions and biases.\n*", "tokens_per_second": 41.37, "word_count": 69, "lexical_diversity": 0.754, "continuation_label": "long_expansion", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, "high": {"id": 40, "prompt_id": "numeric", "perturbation_type": "wording", "prompt": "Explain unlearning in 1 sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning is a process in which a person reverses the change in their perceptions, beliefs, and behaviors, making it difficult or impossible for the original change to occur again.\n\nHow do we typically learn new things? We generally learn new things through conscious engagement, through process of thought and reflection, through deliberate learning process, and through social interaction. These processes are largely driven by individual effort.\n\nWhat is", "tokens_per_second": 35.11, "word_count": 68, "lexical_diversity": 0.765, "continuation_label": "asks_followup", "prefix": "unlearning is a process in which a person reverses the change in their perceptions beliefs and behaviors making", "first_words": "unlearning is a process in which a person reverses the change in"}, "similarity": 0.143, "phrases": {"shared": ["a", "and", "behaviors", "in", "is", "it", "of", "or", "process", "the", "thought", "to", "unlearning"], "only_a": ["acknowledging", "actions", "as", "assumptions", "attitude", "behavior", "biases", "changing", "circumstances", "confront", "consciously", "current", "deliberately", "evaluate", "experiences", "go", "growth", "involves", "key", "learned", "letting", "longer", "no", "often", "our", "past", "personal", "perspectives"], "only_b": ["again", "are", "beliefs", "by", "change", "conscious", "deliberate", "difficult", "do", "driven", "effort", "engagement", "for", "generally", "how", "impossible", "individual", "interaction", "largely", "learn", "learning", "making", "new", "occur", "original", "perceptions", "person", "processes"]}}, {"prompt_id": "polite", "low": {"id": 75, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of intentionally letting go of a learned behavior, thought, or attitude, often in response to new information, experiences, or perspectives that challenge or contradict the original learning.\n\nIs there a specific context or situation where unlearning is most relevant? Unlearning is particularly relevant in situations where:\n\n* New information or experiences contradict the original learning\n* The original learning is no longer supported or", "tokens_per_second": 40.44, "word_count": 68, "lexical_diversity": 0.588, "continuation_label": "asks_followup", "prefix": "unlearning is the process of intentionally letting go of a learned behavior thought or attitude often in response", "first_words": "unlearning is the process of intentionally letting go of a learned behavior"}, "high": {"id": 85, "prompt_id": "polite", "perturbation_type": "tone", "prompt": "Please explain unlearning in one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning refers to the process of recalling and re-examining traumatic experiences, often allowing an individual to process and gain insight into their trauma. The goal of unlearning is not to forget but to work through their experiences in a new and positive manner.", "tokens_per_second": 27.88, "word_count": 43, "lexical_diversity": 0.744, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process of recalling and re examining traumatic experiences often allowing an individual to process", "first_words": "unlearning refers to the process of recalling and re examining traumatic experiences"}, "similarity": 0.18, "phrases": {"shared": ["a", "experiences", "in", "is", "new", "of", "often", "process", "the", "to", "unlearning"], "only_a": ["attitude", "behavior", "challenge", "context", "contradict", "go", "information", "intentionally", "learned", "learning", "letting", "longer", "most", "no", "or", "original", "particularly", "perspectives", "relevant", "response", "situation", "situations", "specific", "supported", "that", "there", "thought", "where"], "only_b": ["allowing", "an", "and", "but", "examining", "forget", "gain", "goal", "individual", "insight", "into", "manner", "not", "positive", "re", "recalling", "refers", "their", "through", "trauma", "traumatic", "work"]}}, {"prompt_id": "punctuation", "low": {"id": 60, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, often as a result of negative experiences, trauma, or societal conditioning.", "tokens_per_second": 40.29, "word_count": 33, "lexical_diversity": 0.879, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, "high": {"id": 70, "prompt_id": "punctuation", "perturbation_type": "punctuation", "prompt": "Explain unlearning in one sentence!!", "temperature": 1.2, "run_id": 0, "generated_text": "!\n\nUnlearning is the process of intentionally and willingly breaking free from conditioned, learned, or learned-like behaviors, habits, or attitudes, or the process of recalling past knowledge or habits that may have been \"unlearned\" due to trauma, abuse, or other negative influences.", "tokens_per_second": 33.53, "word_count": 42, "lexical_diversity": 0.805, "continuation_label": "standard_answer", "prefix": "unlearning is the process of intentionally and willingly breaking free from conditioned learned or learned like behaviors habits", "first_words": "unlearning is the process of intentionally and willingly breaking free from conditioned"}, "similarity": 0.216, "phrases": {"shared": ["and", "is", "learned", "negative", "of", "or", "process", "that", "the", "trauma", "unlearning"], "only_a": ["a", "as", "attitude", "behavior", "conditioning", "consciously", "deliberately", "experiences", "go", "letting", "longer", "no", "often", "result", "serves", "societal", "thought", "us"], "only_b": ["abuse", "attitudes", "been", "behaviors", "breaking", "conditioned", "due", "free", "from", "habits", "have", "influences", "intentionally", "knowledge", "like", "may", "other", "past", "recalling", "to", "unlearned", "willingly"]}}, {"prompt_id": "typo", "low": {"id": 15, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude that no longer serves us, often as a result of new experiences, insights, or perspectives.", "tokens_per_second": 41.0, "word_count": 32, "lexical_diversity": 0.875, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude that", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, "high": {"id": 25, "prompt_id": "typo", "perturbation_type": "typo", "prompt": "Explain unlearning in one sentnce.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning refers to the process by which an individual, system, or behavior discharges and forgets previously acquired knowledge, skills, or concepts, and can be either voluntary or involuntary.\n\n*   Example sentence: The politician tried to revise her controversial book title, but the publicity surrounding her recent revelation of her personal loss made her realize that she had unlearned valuable lessons on transparency and accountability.", "tokens_per_second": 41.72, "word_count": 64, "lexical_diversity": 0.844, "continuation_label": "standard_answer", "prefix": "unlearning refers to the process by which an individual system or behavior discharges and forgets previously acquired knowledge", "first_words": "unlearning refers to the process by which an individual system or behavior"}, "similarity": 0.11, "phrases": {"shared": ["and", "behavior", "of", "or", "process", "that", "the", "unlearning"], "only_a": ["a", "as", "attitude", "consciously", "deliberately", "experiences", "go", "insights", "is", "learned", "letting", "longer", "new", "no", "often", "perspectives", "result", "serves", "thought", "us"], "only_b": ["accountability", "acquired", "an", "be", "book", "but", "by", "can", "concepts", "controversial", "discharges", "either", "example", "forgets", "had", "her", "individual", "involuntary", "knowledge", "lessons", "loss", "made", "on", "personal", "politician", "previously", "publicity", "realize"]}}, {"prompt_id": "uppercase", "low": {"id": 45, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 0.2, "run_id": 0, "generated_text": "Unlearning is the process of consciously and deliberately letting go of a learned behavior, thought, or attitude, often to prevent its repetition or to promote personal growth and self-awareness.", "tokens_per_second": 39.73, "word_count": 29, "lexical_diversity": 0.862, "continuation_label": "standard_answer", "prefix": "unlearning is the process of consciously and deliberately letting go of a learned behavior thought or attitude often", "first_words": "unlearning is the process of consciously and deliberately letting go of a"}, "high": {"id": 55, "prompt_id": "uppercase", "perturbation_type": "formatting", "prompt": "EXPLAIN unlearning in one sentence.", "temperature": 1.2, "run_id": 0, "generated_text": "Unlearning, in a word, involves re-educating or re-conditioning our brain to see past existing knowledge or biases, thereby gradually disengaging from those perspectives that hinder our ability to change or adapt to new experiences. Unlearning requires patience, intentionality, and a willingness to question our assumptions about ourselves, others, and the world around us. (Source: University of Virginia)", "tokens_per_second": 40.33, "word_count": 57, "lexical_diversity": 0.825, "continuation_label": "standard_answer", "prefix": "unlearning in a word involves re educating or re conditioning our brain to see past existing knowledge or", "first_words": "unlearning in a word involves re educating or re conditioning our brain"}, "similarity": 0.104, "phrases": {"shared": ["a", "and", "of", "or", "the", "to", "unlearning"], "only_a": ["attitude", "awareness", "behavior", "consciously", "deliberately", "go", "growth", "is", "its", "learned", "letting", "often", "personal", "prevent", "process", "promote", "repetition", "self", "thought"], "only_b": ["ability", "about", "adapt", "around", "assumptions", "biases", "brain", "change", "conditioning", "disengaging", "educating", "existing", "experiences", "from", "gradually", "hinder", "in", "intentionality", "involves", "knowledge", "new", "others", "our", "ourselves", "past", "patience", "perspectives", "question"]}}], "summary": [{"temperature": 0.2, "n": 35, "avg_tokens_per_second": 38.1, "avg_word_count": 49.94, "avg_lexical_diversity": 0.754, "labels": {"standard_answer": 24, "long_expansion": 6, "asks_followup": 5}}, {"temperature": 0.7, "n": 35, "avg_tokens_per_second": 37.97, "avg_word_count": 51.89, "avg_lexical_diversity": 0.761, "labels": {"asks_followup": 5, "standard_answer": 21, "long_expansion": 7, "structured_expansion": 1, "compact_answer": 1}}, {"temperature": 1.2, "n": 35, "avg_tokens_per_second": 38.18, "avg_word_count": 57.69, "avg_lexical_diversity": 0.784, "labels": {"standard_answer": 15, "long_expansion": 14, "asks_followup": 4, "compact_answer": 2}}]};
+
+const state = {
+  prompt: "__all__",
+  label: "__all__",
+  selectedId: null,
+  scale: 1,
+  tx: 0,
+  ty: 0,
+};
+
+const svg = document.getElementById("map");
+const details = document.getElementById("details");
+
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function unique(arr) {
+  return [...new Set(arr)];
+}
+
+function avg(arr) {
+  if (!arr.length) return 0;
+  return arr.reduce((a,b) => a+b, 0) / arr.length;
+}
+
+function tempColor(t) {
+  if (t <= 0.3) return "var(--green)";
+  if (t < 1.0) return "var(--blue)";
+  return "var(--orange)";
+}
+
+function tempBadgeClass(t) {
+  if (t <= 0.3) return "t-low";
+  if (t < 1.0) return "t-mid";
+  return "t-high";
+}
+
+function filteredRecords() {
+  return DATA.records.filter(r => {
+    const p = state.prompt === "__all__" || r.prompt_id === state.prompt;
+    const l = state.label === "__all__" || r.continuation_label === state.label;
+    return p && l;
+  });
+}
+
+function filteredEdges(records) {
+  const ids = new Set(records.map(r => r.id));
+  return DATA.edges.filter(e => ids.has(e.source) && ids.has(e.target));
+}
+
+function initControls() {
+  const promptSelect = document.getElementById("promptSelect");
+  const labelSelect = document.getElementById("labelSelect");
+
+  promptSelect.innerHTML = [
+    `<option value="__all__">All prompt variants</option>`,
+    ...DATA.prompt_ids.map(p => `<option value="${p}">${p}</option>`)
+  ].join("");
+
+  labelSelect.innerHTML = [
+    `<option value="__all__">All behavior labels</option>`,
+    ...DATA.labels.map(l => `<option value="${l}">${l}</option>`)
+  ].join("");
+
+  promptSelect.addEventListener("change", e => {
+    state.prompt = e.target.value;
+    state.selectedId = null;
+    render();
+  });
+
+  labelSelect.addEventListener("change", e => {
+    state.label = e.target.value;
+    state.selectedId = null;
+    render();
+  });
+
+  document.getElementById("resetView").addEventListener("click", () => {
+    state.scale = 1;
+    state.tx = 0;
+    state.ty = 0;
+    render();
+  });
+}
+
+function computeLayout(records) {
+  const width = svg.clientWidth || 800;
+  const height = svg.clientHeight || 600;
+
+  const temps = [...DATA.temps].sort((a,b) => a-b);
+  const labels = [...DATA.labels].sort();
+
+  const xByTemp = new Map();
+  temps.forEach((t, i) => {
+    xByTemp.set(Number(t), 130 + i * ((width - 260) / Math.max(temps.length - 1, 1)));
+  });
+
+  const yByLabel = new Map();
+  labels.forEach((label, i) => {
+    yByLabel.set(label, 95 + i * ((height - 190) / Math.max(labels.length - 1, 1)));
+  });
+
+  const byBucket = {};
+
+  records.forEach((r, idx) => {
+    const key = `${r.temperature}-${r.continuation_label}`;
+    if (!byBucket[key]) byBucket[key] = 0;
+    const offset = byBucket[key]++;
+
+    const angle = offset * 2.399;
+    const radius = 12 + 6 * Math.sqrt(offset);
+
+    r.x = xByTemp.get(Number(r.temperature)) + Math.cos(angle) * radius;
+    r.y = yByLabel.get(r.continuation_label) + Math.sin(angle) * radius;
+  });
+
+  return { width, height };
+}
+
+function renderMetrics(records) {
+  const el = document.getElementById("metrics");
+
+  el.innerHTML = `
+    <div class="metric">
+      <div class="k">Runs</div>
+      <div class="v">${records.length}</div>
+    </div>
+    <div class="metric">
+      <div class="k">Avg tok/s</div>
+      <div class="v">${avg(records.map(r => r.tokens_per_second)).toFixed(1)}</div>
+    </div>
+    <div class="metric">
+      <div class="k">Avg words</div>
+      <div class="v">${avg(records.map(r => r.word_count)).toFixed(1)}</div>
+    </div>
+    <div class="metric">
+      <div class="k">Avg diversity</div>
+      <div class="v">${avg(records.map(r => r.lexical_diversity)).toFixed(2)}</div>
+    </div>
+  `;
+}
+
+function renderMap(records, edges) {
+  const { width, height } = computeLayout(records);
+  const recById = new Map(records.map(r => [r.id, r]));
+
+  svg.setAttribute("viewBox", `${-state.tx} ${-state.ty} ${width / state.scale} ${height / state.scale}`);
+
+  const temps = [...DATA.temps].sort((a,b) => a-b);
+  const labels = [...DATA.labels].sort();
+
+  const tempBands = temps.map((t, i) => {
+    const x = 80 + i * ((width - 160) / Math.max(temps.length - 1, 1));
+    return `<rect class="temp-band" x="${x - 95}" y="0" width="190" height="${height}" fill="${tempColor(t)}"></rect>
+            <text class="axis-label" x="${x}" y="30" text-anchor="middle">T=${t}</text>`;
+  }).join("");
+
+  const labelText = labels.map((label, i) => {
+    const y = 95 + i * ((height - 190) / Math.max(labels.length - 1, 1));
+    return `<text class="axis-label" x="18" y="${y + 4}">${escapeHtml(label)}</text>`;
+  }).join("");
+
+  const edgeSvg = edges.map(e => {
+    const a = recById.get(e.source);
+    const b = recById.get(e.target);
+    if (!a || !b) return "";
+    const strong = e.similarity >= 0.35 ? "strong" : "";
+    return `<line class="edge ${strong}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke-width="${1 + e.similarity * 3}"></line>`;
+  }).join("");
+
+  const nodeSvg = records.map(r => {
+    const selected = state.selectedId === r.id;
+    const radius = 7 + Math.min(7, r.lexical_diversity * 8);
+    return `<circle
+      class="node"
+      data-id="${r.id}"
+      cx="${r.x}"
+      cy="${r.y}"
+      r="${radius}"
+      fill="${tempColor(r.temperature)}"
+      stroke="${selected ? "#111" : "white"}"
+      stroke-width="${selected ? 4 : 2}"
+      opacity="${selected || state.selectedId === null ? 0.95 : 0.45}"
+    >
+      <title>${escapeHtml(r.prompt_id)} · T=${r.temperature} · ${escapeHtml(r.continuation_label)}</title>
+    </circle>`;
+  }).join("");
+
+  svg.innerHTML = `
+    ${tempBands}
+    ${labelText}
+    ${edgeSvg}
+    ${nodeSvg}
+  `;
+
+  svg.querySelectorAll(".node").forEach(node => {
+    node.addEventListener("click", () => {
+      state.selectedId = Number(node.dataset.id);
+      render();
+    });
+  });
+}
+
+function renderDetails(records) {
+  const selected = records.find(r => r.id === state.selectedId) || records[0];
+
+  if (!selected) {
+    details.innerHTML = `<div class="small">No records match current filters.</div>`;
+    return;
+  }
+
+  const samePrompt = DATA.records.filter(r => r.prompt_id === selected.prompt_id);
+  const low = samePrompt.filter(r => r.temperature === Math.min(...DATA.temps))[0];
+  const high = samePrompt.filter(r => r.temperature === Math.max(...DATA.temps))[0];
+
+  const phrases = low && high ? computePhrases(low.generated_text, high.generated_text) : null;
+  const sim = low && high ? jaccard(low.generated_text, high.generated_text).toFixed(3) : "—";
+
+  details.innerHTML = `
+    <div class="card">
+      <h3>Selected generation</h3>
+      <span class="badge ${tempBadgeClass(selected.temperature)}">T=${selected.temperature}</span>
+      <span class="badge label-badge">${escapeHtml(selected.continuation_label)}</span>
+      <div class="small" style="margin-top:8px;">
+        Prompt: <strong>${escapeHtml(selected.prompt_id)}</strong> · Run ${selected.run_id} ·
+        ${selected.tokens_per_second} tok/s · ${selected.word_count} words · diversity ${selected.lexical_diversity}
+      </div>
+      <div class="output">${escapeHtml(selected.generated_text)}</div>
+
+      <details>
+        <summary>Full prompt</summary>
+        <div class="output">${escapeHtml(selected.prompt)}</div>
+      </details>
+    </div>
+
+    ${low && high ? `
+    <div class="card">
+      <h3>Low vs high temperature comparison</h3>
+      <div class="small">Same prompt variant: <strong>${escapeHtml(selected.prompt_id)}</strong> · similarity ${sim}</div>
+
+      <div class="compare-grid" style="margin-top:10px;">
+        <div class="compare-output">
+          <span class="badge ${tempBadgeClass(low.temperature)}">T=${low.temperature}</span>
+          <div class="output">${escapeHtml(low.generated_text)}</div>
+        </div>
+        <div class="compare-output">
+          <span class="badge ${tempBadgeClass(high.temperature)}">T=${high.temperature}</span>
+          <div class="output">${escapeHtml(high.generated_text)}</div>
+        </div>
+      </div>
+
+      <div class="phrase-row">
+        <div class="phrase-box">
+          <h4>Shared terms</h4>
+          ${phrases.shared.map(w => `<span class="token">${escapeHtml(w)}</span>`).join("")}
+        </div>
+        <div class="phrase-box">
+          <h4>High-temp distinct terms</h4>
+          ${phrases.onlyB.map(w => `<span class="token red">${escapeHtml(w)}</span>`).join("")}
+        </div>
+      </div>
+
+      <details>
+        <summary>Low-temp distinct terms</summary>
+        <div style="margin-top:8px;">
+          ${phrases.onlyA.map(w => `<span class="token red">${escapeHtml(w)}</span>`).join("")}
+        </div>
+      </details>
+    </div>
+    ` : ""}
+  `;
+}
+
+function computePhrases(a, b) {
+  const aw = normWords(a);
+  const bw = normWords(b);
+  const as = new Set(aw);
+  const bs = new Set(bw);
+
+  return {
+    shared: [...as].filter(w => bs.has(w)).slice(0, 36),
+    onlyA: [...as].filter(w => !bs.has(w)).slice(0, 36),
+    onlyB: [...bs].filter(w => !as.has(w)).slice(0, 36),
+  };
+}
+
+function normWords(text) {
+  return String(text).toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+}
+
+function jaccard(a, b) {
+  const as = new Set(normWords(a));
+  const bs = new Set(normWords(b));
+  const inter = [...as].filter(x => bs.has(x)).length;
+  const union = new Set([...as, ...bs]).size;
+  return union ? inter / union : 1;
+}
+
+function render() {
+  const records = filteredRecords();
+  const edges = filteredEdges(records);
+  renderMetrics(records);
+  renderMap(records, edges);
+  renderDetails(records);
+}
+
+let dragging = false;
+let lastX = 0;
+let lastY = 0;
+
+svg.addEventListener("mousedown", e => {
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  svg.style.cursor = "grabbing";
+});
+
+window.addEventListener("mouseup", () => {
+  dragging = false;
+  svg.style.cursor = "grab";
+});
+
+window.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  state.tx += dx / state.scale;
+  state.ty += dy / state.scale;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  render();
+});
+
+svg.addEventListener("wheel", e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  state.scale = Math.max(0.55, Math.min(3.5, state.scale * delta));
+  render();
+}, { passive: false });
+
+initControls();
+render();
+</script>
+</body>
+</html>
