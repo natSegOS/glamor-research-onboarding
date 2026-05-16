@@ -9,8 +9,9 @@ from pathlib import Path
 import pandas as pd
 
 
-RESULTS_PATH = Path("results/generations.csv")
-OUTPUT_PATH = Path("visualizations/trajectory_divergence.html")
+HERE = Path(__file__).parent
+RESULTS_PATH = HERE / "results" / "generations.csv"
+OUTPUT_PATH = HERE / "visualization.html"
 
 
 def normalize_words(text: str) -> list[str]:
