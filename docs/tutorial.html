@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Onboarding Tutorial — Native Python + Colab as GPU</title>
+<style>
+:root {
+  --bg: #f7f5f0;
+  --panel: #ffffff;
+  --ink: #171717;
+  --muted: #686868;
+  --line: #ddd8cd;
+  --blue: #2d6cdf;
+  --blue-soft: #e8f0ff;
+  --green: #1f7a4d;
+  --green-soft: #e8f7ef;
+  --orange: #c45a21;
+  --orange-soft: #fff0e7;
+  --red: #b94242;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.55;
+}
+
+header {
+  padding: 32px 40px 22px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+h1 {
+  font-size: 32px;
+  letter-spacing: -0.04em;
+  margin: 0 0 8px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 14px;
+  max-width: 820px;
+}
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 28px 80px;
+}
+
+nav.toc {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-bottom: 28px;
+  font-size: 14px;
+}
+
+nav.toc ol {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+nav.toc a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+nav.toc a:hover { text-decoration: underline; }
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px 28px;
+  margin-bottom: 18px;
+}
+
+section h2 {
+  font-size: 22px;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+section .lede {
+  color: var(--muted);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+section h3 {
+  font-size: 16px;
+  margin: 18px 0 6px;
+}
+
+p, ul, ol { margin: 8px 0; }
+
+ul, ol { padding-left: 22px; }
+
+li { margin: 4px 0; }
+
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+code {
+  background: #f1ede3;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 13px;
+}
+
+pre {
+  background: #1d1d1d;
+  color: #f5f1e8;
+  padding: 14px 16px;
+  border-radius: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 13px;
+}
+
+.callout {
+  border-left: 3px solid var(--blue);
+  background: var(--blue-soft);
+  padding: 10px 14px;
+  border-radius: 0 10px 10px 0;
+  margin: 14px 0;
+  font-size: 14px;
+}
+
+.callout.warn {
+  border-left-color: var(--orange);
+  background: var(--orange-soft);
+}
+
+.callout.do {
+  border-left-color: var(--green);
+  background: var(--green-soft);
+}
+
+.callout strong { display: block; margin-bottom: 2px; }
+
+.diagram {
+  background: #fcfbf8;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 14px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  white-space: pre;
+  overflow-x: auto;
+  color: #333;
+}
+
+.kbd {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px;
+  background: #fcfbf8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--blue-soft);
+  color: var(--blue);
+  margin-right: 6px;
+}
+
+.tag.local { background: var(--green-soft); color: var(--green); }
+.tag.colab { background: var(--orange-soft); color: var(--orange); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 28px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Onboarding tutorial — Allegro project layout, Colab as GPU only</h1>
+  <div class="subtitle">
+    The first onboarding milestone proved you can run Llama-3.2-1B inference on a Colab T4. This tutorial walks you through the next step: moving the code into the Allegro Lab project layout — a <code>paper/</code> submodule plus an <code>experiments/</code> tree — edited locally with Claude Code and only sent to Colab when a GPU is actually needed.
+  </div>
+</header>
+
+<main>
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#why">Why move off the notebook</a></li>
+    <li><a href="#workflow">The new workflow at a glance</a></li>
+    <li><a href="#layout">The Allegro project layout</a></li>
+    <li><a href="#local-setup">The prompts</a></li>
+  </ol>
+</nav>
+
+<section id="why">
+  <h2>1. Why move off the notebook</h2>
+  <div class="lede">A notebook is a great <em>demo</em>. It's a bad <em>codebase</em>.</div>
+
+  <p>Right now the entire pipeline lives in <code>notebooks/llama_pipeline.ipynb</code>. That's been useful — it proved the model loads and generates on a T4. But notebooks have problems that get worse as the project grows:</p>
+
+  <ul>
+    <li><strong>Diffs are unreadable.</strong> A one-line code change shows up in the diff as 200 lines of JSON. Code review on GitHub becomes painful.</li>
+    <li><strong>Hidden state.</strong> Cells that ran out of order can produce results no one can reproduce.</li>
+    <li><strong>No reuse.</strong> If a function lives in cell 7 of one notebook, the next experiment copies and edits it instead of importing it.</li>
+    <li><strong>Tooling can't help.</strong> Linters, type checkers, tests, and Claude Code all work much better on plain <code>.py</code> files.</li>
+  </ul>
+
+  <div class="callout">
+    <strong>The principle</strong>
+    Keep <em>logic</em> in <code>.py</code> files. Use notebooks only as a <em>thin driver</em> on Colab — a few cells that import from your package and run it. No business logic should live inside a notebook cell.
+  </div>
+</section>
+
+<section id="workflow">
+  <h2>2. The new workflow at a glance</h2>
+
+  <div class="diagram">
+   ┌────────────────────┐         ┌────────────────────┐         ┌────────────────────┐
+   │  Your laptop       │  push   │  GitHub            │  pull   │  Google Colab      │
+   │  (CPU, no GPU)     │ ──────▶ │  this repo         │ ──────▶ │  (T4 GPU)          │
+   │                    │         │                    │         │                    │
+   │  • Edit .py files  │         │  • Source of truth │         │  • Clone repo      │
+   │  • Claude Code     │         │  • Issues / PRs    │         │  • pip install -e .│
+   │  • git commit      │         │                    │         │  • Run experiment  │
+   │  • git push        │         │                    │         │  • Save CSV → git  │
+   └────────────────────┘         └────────────────────┘         └────────────────────┘
+  </div>
+
+  <p>You stop writing code in Colab. Colab becomes a GPU you rent for free, nothing more. All editing happens on your laptop with Claude Code, in real files you commit to git.</p>
+</section>
+
+<section id="layout">
+  <h2>3. The Allegro project layout</h2>
+  <div class="lede">Two folders. That's the whole rule.</div>
+
+<div class="diagram">glamor-research-onboarding/
+├── paper/          ← git submodule → the paper's GitHub repo
+└── experiments/    ← one folder per experiment</div>
+
+  <ul>
+    <li><strong><code>paper/</code> is a git submodule</strong> pointing at the project's paper repo on GitHub. One paper repo per project. Until there's a real paper, point it at an empty placeholder — the convention matters more than the contents.</li>
+    <li><strong><code>experiments/&lt;name&gt;/</code> is self-contained.</strong> Whatever's needed to reproduce one figure or one table lives in that folder. The shape inside is up to the experiment; don't pre-design it.</li>
+  </ul>
+
+  <div class="callout">
+    <strong>Why no <code>src/</code> layout?</strong>
+    Research code is read more than it's imported. A reviewer (or future-you) <code>cd</code>s into one experiment folder and sees everything in one place. A <code>src/</code> package layout is for libraries; experiments aren't libraries.
+  </div>
+</section>
+
+<section id="local-setup">
+  <h2>4. The prompts <span class="tag local">on your laptop</span></h2>
+  <div class="lede">You don't run the shell commands. You ask Claude Code to.</div>
+
+  <p>The whole point of this onboarding step is to stop hand-typing setup commands and start describing intent. Open Claude Code in any directory and use these prompts in order.</p>
+
+  <h3>4.1 Prompt — clone and open the repo</h3>
+  <p>In Claude Code, type:</p>
+
+<pre><code>Clone https://github.com/natSegOS/glamor-research-onboarding
+into ~/Desktop/projects, then open the repo. Don't make any edits yet —
+just clone it and show me the top-level files.</code></pre>
+
+  <p>Claude will run <code>git clone</code>, <code>ls</code>, and show you what's inside. If anything looks wrong, ask it to fix it before moving on.</p>
+
+  <h3>4.2 Re-open Claude Code <em>inside</em> the repo</h3>
+  <p>Exit the current Claude Code session. In your terminal:</p>
+
+<pre><code>cd ~/Desktop/projects/glamor-research-onboarding
+claude</code></pre>
+
+  <div class="callout">
+    <strong>Why a new session?</strong>
+    Claude Code anchors to the directory it was started in. Running it from inside the repo means it reads <code>CLAUDE.md</code> (if present), respects <code>.gitignore</code>, and treats this project as its workspace.
+  </div>
+
+  <h3>4.3 Prompt — set up the local environment</h3>
+  <p>In the new session, type:</p>
+
+<pre><code>Set up this repo for local editing. I won't run the model on my laptop —
+I'll run it on Colab. Locally I just need imports to resolve so you can
+read the code. Create a venv, replace the broken requirements.txt with a
+real pyproject.toml, and install the deps.</code></pre>
+
+  <p>Claude will read what's in the repo, propose the changes, and (with your approval) execute them. You watch and approve — you don't type the commands.</p>
+
+  <h3>4.4 Prompt — use Colab as a remote GPU</h3>
+  <p>Now ask Claude to set up the Colab side. Claude can't reach Colab itself, so its job is to <em>write the notebook</em> and <em>tell you exactly what to paste</em>.</p>
+
+<pre><code>I want to use Google Colab as a GPU only — all editing happens here in
+Claude Code. Create experiments/trajectory_divergence/colab.ipynb as a
+5-cell driver that: clones this repo with submodules, pip-installs it,
+logs into Hugging Face, runs experiments/trajectory_divergence/run.py,
+and downloads the CSV back. Then walk me through opening it in Colab,
+switching the runtime to T4, and running the cells in order.</code></pre>
+
+  <p>Claude writes the notebook into the repo. You open <a href="https://colab.research.google.com">colab.research.google.com</a>, <strong>File → Upload notebook</strong>, pick the <code>colab.ipynb</code> from the cloned repo, switch runtime to T4, and run cells top-to-bottom.</p>
+
+  <div class="callout do">
+    <strong>The pattern</strong>
+    Anything that needs a GPU, you ask Claude to <em>prepare</em> locally — a notebook, a config, a script — then you push to GitHub, pull on Colab, and run. Claude is your editor; Colab is your renderer.
+  </div>
+</section>
+
+
+</main>
+
+<footer>
+  GLAMOR Lab onboarding · drafted for the natSegOS / glamor-research-onboarding repo
+</footer>
+
+</body>
+</html>
