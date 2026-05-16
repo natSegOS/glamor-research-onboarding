@@ -11,7 +11,7 @@ Public repository tracking my onboarding progress for the GLAMOR Lab at USC unde
     └── 000_trajectory_divergence/
 ```
 
-See [`docs/tutorial.html`](docs/tutorial.html) for the project conventions and the prompts you paste into Claude Code to set up locally and run on Colab.
+See [`docs/index.html`](docs/index.html) for the weekly log — sidebar tabs link to each week's deliverable. Week 1 is the trajectory-divergence visualization; Week 2 is the onboarding tutorial for migrating into this layout.
 
 ## Experiments
 
