@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>GLAMOR Onboarding — Weekly Log</title>
+<style>
+:root {
+  --bg: #f7f5f0;
+  --panel: #ffffff;
+  --ink: #171717;
+  --muted: #686868;
+  --line: #ddd8cd;
+  --blue: #2d6cdf;
+  --blue-soft: #e8f0ff;
+  --green: #1f7a4d;
+  --green-soft: #e8f7ef;
+  --orange: #c45a21;
+  --orange-soft: #fff0e7;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+}
+
+header {
+  grid-column: 1 / -1;
+  padding: 18px 26px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+header h1 {
+  font-size: 20px;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+header .sub {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+aside.sidebar {
+  border-right: 1px solid var(--line);
+  background: rgba(255,255,255,0.4);
+  padding: 18px 14px;
+  overflow-y: auto;
+}
+
+aside .label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 6px 8px 10px;
+}
+
+.week {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 12px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  margin-bottom: 6px;
+  transition: background 100ms ease, border-color 100ms ease;
+  font-family: inherit;
+}
+
+.week:hover {
+  background: rgba(255,255,255,0.7);
+}
+
+.week.active {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+}
+
+.week .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.week .num {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.week .pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pill.done { background: var(--green-soft); color: var(--green); }
+.pill.next { background: var(--orange-soft); color: var(--orange); }
+
+.week .title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-top: 2px;
+  letter-spacing: -0.01em;
+}
+
+.week .desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+main.viewer {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: 14px;
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header>
+    <h1>GLAMOR Research Onboarding</h1>
+    <span class="sub">Weekly log · natSegOS/glamor-research-onboarding</span>
+  </header>
+
+  <aside class="sidebar">
+    <div class="label">Weeks</div>
+
+    <button class="week active" data-src="../experiments/000_trajectory_divergence/visualization.html">
+      <div class="row">
+        <span class="num">Week 1</span>
+        <span class="pill done">This week</span>
+      </div>
+      <div class="title">Trajectory divergence</div>
+      <div class="desc">Llama-3.2-1B on a Colab T4. Temperature sweep at 0.2 / 0.7 / 1.2 with prompt perturbations. Lexical-similarity map of generations.</div>
+    </button>
+
+    <button class="week" data-src="tutorial.html">
+      <div class="row">
+        <span class="num">Week 2</span>
+        <span class="pill next">Next week</span>
+      </div>
+      <div class="title">Migrate to Allegro layout</div>
+      <div class="desc">Move the notebook pipeline into <code>experiments/&lt;name&gt;/</code> + <code>paper/</code> submodule, edit locally with Claude Code, use Colab as a GPU only.</div>
+    </button>
+  </aside>
+
+  <main class="viewer">
+    <iframe id="viewer" src="../experiments/000_trajectory_divergence/visualization.html"></iframe>
+  </main>
+
+</div>
+
+<script>
+const viewer = document.getElementById("viewer");
+
+document.querySelectorAll(".week").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".week").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    viewer.src = btn.dataset.src;
+  });
+});
+</script>
+
+</body>
+</html>
