@@ -2,8 +2,15 @@
 __pycache__/
 *.py[codz]
 *$py.class
+*.pyo
+*.pyd
+*.py[cod]
 
 .DS_Store
+
+## Hugging Face
+.cache/
+hf_cache/
 
 # C extensions
 *.so
