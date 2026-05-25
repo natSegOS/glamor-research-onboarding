@@ -1,47 +1,11 @@
 [project]
 name = "glamor-research-onboarding"
 version = "0.1.0"
-description = "Research onboarding repository for GLAMOR Lab experiments."
-readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-	"accelerate>=0.34.0",
-	"bitsandbytes>=0.43.0",
-	"huggingface-hub>=0.24.0",
-	"ipykernel>=6.29.0",
-	"ipywidgets>=8.1.0",
-	"jupyter>=1.0.0",
-	"matplotlib>=3.8.0",
-	"numpy>=1.26.0",
-	"pandas>=2.2.0",
-	"psutil>=5.9.0",
-	"pyyaml>=6.0.0",
-	"scipy>=1.12.0",
-	"statsmodels>=0.14.0",
-	"torch>=2.2.0",
-	"tqdm>=4.66.0",
-	"transformers>=4.44.0",
+	"torch>=2.0",
+	"transformers>=4.40",
+	"accelerate>=0.29",
+	"pandas>=2.0",
+	"huggingface-hub>=0.22"
 ]
-
-[pyproject.optional-dependencies]
-dev = [
-	"black>=24.0.0",
-	"pytest>=8.0.0",
-	"ruff>=0.6.0",
-]
-
-[tool.black]
-line-length = 100
-target-version = ["py310"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "B"]
-ignore = []
-
-[tool.pytest.ini_options]
-testpaths = ["experiments"]
-python_files = ["test_*.py"]
