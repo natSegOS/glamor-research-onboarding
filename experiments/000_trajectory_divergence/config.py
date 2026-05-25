@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 @dataclass
 class ExperimentConfig:
     model_id: str = "meta-llama/Llama-3.2-1B-Instruct"
+    quant_bits: Optional[int] = None  # None = fp16, 4 = 4-bit, 8 = 8-bit
     max_new_tokens: int = 80
     top_p: float = 0.95
     runs_per_condition: int = 5

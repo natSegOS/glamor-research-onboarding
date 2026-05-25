@@ -1,15 +1,28 @@
 import math
 import time
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from typing import Dict, Any
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from typing import Dict, Any, Optional
 
 
-def load_model(model_id: str):
+def load_model(model_id: str, quant_bits: Optional[int] = None):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+    bnb_config = None
+    if quant_bits == 4:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+    elif quant_bits == 8:
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        dtype=torch.float16,
+        quantization_config=bnb_config,
+        dtype=torch.float16 if bnb_config is None else None,
         device_map="auto",
     )
 

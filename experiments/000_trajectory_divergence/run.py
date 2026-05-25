@@ -10,7 +10,7 @@ from metrics import lexical_diversity, sentence_count, classify_behavior
 
 def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
     os.makedirs(config.output_dir, exist_ok=True)
-    tokenizer, model = load_model(config.model_id)
+    tokenizer, model = load_model(config.model_id, quant_bits=config.quant_bits)
 
     # warmup
     warmup_inputs = tokenizer(PROMPT_VARIANTS[0]["prompt"], return_tensors="pt").to(model.device)
@@ -34,6 +34,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
                 gt = result["generated_text"]
                 records.append({
                     "model_id": config.model_id,
+                    "quant_bits": config.quant_bits,
                     "prompt_id": prompt_info["prompt_id"],
                     "perturbation_type": prompt_info["perturbation_type"],
                     "prompt": prompt_info["prompt"],
