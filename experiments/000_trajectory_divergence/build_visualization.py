@@ -10,7 +10,7 @@ import pandas as pd
 
 
 HERE = Path(__file__).parent
-RESULTS_PATH = HERE / "results" / "generations.csv"
+RESULTS_PATH = HERE / "results_1b" / "generations.csv"
 OUTPUT_PATH = HERE / "visualization.html"
 
 
