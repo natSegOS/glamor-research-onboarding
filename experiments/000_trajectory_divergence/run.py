@@ -82,7 +82,12 @@ def create_summaries(df: pd.DataFrame, output_dir: str) -> None:
 
 
 if __name__ == "__main__":
-    config = ExperimentConfig()
+    config = ExperimentConfig(
+        model_id="meta-llama/Llama-3.1-8B-Instruct",
+        quant_bits=4,
+        output_dir="results_8b",
+    )
+
     df = run_experiment(config)
     create_summaries(df, config.output_dir)
     print("Done.")
