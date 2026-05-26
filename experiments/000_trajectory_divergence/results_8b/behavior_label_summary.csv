@@ -1,0 +1,11 @@
+temperature,behavior_label,count
+0.2,conversational_extension,30
+0.2,verbose_definition,3
+0.2,standard_definition,2
+0.7,conversational_extension,18
+0.7,standard_definition,10
+0.7,verbose_definition,7
+1.2,conversational_extension,14
+1.2,standard_definition,11
+1.2,verbose_definition,9
+1.2,example_extension,1
