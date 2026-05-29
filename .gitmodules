@@ -1,0 +1,3 @@
+[submodule "paper"]
+	path = paper
+	url = https://github.com/zizhao-hu/glamor-research-onboarding-paper.git
