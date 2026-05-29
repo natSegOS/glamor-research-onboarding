@@ -24,7 +24,9 @@ The **model-plus-decoding** procedure is a deterministic function under greedy d
 f : Σ* → Y
 ```
 
-where `Y` is the space of generated strings. A **scorer** maps a generation to a binary correctness label against a gold answer `y*`:
+where `Y` is the space of generated strings.
+
+Generically, the object `f` realizes a **partially observable non-Markovian process**: *partially observable* because the experimenter (and downstream scorer) sees only the surface generation `f(x')` and never the internal states (attention pattern, KV cache, residual stream activations) that mediate it, and *non-Markovian* because the conditional distribution at step `t` depends on the entire generated prefix `y_{<t}` together with the full perturbed input `x'`, not on a fixed-dimensional state summary. This characterization is the abstract type of every system under test in this study; specific models `f_m` are instances of it. A **scorer** maps a generation to a binary correctness label against a gold answer `y*`:
 
 ```
 g : Y → {0, 1},    g(f(x)) = 1  iff the answer is correct
