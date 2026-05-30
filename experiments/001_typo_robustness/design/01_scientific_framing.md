@@ -6,7 +6,7 @@
 
 ## 1.1 The problem in one paragraph
 
-People mistype. Real prompts to language models contain typos, dropped letters, transposed keys, and the occasional autocorrect that turns one real word into another. A useful model should be **robust** to the harmless version of this noise — it should still answer "What is the capital of *Frnace*?" with Paris — while remaining **sensitive** to noise that actually changes the question — it should answer "What is the capital of *Germany*?" with Berlin, not Paris. The interesting scientific object is therefore not "are LLMs hurt by typos" (they are; this is established) but **the structure of the failure**: which edits matter, where, by how much, and — the part nobody has pinned down — *through what mechanism*.
+Voice is becoming the dominant interface for AI assistants. But the transcription step — converting speech to the text the model actually receives — is systematically noisy. ASR systems produce acoustic confusions ("weather" for "whether"), disfluencies, run-on phrasing, absent punctuation, and filler words. These are not occasional edge cases; they are a structural property of the voice pipeline, and they arrive at the LLM as corrupted text. The question this study asks is not "does this hurt performance" (it does; noisy-instruction work has established that) but **why it hurts and through what mechanism** — because only a mechanistic answer can guide mitigation. Keyboard typos provide the controlled experimental baseline for the same causal question, and ASR errors provide the ecologically motivated application. The study combines both.
 
 ## 1.2 What is already known (so we do not claim it)
 
@@ -25,7 +25,7 @@ The honest consequence: **"we show LLMs are brittle to typos" is not publishable
 
 We keep the selective-invariance vocabulary because it organizes the experiment cleanly and is reader-friendly, but we **explicitly attribute the concept** to Niu & Bansal (2018), CheckList (2020), and Ismailov & Asanova (2025), and we position our contribution as the *measurement* and *mechanism*, not the idea. Concretely, our framing sentence is:
 
-> Prior work establishes that instruction LLMs are brittle to typographical noise and that subword tokenization is implicated. We provide the first matched-pair, statistically disciplined decomposition of this brittleness into a tokenization-fragmentation channel and a residual channel, and the first controlled test of whether 4-bit quantization changes typo robustness on reasoning tasks — all under a three-regime design that separates benign noise from meaning-changing edits so that robustness is never confused with altered task definition.
+> ASR transcription introduces systematic noise into voice-LLM pipelines. We provide the first matched-pair, statistically disciplined decomposition of noise-induced accuracy loss into a tokenization-fragmentation channel and a residual channel — using both controlled keyboard-adjacency typos and realistic ASR-transcription errors — and the first controlled test of whether 4-bit quantization changes robustness to transcription noise on reasoning tasks. A three-regime design separates intent-preserving noise from meaning-changing edits throughout, so robustness is never confused with altered task definition.
 
 Everything defensible in this study lives in three words: **matched-pair, mechanism, controlled.**
 
@@ -57,10 +57,10 @@ Why it still counts: no prior typo paper combines (a) a human-audited three-regi
 
 ## 1.5 Research questions
 
-- **RQ1 (primary, mechanism).** Of the accuracy lost under intent-preserving typographical noise, what fraction is attributable to subword fragmentation, holding the target word, edit count, and position fixed?
+- **RQ1 (primary, mechanism).** Of the accuracy lost under intent-preserving noise — whether keyboard-typo or ASR-transcription — what fraction is attributable to subword fragmentation, holding the target word, edit count, and position fixed?
 - **RQ2 (secondary, quantization).** Does 4-bit quantization change an instruction model's typo robustness relative to its fp16 counterpart, after conditioning on clean accuracy, and in which direction?
 - **RQ3 (framing, selectivity).** Do current open instruction LLMs exhibit selective invariance — low clean-conditioned failure on intent-preserving noise yet high appropriate-change on meaning-changing controls — and how does this depend on model scale, family, edit budget, and edit location?
-- **RQ4 (descriptive, structure).** Which primitive operations (insertion, deletion, substitution, transposition), edit locations (instruction vs content vs answer-critical), and selection policies (keyboard-neighbor vs uniform vs informative-word-targeted) produce the most clean-conditioned failure?
+- **RQ4 (descriptive, structure).** Which primitive operations, edit locations, and selection policies (keyboard-neighbor, ASR-transcription, uniform, informative-word-targeted) produce the most clean-conditioned failure, and do keyboard-typo and ASR-error conditions produce similar degradation profiles?
 
 RQ1 and RQ2 are the publishable core. RQ3 and RQ4 are the map that contextualizes them and that any reviewer expects to see.
 
@@ -77,10 +77,10 @@ These are committed *before* the held-out runs (Document 10, Document 11 Stage 3
 
 A paper is hard to refute partly because of what it refuses to say. We bound the scope explicitly:
 
-- We study **English** only. We do not claim multilingual generality (MulTypo owns that).
+- We study **English** only, including English ASR transcription errors. We do not claim multilingual generality (MulTypo owns that).
 - We study **open-weight instruction-tuned LLMs in the 1B–8B range**. We do not claim anything about frontier or closed models.
 - We study **BPE/subword-tokenized** models. Byte-level models (BLT, ByT5) are discussed as the contrasting architecture but are out of experimental scope except as an optional single-point reference.
-- We measure **task accuracy** on deterministically scorable tasks. We do not study open-ended generation quality, safety, or alignment under typos.
+- We measure **task accuracy** on deterministically scorable tasks. We do not study end-to-end ASR pipeline optimization, open-ended generation quality, or safety under noise.
 - The mediation claim is **causal only within the fragmentation-matched counterfactual's bounded scope** — we do not claim a complete causal account of typo brittleness, only that fragmentation is a measurable, manipulable channel.
 - The quantization claim is about **one quantization family per cell**, with a sub-study to guard against recipe-specific artifacts; we do not claim all quantization methods behave identically.
 
@@ -96,8 +96,8 @@ A paper is hard to refute partly because of what it refuses to say. We bound the
 | Ismailov & Asanova (2025) | Selective robustness on code, frontier models, no stats | Reasoning+MCQ, open small models, nonword typos, full paired-stats stack, mechanism |
 | GeoRepEval (2026) | Paired McNemar+bootstrap on geometry | Same statistical spirit, applied to typo robustness with the mediation and quantization contributions |
 
-The cell that no competitor fills: **matched-pair fragmentation-mediation + quantization interaction, three audited regimes, open small models, English reasoning + MCQ.** That is our claim to a place in the literature, and it is narrow enough to defend.
+The cell that no competitor fills: **matched-pair fragmentation-mediation + quantization interaction, dual keyboard+ASR noise sources, three audited regimes, open small models, English reasoning + MCQ.** That is our claim to a place in the literature, and it is narrow enough to defend.
 
 ## 1.9 Why this is worth a journal/conference slot
 
-Three reasons, in the order a reviewer weighs them. First, it answers a *mechanistic* question (RQ1) rather than adding another benchmark number — the field is moving from "models fail" to "models fail *because*," and we are on the right side of that. Second, it is *statistically disciplined* in a subfield that is often not, which directly raises its credibility. Third, it is *cheap to reproduce* (open small models, deterministic scoring, released code/configs/seeds), which reviewers increasingly reward and which makes the claims verifiable rather than take-our-word-for-it. The target venues are ACL Rolling Review → EMNLP 2026 main, NAACL 2027, or NeurIPS Datasets & Benchmarks; Document 11 §11.7 covers venue selection.
+Three reasons, in the order a reviewer weighs them. First, it answers a *mechanistic* question (RQ1) rather than adding another benchmark number — the field is moving from "models fail" to "models fail *because*," and we are on the right side of that. Second, it is *statistically disciplined* in a subfield that is often not, which directly raises its credibility. Third, it is *cheap to reproduce* (open small models, deterministic scoring, released code/configs/seeds), which reviewers increasingly reward and which makes the claims verifiable rather than take-our-word-for-it. The confirmed target venue is ACL Rolling Review → EMNLP 2026 main (evaluation and analysis track); NAACL 2027 is the fallback. Document 11 §11.7 covers submission timing.

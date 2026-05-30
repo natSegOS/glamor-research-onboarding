@@ -14,7 +14,7 @@ The defaults that hold across modules unless a module explicitly varies them:
 |---|---|
 | unit `u` | character |
 | location `ℓ` | content |
-| selection `s` | keyboard-neighbor (MulTypo) |
+| selection `s` | keyboard-neighbor (MulTypo) for controlled cells; asr-transcription for ecological cells |
 | regime `c` | A (intent-preserving) |
 | decoding | greedy, temperature 0 (Document 05 §5.6) |
 | quantization | AWQ W4A16 (Document 05 §5.4) |
@@ -34,14 +34,15 @@ Fixed: Regime A, content, keyboard-neighbor, `k ∈ {1, 2, 4}`, fixed model subs
 Output: Δ and CCF for quantized vs fp16, conditioned on clean accuracy; interaction term in the mixed model.
 
 **Module 3 — Selective-invariance audit (FRAMING, serves RQ3/H3).**
-Varies: regime `c ∈ {A, B, C}`; edit budget `k ∈ {1, 2, 4}`; model scale.
-Fixed: content location, keyboard-neighbor.
-Output: CCF/Δ/AFR/ICR on A and B; ACR/ORR on C; the CCF(A)-vs-ORR(C) selectivity plot.
+Varies: regime `c ∈ {A, B, C}`; perturbation source ∈ {keyboard-neighbor, asr-transcription}; edit budget `k ∈ {1, 2, 4}`; model scale.
+Fixed: content location.
+Output: CCF/Δ/AFR/ICR on A and B, separately for keyboard and ASR sources; ACR/ORR on C; the CCF(A)-vs-ORR(C) selectivity plot; a keyboard-vs-ASR profile comparison.
+Note: ASR-transcription errors predominantly land in Regime B (real-word acoustic confusions) rather than Regime A (nonword typos), because ASR rarely produces nonwords. This is the key structural difference between the two noise sources and is itself an expected finding.
 
 **Module 4 — Edit structure (DESCRIPTIVE, serves RQ4/H4).**
-Varies: operation `o ∈ {I, D, S, T}`; location `ℓ ∈ {instruction, content, answer-critical}`; selection `s ∈ {keyboard-neighbor, uniform, informative-word-targeted}`; edit budget `k ∈ {1, 2, 4}`.
+Varies: operation `o ∈ {I, D, S, T}`; location `ℓ ∈ {instruction, content, answer-critical}`; selection `s ∈ {keyboard-neighbor, asr-transcription, uniform, informative-word-targeted}`; edit budget `k ∈ {1, 2, 4}`.
 Fixed: Regime A.
-Output: CCF/Δ by operation, by location, by policy, by budget; token-inflation by operation (feeds back into Module 1's mechanism story).
+Output: CCF/Δ by operation, by location, by policy, by budget; token-inflation by operation; a direct keyboard-vs-ASR degradation comparison at matched severity.
 
 **Exploratory addenda (not pre-registered as confirmatory):** `k = 8` heavy-stress budget; a single byte-level reference point (e.g., a ByT5- or BLT-class model if one is runnable) to contextualize the BPE results; a decoding-noise check (temperature 0.7, fixed seeds) to confirm greedy results are not a sampling artifact. These are reported in a clearly labeled exploratory section so they never contaminate the confirmatory claims.
 
@@ -88,6 +89,16 @@ s ∈ {keyboard-neighbor, uniform, informative-word-targeted, real-word, whitesp
 - **informative-word-targeted:** edits placed on the most task-relevant content words (operationalized in Document 04 §4.6 via task-specific key-term lists, not gradient saliency, to keep it model-agnostic and reproducible). This is the upper-bound-of-damage policy and tests H4, extending Pruthi et al. (2019).
 - **real-word:** edit sequences whose result is a valid word — used to *construct* Regime B items, drawing on the WikiTypos and GitHub Typo Corpus distributions.
 - **whitespace:** split/merge of spaces — a common human/OCR error, used in Module 4's location analysis.
+- **asr-transcription:** errors drawn from a real ASR error distribution (§3.5a below) — acoustic confusions, disfluencies, filler insertions, and missing punctuation. This is the ecologically motivated noise source and produces primarily Regime B items.
+
+### 3.5a ASR error source (decided)
+
+We use **real ASR output errors** rather than synthetic acoustic-confusion models, for two reasons: realism (actual ASR errors reflect the full noise distribution including disfluencies and language-model-in-ASR artifacts that synthetic models miss) and defensibility (a reviewer cannot say "your ASR simulation is unrealistic"). The source is Whisper (Radford et al., OpenAI 2022) transcriptions of spoken English, compared against reference transcripts. Concretely:
+
+- We take items from the primary tasks (GSM-Symbolic reasoning, MMLU-Pro MCQ), read them aloud via a TTS voice (e.g., edge-tts or Google TTS, a single fixed voice per task to avoid speaker-variation confounds), and run Whisper (large-v3, greedy decoding) to transcribe. The difference between the original text and the Whisper transcription is the ASR error.
+- Because ASR errors are item-specific and not controllable the way keyboard edits are, **the edit budget `k` for ASR items is the measured Damerau-Levenshtein distance** between original and transcription, logged per item rather than set in advance. We then select ASR items whose edit distance falls within our k-bands {1–2, 3–5, 6+} to maintain comparability with the keyboard-typo severity axis.
+- The TTS voice, Whisper version, and decoding settings are pinned and logged.
+- A separate noise condition: **environmental-noise stress** — we also run Whisper on TTS audio degraded with babble noise at a fixed SNR (e.g., 10 dB), to represent realistic deployment conditions. This gives a "quiet ASR" vs "noisy ASR" comparison within the ASR arm.
 
 ## 3.6 The design matrix and cell counts
 
@@ -109,18 +120,20 @@ Perturbed generations: 240 × 400 = 96,000.
 
 **Shared clean baselines:** one clean run per item per (model, task). The union of items across modules per (model, task) is at most the largest single-module item pool plus the audit pool; budget ≈ 1,500 unique clean items × 5 models × 2 tasks = 15,000 clean generations. (Re-used across modules; not multiplied per cell.)
 
-**Total (full design, all tiers available):**
+**Total (full design, USC GPU cluster):**
 ```
-24,000 + 21,600 + 54,000 + 96,000 + 15,000 ≈ 210,600 generations
+Keyboard arm:  24,000 + 21,600 + 54,000 + 96,000 + 15,000 ≈ 210,600
+ASR arm (Modules 3+4 only, shared clean baselines): ~40,000
+Total: ~250,000 generations
 ```
 
-This is the "Tier 1 / best case" footprint and matches the ~200k figure in the research foundation. It is *not* what we run if compute is constrained; §3.7 and Document 07 §7.6 specify how it collapses.
+This is the full-design footprint. The USC lab GPU cluster (confirmed by Zizhao) makes this scale straightforwardly feasible; Document 07 §7.4 covers the logistics of remote submission if cluster access for an external collaborator is pending. It is *not* what we run if compute is constrained; §3.7 and Document 07 §7.6 specify how it collapses.
 
 ## 3.7 Graceful degradation (drop conditions, never items)
 
 If compute forces a smaller study, we shrink by removing *conditions* (cells), never by shrinking `N` per cell, because shrinking `N` is what destroys statistical power and invites the "underpowered" critique. The priority order for what to keep:
 
-1. **Always keep:** Module 1 (mediation, the primary contribution) at full `N`, both tasks, all five models at AWQ-4bit. This alone is ~24,000 perturbed + ~12,000 clean ≈ 36,000 generations — feasible even on free T4 for the 1B/3B models plus AWQ-8B.
+1. **Always keep:** Module 1 (mediation, the primary contribution) at full `N`, both tasks, all five models at AWQ-4bit, **both keyboard and ASR noise sources**. This alone is ~30,000 perturbed + ~12,000 clean ≈ 42,000 generations — feasible on the USC cluster or free T4 for the 1B/3B models plus AWQ-8B.
 2. **Keep next:** Module 3 regimes A and C only (drop B), `k ∈ {1, 4}` only. Establishes selectivity with the over-robustness control intact.
 3. **Keep next:** Module 2 quantization on a single 7–8B model (Qwen2.5-7B) fp16-vs-AWQ.
 4. **Drop first under pressure:** Module 4's policy and location sweeps; `k=8`; the second task; the fp16 arm of the other 7–8B models; the GPTQ sub-study.
@@ -137,5 +150,6 @@ Designing the figures now ensures every cell we run earns its place. The confirm
 - **Fig 4 — Selectivity scatter:** CCF(Regime A) on the x-axis vs ORR(Regime C) on the y-axis, one point per (model, scale), ideal at bottom-left. Serves RQ3/H3. *This is the conceptual centerpiece.*
 - **Fig 5 — Severity curves:** CCF vs `k` by operation, with the {1,2,4,8} points showing linear-vs-superlinear shape. Serves RQ4/H4.
 - **Fig 6 — Location/policy heatmap:** CCF by (location × task) and by (policy × task). Serves RQ4.
+- **Fig 7 — Keyboard vs ASR profile:** side-by-side CCF and Δ for keyboard-neighbor (Regime A) vs ASR-transcription (Regime B) at matched severity bands, across models. The headline "does the same mechanism explain both noise types?" figure.
 
 Every module in §3.2 maps to at least one figure, and every figure maps to a research question. No cell is run that does not feed a planned figure or a pre-registered test.
