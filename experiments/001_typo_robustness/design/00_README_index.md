@@ -1,7 +1,7 @@
 # Experiment 001 — Typographical Perturbation Robustness: Design Suite
 
 **Project:** GLAMOR Lab (USC) research onboarding — Experiment 001
-**Working title:** *Selective Invariance Under Typographical Noise: A Tokenization-Mediated, Quantization-Aware, Matched-Pair Study of Robustness in Open Instruction LLMs*
+**Working title:** *When Voice Meets Text: Tokenization-Mediated LLM Robustness to ASR Transcription Errors and Typographical Noise*
 **Repo path (proposed):** `experiments/001_typo_robustness/`
 **Status:** Design / pre-registration phase
 **Maintainer:** (you) · **Mentor:** Zizhao Hu
@@ -33,13 +33,15 @@ The suite is written so that it can be lifted, lightly edited, and used directly
 
 ## 0.3 One-page summary of the study
 
-We measure whether current open-weight instruction-tuned LLMs exhibit **selective invariance**: staying correct when the input carries intent-preserving typographical noise, while still changing their answer when an edit genuinely changes the question. We do this with a **matched-pair** design — every perturbed prompt has a clean twin scored on the same item — so degradation is measured on the same problems rather than across populations.
+Voice is an increasingly dominant way of interacting with AI systems, but ASR (automatic speech recognition) transcription introduces systematic errors before the LLM ever sees the prompt: acoustic confusions (real-word substitutions like "weather" for "whether"), disfluencies, filler words, and non-standard punctuation. Understanding exactly *how and why* these surface errors degrade LLM performance is a prerequisite for mitigating them. This study addresses that causal question.
+
+We use a **matched-pair** design and combine **two complementary perturbation sources**: controlled keyboard-adjacency typos (the experimental baseline) and realistic ASR-transcription errors (the ecologically motivated application). The dual-source design lets us test whether the same causal mechanism operates across both noise types, making the findings directly actionable for voice-interface deployments.
 
 The study is built around three contributions, in priority order:
 
-1. **Tokenization-fragmentation mediation (primary).** We do not merely show that typos hurt (already well established). We decompose the typo-induced accuracy loss into the part that flows through *subword fragmentation* (measured by a per-item token-inflation ratio τ and subword-count change) and a residual part, using a matched, fragmentation-controlled counterfactual. No prior typo study delivers this causal decomposition; the closest works stop at correlation.
-2. **Quantization × typo interaction (strong secondary).** We test whether 4-bit-quantized instruction models are more, equally, or less typo-robust than their fp16 counterparts *on matched items, controlling for clean accuracy*. The one adjacent result (code generation) found quantized models surprisingly *more* robust; whether that direction holds for nonword typos on reasoning is open.
-3. **Three-regime selective-invariance audit (framing).** We separate intent-preserving nonword typos, context-recoverable real-word shifts, and meaning-changing controls, and report robustness only on the first as the primary endpoint, with the others as sensitivity and over-robustness diagnostics.
+1. **Tokenization-fragmentation mediation (primary).** We decompose noise-induced accuracy loss into the part flowing through *subword fragmentation* and a residual, using a fragmentation-matched counterfactual. No prior typo or ASR-noise study delivers this causal decomposition; the closest works stop at correlation.
+2. **Quantization × noise interaction (strong secondary).** We test whether 4-bit-quantized models are more, equally, or less robust to transcription noise than fp16 counterparts, controlling for clean accuracy — directly relevant for deployed voice assistants running quantized models.
+3. **Three-regime selective-invariance audit (framing).** We separate intent-preserving noise, context-recoverable real-word shifts (the dominant ASR error type), and meaning-changing controls, reporting primary robustness only on audited intent-preserving items.
 
 Tasks are deterministically scorable and contamination-controlled (GSM-Symbolic-style fresh reasoning items; MMLU-Pro multiple choice). Models span three families and three scales. All statistics are paired (McNemar with mid-p exact correction, BCa bootstrap confidence intervals, a crossed-random-effects mixed logistic model). The whole analysis plan is pre-registered before the held-out runs.
 
@@ -64,18 +66,18 @@ These were chosen for you and are justified in the cited document. Change them o
 | Quantization sub-study | fp16 vs AWQ-4bit vs GPTQ-4bit on a fixed model subset | 05 §5.5 |
 | Decoding | Greedy (temperature 0, top_p 1), fixed max_new_tokens per task | 05 §5.6 |
 | Inference engine | vLLM with continuous batching + prefix caching | 07 §7.2 |
-| Hardware (default) | Colab Pro L4 24 GB; RunPod A40 48 GB for 7–8B bursts | 07 §7.4 |
+| Hardware (default) | USC lab GPU cluster (confirmed); free Colab T4 fallback if access pending | 07 §7.4 |
 | Hardware (fallback) | Free Colab T4: 1B/3B fp16 + 8B AWQ, drop conditions not items | 07 §7.6 |
 | Edit budgets | k ∈ {1, 2, 4} primary; k = 8 exploratory | 03 §3.4 |
-| Selection policy | Keyboard-neighbor (MulTypo) primary; uniform-random ablation; informative-word-targeted as a separate condition | 03 §3.5 |
+| Selection policy | Keyboard-neighbor (MulTypo) + ASR-transcription errors (primary); uniform-random ablation; informative-word-targeted | 03 §3.5 |
 | Per-cell sample size | Provisional 600 paired items (5 pp MDE); confirmed by Stage-2 pilot | 06 §6.3 |
-| Human audit | 3 annotators, 385 items/regime, Fleiss κ ≥ 0.6 gate | 09 §9.3 |
+| Human audit | ≥3 annotators (sourcing TBD with Zizhao), 385 items/regime, Fleiss κ ≥ 0.6 gate | 09 §9.3 |
 
 ## 0.5 Change log
 
 Append any deviation from §0.4 here with date, reason, and the document section updated. (Empty at design freeze.)
 
-- *(none yet)*
+- **2025-05-29** — Meeting with Zizhao: (1) ASR transcription errors added as a second perturbation source and elevated to primary real-world motivation; (2) Regime B (context-recoverable real-word shift) elevated to co-primary perturbation type alongside Regime A nonword typos; (3) hardware confirmed as USC lab GPU cluster; (4) annotator sourcing TBD with Zizhao; (5) target venue confirmed as ACL Rolling Review → EMNLP 2026. Sections updated: 00 §0.3, §0.4, §0.5; 01 §1.1, §1.3, §1.5, §1.7, §1.8; 03 §3.2, §3.5, §3.8; 07 §7.4, §7.5, §7.6; 09 §9.2; 11 §11.7; 12.
 
 ## 0.6 Relationship to the existing repo
 

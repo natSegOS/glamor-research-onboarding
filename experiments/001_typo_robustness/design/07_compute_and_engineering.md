@@ -38,14 +38,18 @@ The KV cache also consumes VRAM and grows with batch size × context length; vLL
 
 ## 7.4 Decision: default hardware tier
 
-**Default: Colab Pro (L4 24 GB) for routine work + RunPod A40 48 GB bursts for fp16 7–8B and the big Module-4 sweep.**
+**Default: USC lab GPU cluster (confirmed by Zizhao).**
 
-Justification and current (May 2026) pricing:
-- **Colab Pro** is ~$10/month with compute units (~$0.10/unit; an L4 burns roughly 2–3 units/hour), giving an L4 24 GB that runs AWQ 7–8B comfortably and fp16 3B easily, with longer session limits than free. This is the everyday driver and matches the repo's existing Colab-as-GPU workflow (the tutorial in `docs/tutorial.html`).
-- **RunPod Community Cloud** A40 48 GB at ~$0.20/GPU-hr or A6000 48 GB at ~$0.44/hr handles the fp16 7–8B arm and the largest sweeps; **Vast.ai** RTX 3090 from ~$0.17/hr or RTX 4090 from ~$0.40/hr are cheaper spot alternatives if 24 GB suffices.
-- The whole 210k-generation study, at the throughput estimates in §7.5, is on the order of **tens of GPU-hours**, i.e. **well under $50** of burst compute even at the higher per-hour rates. This is the "relatively cheap, temporary upgrade" you said you could do, and it is the recommended path because it unlocks the fp16 arm (and thus the full RQ2 contribution).
+Zizhao confirmed in the post-design-suite meeting that the lab has access to a more powerful GPU through USC. This makes the full ~250k-generation design (Document 03 §3.6) straightforwardly feasible with no personal compute cost.
 
-You set up the GPU side exactly as the existing tutorial describes (Claude Code writes the driver notebook locally; you upload to Colab/RunPod, pull the repo, `pip install -e .`, run). The only change is that the runner now calls vLLM.
+**Access logistics:** Zizhao is checking whether external collaborators (you, as a non-USC student) can be granted direct cluster access. Two workflows, depending on the outcome:
+
+- **Direct access (preferred):** you push code to the repo; you submit the job yourself via the cluster's scheduler (SLURM or equivalent). The existing Allegro layout (code locally, GPU remotely) maps cleanly onto this.
+- **Proxy workflow:** if direct access is unavailable, you prepare a fully self-contained job script and send it to Zizhao with a one-command run instruction. The idempotent shard design (§7.7) means intermediate results transfer back safely. He runs it; results come back as a results CSV + manifest. You analyze locally. This is slower but requires no design changes.
+
+**Fallback if cluster access is delayed:** Colab Pro (L4 24 GB) at ~$10/month or RunPod A40 at ~$0.20/GPU-hr for short bursts, well under $50 for the primary Module 1 arm. Use the free-T4 fallback (§7.6) if neither is available.
+
+**ASR data generation** (Document 03 §3.5a, 04 §4.7a) — TTS synthesis and Whisper transcription are a separate pre-processing step that runs once on CPU/small GPU before the main sweep. Whisper large-v3 runs on a single T4 in minutes per batch; this step does not need the cluster and can be done locally or on free Colab in advance.
 
 ## 7.5 Throughput estimates and the time budget
 
@@ -62,12 +66,12 @@ Throughput on small GPUs is workload-dependent; we use deliberately conservative
 Time for a given generation count, at mean output 200 tokens (a deliberately high estimate; MCQ is far shorter), using `time = gens × 200 / tok_s / 3600`:
 
 - **Free-T4 fallback study** (~36k generations, Document 03 §3.7), mostly 1B/3B fp16 + 8B AWQ: at a blended ~150 tok/s, ≈ 36,000 × 200 / 150 / 3600 ≈ **13 GPU-hours**, i.e. 2–3 free Colab sessions with checkpointing. Feasible.
-- **Default-tier full study** (~210k generations) on L4+A40 at a blended ~250 tok/s: ≈ 210,000 × 200 / 250 / 3600 ≈ **47 GPU-hours**, i.e. a few days of part-time bursts, well under $50.
+- **Full study** (~250k generations, keyboard + ASR arms) on the USC cluster at a blended ~400+ tok/s on a server-class GPU: ≈ 250,000 × 200 / 400 / 3600 ≈ **35 GPU-hours**, i.e. a single overnight batch run.
 - Because MCQ answers are short (≤256 tokens, often <50 with the single-letter instruction) and prefix caching cuts the effective prefill cost, the *real* numbers will be better than these estimates. We treat the estimates as upper bounds and re-baseline after the pilot.
 
-## 7.6 The free-T4-only fallback (fully specified)
+## 7.6 The free-T4-only fallback (if USC cluster access is delayed)
 
-If no paid tier is available, the study still runs and still supports the primary contribution. The plan (Document 03 §3.7, made concrete here):
+If the USC cluster is unavailable and no paid alternative is accessible, the study still runs and still supports the primary contribution. The plan (Document 03 §3.7, made concrete here):
 - **Models:** Llama-3.2-1B (fp16), Llama-3.2-3B (fp16), Llama-3.1-8B (AWQ-4bit). The fp16 7–8B arm is dropped, so the quantization sub-study shrinks to "AWQ-8B vs the fp16 small models" framing — weaker, but the primary mediation contribution does not need it.
 - **Modules:** Module 1 (mediation) at full `N=600`, both tasks, all three runnable models. Module 3 regimes A and C, `k∈{1,4}`. Module 2 collapses to a single qualitative quantization observation.
 - **Budget:** ~36k generations ≈ 13 GPU-hours ≈ 2–3 free sessions.
@@ -107,15 +111,15 @@ From the Experiment-000 scaffolding to the Experiment-001 runner:
 - Keep: the Allegro layout, the `model_id`/`quant_bits` result columns, the Colab-as-GPU workflow, the tidy-CSV philosophy.
 - Replace: `model.generate_once` (serial HF) → a vLLM offline-batched generation function.
 - Add: the perturbation engine, the deterministic scorers, the token-metric logger, the idempotent shard runner with manifest, and the statistics/audit modules. Full module spec is Document 08.
-- Pin: `transformers`, `vllm`, `torch`, tokenizer versions, and model commit hashes in `pyproject.toml` / a lockfile; the current `pyproject.toml` already lists torch/transformers/accelerate/bitsandbytes and adding `vllm` is a one-line change.
+- Pin: `transformers`, `vllm`, `torch`, `whisper`, `edge-tts`, tokenizer versions, and model commit hashes in `pyproject.toml` / a lockfile; the current `pyproject.toml` already lists torch/transformers/accelerate/bitsandbytes and adding `vllm` and `openai-whisper` is a two-line change.
 
 ## 7.11 Compute decisions summary
 
 | Question | Decision | Why |
 |---|---|---|
 | Inference engine | vLLM offline batched | 10×+ over serial HF; prefix caching fits matched-pair design |
-| Default hardware | Colab Pro L4 + RunPod A40 bursts | runs AWQ everywhere + fp16 7–8B; whole study < $50 |
-| Fallback hardware | Free Colab T4 | 1B/3B fp16 + 8B AWQ; ~13 GPU-h; supports primary claim |
+| Default hardware | USC lab GPU cluster (confirmed) | full ~250k-gen study in a single overnight run; no personal cost |
+| Fallback hardware | Free Colab T4 / Colab Pro | 1B/3B fp16 + 8B AWQ; ~13 GPU-h; supports primary claim if cluster delayed |
 | Parallelism | continuous batching + idempotent shards across GPUs | matches "many independent generations" workload |
 | Model parallelism | none | models fit on one GPU |
 | Checkpointing | idempotent per-row IDs + manifest, flush ≤500 | survives free-tier disconnects; enables shard parallelism |
