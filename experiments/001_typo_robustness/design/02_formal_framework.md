@@ -77,7 +77,7 @@ r = (o, u, ℓ, k, s, c, ρ)
 | `u` | unit | {char, word, span} |
 | `ℓ` | location/scope | {instruction, content, answer-critical, anywhere} |
 | `k` | edit budget | {0, 1, 2, 4, 8} |
-| `s` | selection policy | {uniform, keyboard-neighbor, informative-word-targeted, real-word, whitespace} |
+| `s` | selection policy | {uniform, keyboard-neighbor, informative-word-targeted, real-word, whitespace, asr-transcription} |
 | `c` | semantic regime | {A intent-preserving, B context-recoverable, C meaning-changing} |
 | `ρ` | seed | ℤ |
 
@@ -99,7 +99,7 @@ Example: "capital of *Frnace*" → still Paris. *This is the primary-endpoint re
 the corrupted token IS a valid dictionary word
 π(x') ≈ π(x)  (recoverable but weakened)
 ```
-Example: "capital of *Finance*" → a human infers France. *Secondary; weaker desired behavior.* This is exactly the regime where WikiTypos' semantic substitutions live (Document 01 §1.2), which is why it must be separated rather than folded into Regime A.
+Example: "capital of *Finance*" → a human infers France. **This is the dominant error type produced by ASR transcription** — the recognizer outputs a valid word that sounds like the intended word. Because ASR is the study's primary real-world motivation, Regime B is elevated to co-primary status alongside Regime A, and ASR-sourced items are the main population of Regime B. WikiTypos also contains real-word substitutions of this type (the reason it must be separated from Regime A). Desired behavior is less absolute than Regime A, so it is reported as a secondary endpoint.
 
 **Regime C — meaning-changing control.** The edit changes the intended task.
 ```
