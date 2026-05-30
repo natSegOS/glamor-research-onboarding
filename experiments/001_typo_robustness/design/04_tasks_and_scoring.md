@@ -68,10 +68,20 @@ This determinism is what lets us claim the "answer-critical" condition is exactl
 ## 4.7 Constructing the three regimes per task
 
 - **Regime A (intent-preserving nonword):** apply MulTypo keyboard-neighbor edits to non-key content words (reasoning) or to the question's content words (MCQ), constrained so the result is a nonword (dictionary check against a frozen wordlist, e.g., `wordfreq`/`hunspell` en_US, pinned). Audited to confirm intent preservation (Document 09).
-- **Regime B (context-recoverable real-word shift):** draw real-word substitutions from the WikiTypos / GitHub Typo Corpus edit distributions, or via single-edit-distance real-word neighbors, such that the corrupted token is a valid word but context recovers intent. Audited; items where audit says intent is *not* recoverable are reassigned to C or dropped.
+- **Regime B (context-recoverable real-word shift):** items are sourced primarily from **ASR-transcription errors** (Document 03 §3.5a): Whisper transcriptions of TTS-spoken task items, where the recognized form is a valid word differing from the original (e.g., acoustic confusions). Real-word substitutions from WikiTypos / GitHub Typo Corpus serve as a supplementary source and for cross-validation. Audited; items where audit says intent is *not* recoverable are reassigned to C or dropped.
 - **Regime C (meaning-changing control):** for reasoning, swap a key numeric operand to a different value and recompute the gold answer `y'*` from the template (trivial because the template computes the answer); for MCQ, insert/delete a negation or swap the focus entity so the correct option changes. The new gold `y'*` is known by construction.
 
 The fact that templated reasoning data lets us recompute `y'*` exactly for Regime C is a second major reason to use GSM-Symbolic-style templates rather than raw GSM8K: it makes the meaning-changing control gold-labeled without a human guessing the new answer.
+
+### 4.7a ASR data generation procedure (Regime B primary source)
+
+1. For each clean item `(x_i, y*_i)`, synthesize audio using a single fixed TTS voice (pinned model/voice ID, e.g., `edge-tts en-US-AriaNeural`) at a fixed speaking rate.
+2. Run **Whisper large-v3** (greedy decoding, English language forced, pinned commit hash) on the audio to produce a transcription `x'_i`.
+3. Log the Damerau-Levenshtein distance `d_DL(x_i, x'_i)` and all word-level diffs.
+4. Classify each changed token: real-word substitution (→ Regime B candidate), nonword (→ Regime A candidate, rare for ASR), deletion/insertion (logged by operation type).
+5. Also generate a **noisy-ASR variant**: add babble noise at 10 dB SNR before transcription, to simulate realistic ambient-noise deployment conditions.
+6. Both the quiet and noisy ASR transcriptions enter the pipeline as separate conditions, tagged `asr_clean` and `asr_noisy` in the `selection_policy` field.
+7. The TTS audio files are retained and released with the paper (they are not copyrightable as machine-generated audio of public benchmark text) to make the ASR arm fully reproducible without re-running TTS.
 
 ## 4.8 Data provenance, licensing, and release
 

@@ -12,6 +12,7 @@ experiments/001_typo_robustness/
 ├── src/
 │   ├── perturb.py               ← the perturbation engine (§8.3)
 │   ├── regimes.py               ← regime A/B/C construction + nonword/real-word checks (§8.6)
+│   ├── asr_generate.py          ← TTS synthesis + Whisper transcription pipeline (Doc 04 §4.7a)
 │   ├── tokenize_metrics.py      ← τ_tok, Δsub, fragmentation strata (Doc 02 §2.5)
 │   ├── tasks.py                 ← task loaders, GSM-Symbolic instancing, MMLU-Pro sampling (Doc 04)
 │   ├── scoring.py               ← deterministic answer extractors + g(·) (Doc 04)
@@ -107,7 +108,8 @@ clean_prompt, expected_answer (y*), expected_answer_changed (y'* for Regime C, e
 # perturbation state vector r
 is_clean (bool), operation, unit, scope, edit_budget (k), edit_density (δ),
 selection_policy, semantic_class (A|B|C), seed (ρ), perturbed_prompt,
-edit_script (JSON), damerau_levenshtein (d_DL)
+edit_script (JSON), damerau_levenshtein (d_DL),
+asr_source ("keyboard"|"asr_clean"|"asr_noisy"|null), tts_voice_id, whisper_model_revision, snr_db
 # tokenization metrics
 clean_token_count, perturbed_token_count, token_inflation (τ_tok),
 edited_word, clean_subwords, perturbed_subwords, delta_subwords (Δsub), frag_stratum ("Low"|"High")
@@ -149,6 +151,9 @@ Unit tests are non-negotiable; they are what let us claim the instrument is soun
 `test_reproducibility.py`
 - a fixed (model, item, r, seed) reproduces an identical generation under pinned versions (greedy); the rare vLLM batch-composition flip is detected and bounded (Document 07 §7.9).
 
+`test_asr_generate.py`
+- a fixed (item, tts_voice, whisper_model, snr_db) produces identical transcriptions under pinned versions; TTS audio is cached to avoid re-synthesis; Whisper decoding is greedy (deterministic); the edit script from original to transcription reconstructs the transcription exactly.
+
 CI runs the non-GPU tests on every commit; the reproducibility test runs on the GPU tier before the main sweep.
 
 ## 8.8 Reproducibility artifacts released with the paper
@@ -157,6 +162,7 @@ CI runs the non-GPU tests on every commit; the reproducibility test runs on the 
 - The generation rows (full schema §8.4), the run manifests, and the fitted statistical models.
 - Code (perturbation engine, scorers, runner, stats), `configs/`, pinned versions, and model commit hashes.
 - Where a dataset license blocks redistributing source text, the **generation scripts + seeds** that reconstruct identical items (Document 04 §4.8).
+- **TTS audio files** for the ASR arm (machine-generated, not copyrightable), so the Whisper transcription step is reproducible without re-running TTS. Stored as 16 kHz mono WAV, one file per item per noise condition.
 This is the concrete content behind the reproducibility claim in Document 10.
 
 ## 8.9 Why this pipeline is auditable end to end

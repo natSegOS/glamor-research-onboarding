@@ -19,10 +19,11 @@ The audit's job is to validate the *intended* regime from `regimes.py` (Document
 
 ## 9.2 Who audits
 
-- **Three independent annotators**, fluent English readers, blind to model outputs and to each other's labels. Blinding to model outputs is essential: an annotator who has seen the model fail might rationalize the item as "meaning-changed."
-- Annotators receive a **written guideline** with worked examples of each regime (including the hard cases: a real-word typo that *does* change meaning → C; a nonword typo on a non-key word → A; a number swap → C).
+- **Three or more independent annotators**, fluent English readers, blind to model outputs and to each other's labels. Blinding to model outputs is essential: an annotator who has seen the model fail might rationalize the item as "meaning-changed."
+- **Annotator sourcing is to be confirmed with Zizhao.** Options include labmates, recruited annotators, or crowd-sourcing with qualification filters. The protocol and agreement-threshold gate (κ ≥ 0.60) are identical regardless of sourcing; only the logistics differ. This will be resolved before Stage 2 (Document 11 §11.3).
+- Annotators receive a **written guideline** with worked examples of each regime (including the hard cases: a real-word typo that *does* change meaning → C; a nonword typo on a non-key word → A; a number swap → C; an ASR acoustic confusion that context recovers → B; one that context cannot recover → C).
 - A **fourth person adjudicates** disagreements (§9.5).
-- For a course/onboarding setting, annotators can be the student plus two labmates; the protocol is identical regardless of who fills the roles, and the agreement statistics (not the identities) are what the paper reports.
+- **ASR-specific annotation note:** because ASR errors predominantly produce Regime B items (real-word acoustic confusions), the guideline includes examples of common ASR substitution patterns and makes the Regime B/C distinction especially concrete for that item type.
 
 ## 9.3 How many items to audit (sample size tied to a margin)
 
