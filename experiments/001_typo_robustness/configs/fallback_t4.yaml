@@ -1,0 +1,33 @@
+# Free-T4 fallback
+# Keeps Module 1 at full N on the
+# models a T4 can run; drops conditions, never items
+
+run_name: fallback_t4
+seed: 1729
+
+models:
+  - {key: llama-1b, model_id: meta-llama/Llama-3.2-1B-Instruct, revision: PIN_ME, precision: fp16}
+  - {key: llama-3b, model_id: meta-llama/Llama-3.2-3B-Instruct, revision: PIN_ME, precision: fp16}
+  - {key: llama-8b-awq, model_id: hugging-quants/Meta-LLama-3.1-8B-Instruct-AWQ-INT4, revision: PIN_ME, precision: awq}
+
+tasks:
+  - family: gsm_symbolic
+    n_items: 600
+
+regimes: [A, C]
+operations: [substitute, delete]
+edit_budgets: [1, 2]
+selection_policies: [keyboard_neighbor]
+
+asr:
+  enabled: true
+  voice: en-US-AriaNeural
+  whisper_model: large-v3
+  snr_levels: [null]
+
+decoding:
+  greedy: true
+  max_new_tokens: 512
+
+outputs:
+  results_dir: results/fallback_t4
