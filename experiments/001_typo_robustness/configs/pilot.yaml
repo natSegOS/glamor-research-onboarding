@@ -1,0 +1,39 @@
+# Stage-1 pilot (design/11): one model, Reigme A keyboard arm at k=1
+# across all four operations + a Regime C control slice. Purpose: validate
+# the pipeline, measure discordant-pair rate p_d (fixer per-cell N), measure
+# throughput, validate clean accuracy A0.
+
+run_name: pilot
+seed: 1729
+
+models:
+  - key: llama-1b
+    model_id: meta-llama/Llama-3.2-1B-Instruct
+    revision: PIN_ME # pin the HF commit hash at pre-registration
+    precision: fp16
+
+tasks:
+  - family: gsm_symbolic
+    n_items: 200
+
+regimes: [A, C]
+operations: [substitute, delete, insert, transpose]
+edit_budgets: [1]
+selection_policies: [keyboard_neighbor]
+
+asr:
+  enabled: true
+  voice: en-US-AriaNeural
+  whisper_model: large-v3
+  snr_levels: [null, 10]
+
+decoding:
+  greedy: true
+  max_new_tokens: 512
+
+outputs:
+  results_dir: results/pilot
+
+gates:
+  min_clean_accuracy: 0.35
+  record: [discordant_rate, tokens_per_second, asr_word_accuracy]
