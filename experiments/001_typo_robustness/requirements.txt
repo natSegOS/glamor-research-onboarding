@@ -1,0 +1,15 @@
+# Core (analysis + tests run with these alone; tests need nothing beyond stdlib + numpy + scipy)
+numpy>=1.26
+scipy>=1.11
+pyyaml>=6.0
+matplotlib>=3.8 # figures (optional; analyze.py degrades gracefully)
+
+# GPU side (Colab / USC cluster only) - pin exact versions at pre-registration
+vllm>=0.6
+transformers>=4.44
+accelerate>=0.33
+
+# ASR arm (pre-processing step only)
+openai-whisper
+edge-tts
+soundfile
