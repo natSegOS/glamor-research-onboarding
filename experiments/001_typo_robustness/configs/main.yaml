@@ -1,0 +1,46 @@
+# Main study (design/03): all four modules, full roster, both arms
+# Per-cell N is PROVISIONAL 600 (5pp MDE at p_d <= 0.19) until the pilot
+# confirms p_d (design/06). USC cluster footprint ~250k generations.
+
+run_name: main
+seed: 1729
+
+models:
+  - {key: llama-1b, model_id: meta-llama/Llama-3.2-1B-Instruct, revision: PIN_ME, precision: fp16}
+  - {key: llama-3b, model_id: meta-llama/Llama-3.2-3B-Instruct, revision: PIN_ME, precision: fp16}
+  - {key: llama-8b, model_id: meta-llama/Llama-3.2-8B-Instruct, revision: PIN_ME, precision: fb16}
+  - {key: llama-8b-awq, model_id: hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4, revision: PIN_ME, precision: awq}
+  - {key: qwen-7b, model_id: Qwen/Qwen2.5-7B-Instruct, revision: PIN_ME, precision: fp16}
+  - {key: qwen-7b-awq, model_id: Qwen/Qwen2.5-7B-Instruct-AWQ, revision: PIN_ME, precision: awq}
+  - {key: mistral-7b, model_id: mistralai/Mistral-7B-Instruct-v0.3, revision: PIN_ME, precision: fp16}
+
+tasks:
+  - family: gsm_symbolic
+    n_items: 600 # provisional; pilot-gated
+  - family: mmlu_pro
+    path: data/items/mmlu_pro.jsonl # subject-stratified subsample
+    n_items: 600
+
+regimes: [A, B, C]
+operations: [substitute, delete, insert, transpose]
+edit_budgets: [1, 2, 4] # k=8 exploratory, run separately
+selection_policies: [keyboard_neighbor, uniform, informative_word]
+
+asr:
+  enabled: true
+  voice: en-US-AriaNeural
+  whisper_model: large-v3
+  snr_levels: [null, 10]
+
+decoding:
+  greedy: true
+  max_new_tokens: 512
+
+outputs:
+  results_dir: results/main
+
+analysis:
+  bca_resamples: 10000
+  fdr_q: 0.05 # Benjamini-Hochberg across cells
+  audit_n_per_regime: 385
+  kappa_gate: 0.60
