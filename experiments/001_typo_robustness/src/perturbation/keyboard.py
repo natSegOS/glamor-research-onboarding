@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 _QWERTY_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
 
 
@@ -23,14 +24,17 @@ def _build_qwerty_neighbors() -> dict[str, str]:
                 neighbor_row = row_index + delta_row
                 neighbor_col = col_index + delta_col
 
-                if (0 <= neighbor_row < len(_QWERTY_ROWS)
-                        and 0 <= neighbor_col < len(_QWERTY_ROWS[neighbor_row])):
+                if (
+                    0 <= neighbor_row < len(_QWERTY_ROWS)
+                    and 0 <= neighbor_col < len(_QWERTY_ROWS[neighbor_row])
+                ):
                     neighbors[character].add(_QWERTY_ROWS[neighbor_row][neighbor_col])
 
     return {ch: "".join(sorted(adjacent)) for ch, adjacent in neighbors.items()}
 
 
 QWERTY_NEIGHBORS: dict[str, str] = _build_qwerty_neighbors()
+
 ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
 
