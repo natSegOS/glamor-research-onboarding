@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "note": "Pre-registered decision logic lexicons for GLAMOR Lab Exp 001. Frozen at pre-registration; any extension requires a design-doc amendment and an updated version date in the affected file. See design/04_tasks_and_scoring.md §4.5 and §4.7.",
+  "lexicons": {
+    "clarification_phrases.txt": {
+      "version": "2026-06-19",
+      "implements": "design/04 §4.5 — ParseStatus.CLARIFICATION detection",
+      "rationale": "Conservative lexical proxy for explicit clarification requests. Under-counts by design (ICR is a diagnostic, not a primary endpoint). See AdversarialOverSensitivity_Niu and ResilienceOfLLMsForNoisyInstructions_Wang for the over-sensitivity framing that motivates conservatism.",
+      "entry_count": 7,
+      "match_mode": "whole-word, case-insensitive regex alternation"
+    },
+    "refusal_phrases.txt": {
+      "version": "2026-06-19",
+      "implements": "design/04 §4.5 — ParseStatus.REFUSAL detection (no parseable answer required)",
+      "rationale": "Conservative lexical proxy for strong modal negations and the formulaic 'as an AI' opener. Applied only when no parseable answer is present, so hedged-but-answered responses are scored normally.",
+      "entry_count": 7,
+      "match_mode": "whole-word, case-insensitive regex alternation"
+    },
+    "negatable_verbs.txt": {
+      "version": "2026-06-19",
+      "implements": "design/04 §4.7 — MCQ Regime-C negation target set",
+      "rationale": "English copula and high-frequency modal/aspectual auxiliaries most likely to carry the main finite verb in factual MCQ stems. Epistemic modals (would, should, must, might) are deliberately excluded to avoid unpredictable negation semantics. The negative lookahead (?! not) prevents double-negation.",
+      "entry_count": 8,
+      "match_mode": "whole-word regex alternation with negative lookahead (?! not)"
+    }
+  }
+}
