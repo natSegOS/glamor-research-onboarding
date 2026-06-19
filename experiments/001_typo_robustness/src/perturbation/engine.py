@@ -1,754 +1,636 @@
-"""engine.py — The complete perturbation engine for the typo-robustness study.
+"""The perturbation engine: the four primitive edits over Damerau-Levenshtein
+edit space, applied deterministically with a fully reconstructible edit script.
 
-Implements the perturbation state vector r = (operation, unit, scope,
-edit_budget, selection_policy, regime, seed) from design/02 §2.3, and
-exposes a single public entry point: perturb().
+Provenance
+----------
+The primitive edit basis {insertion, deletion, substitution, transposition} is
+the Damerau-Levenshtein operation set (Damerau, 1964): the three Levenshtein
+operations plus adjacent transposition, which is included because transposition
+is a common human typing error. The keyboard-neighbor policy follows MulTypo
+(Liu et al., 2025). See docs/PROVENANCE.md §2.1–2.3 and design/02 §2.2.
 
-Guarantees (each enforced and unit-tested in tests/test_perturb.py):
-  1. Determinism      — same arguments + seed → byte-identical output and edit script.
-  2. Budget exactness — exactly edit_budget primitive edits applied, or PerturbationError.
-  3. Identity at k=0  — edit_budget=0 returns text unchanged with an empty edit script.
-  4. Protected spans  — no edit ever touches a protected span.
-  5. Reconstructibility — apply_edit_script(text, edit_script) == perturbed_text.
-  6. Policy fidelity  — keyboard_neighbor draws only QWERTY neighbors; real_word
-                        results are always valid words; informative_word edits only key terms.
+Contract (each clause is enforced by tests/test_perturbation_engine.py)
+-----------------------------------------------------------------------
+1. Determinism      same arguments + same seed -> byte-identical output and
+                    edit script.
+2. Budget exactness exactly ``edit_budget`` primitive edits are applied, or a
+                    PerturbationError is raised if that is impossible.
+3. Identity at k=0  an edit budget of zero returns the input unchanged.
+4. Protected spans  characters inside a protected span are never edited, even
+                    as surrounding indices shift under insertion/deletion.
+5. Reconstructible  apply_edit_script(original, script) == perturbed output.
+6. Policy fidelity  keyboard_neighbor draws only QWERTY-adjacent keys;
+                    real_word produces only valid dictionary words;
+                    informative_word edits only the supplied key terms.
+
+How protected spans survive shifting indices
+---------------------------------------------
+The engine works on a list of [character, original_index] pairs. The
+original_index is the character's position in the *original* string (None for
+characters the engine inserts). Eligibility is decided against original indices,
+so an insertion or deletion earlier in the string cannot accidentally expose a
+protected character to a later edit — the protection travels with the character,
+not with its current position.
 """
 
 from __future__ import annotations
 
 import random
 import re
-from dataclasses import asdict, dataclass
-from enum import Enum
-from typing import Callable, Sequence
 
-from .keyboard import ALPHABET, keyboard_neighbors
+from dataclasses import dataclass, asdict
+from typing import Callable, Optional, Sequence
 
-
-# -- Enumerations --
-
-class Operation(str, Enum):
-    """Damerau–Levenshtein primitive edit operation (design/02 §2.2)."""
-
-    INSERT = "insert"
-    DELETE = "delete"
-    SUBSTITUTE = "substitute"
-    TRANSPOSE = "transpose"
+from enums import Operation, SelectionPolicy, Scope, Unit, SemanticClass
+from perturbation.keyboard import keyboard_neighbors_of
 
 
-class SelectionPolicy(str, Enum):
-    """Character/word selection policy controlling which edits are generated."""
-
-    UNIFORM = "uniform"
-    KEYBOARD_NEIGHBOR = "keyboard_neighbor"
-    INFORMATIVE_WORD = "informative_word"
-    REAL_WORD = "real_word"
-    WHITESPACE = "whitespace"
-    ASR_TRANSCRIPTION = "asr_transcription"
+LOWERCASE_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
 
-class Scope(str, Enum):
-    """Which part of the prompt is eligible for edits."""
+# The four primitive Damerau-Levenshtein operations (insert, delete, substitute,
+# transpose). WORD_SUBSTITUTE is excluded here — it is not a DL primitive, but
+# a convenience op for whole-word replacement recorded distinctly in edit scripts.
+PRIMITIVE_OPERATIONS: tuple[Operation, ...] = (
+    Operation.INSERT, Operation.DELETE, Operation.SUBSTITUTE, Operation.TRANSPOSE)
 
-    INSTRUCTION = "instruction"
-    CONTENT = "content"
-    ANSWER_CRITICAL = "answer_critical"
-    ANYWHERE = "anywhere"
+SELECTION_POLICIES: tuple[SelectionPolicy, ...] = (
+    SelectionPolicy.UNIFORM,            # any letter, drawn uniformly
+    SelectionPolicy.KEYBOARD_NEIGHBOR,  # QWERTY-adjacent letter (MulTypo replacement)
+    SelectionPolicy.INFORMATIVE_WORD,   # keyboard_neighbor, but restricted to key terms
+    SelectionPolicy.REAL_WORD,          # whole-word substitution to a valid-word neighbor
+    SelectionPolicy.WHITESPACE,         # split a word with a space, or merge two words
+    SelectionPolicy.ASR_TRANSCRIPTION,  # produced by asr.py, never by this engine
+)
 
-
-class Unit(str, Enum):
-    """Granularity of the edit operation."""
-
-    CHAR = "char"
-    WORD = "word"
-    SPAN = "span"
-
-
-class Regime(str, Enum):
-    """Semantic regime of the perturbation (design/02 §2.4)."""
-
-    A = "A"   # intent-preserving nonword typos
-    B = "B"   # context-recoverable real-word shift
-    C = "C"   # meaning-changing control
+PERTURBATION_SCOPES: tuple[Scope, ...] = (
+    Scope.INSTRUCTION, Scope.CONTENT, Scope.ANSWER_CRITICAL, Scope.ANYWHERE)
 
 
-# -- Edit record --
+class PerturbationError(Exception):
+    """Raised when the requested perturbation cannot be applied exactly as
+    specified (for example, an edit budget larger than the number of eligible
+    positions, or a policy whose preconditions are not met)."""
+
 
 @dataclass
 class Edit:
-    """One primitive edit recorded in current-string coordinates at application time.
+    """One primitive edit, recorded in the coordinates of the string *at the
+    moment the edit was applied*, so the script replays deterministically when
+    the edits are applied in order.
 
-    Storing coordinates at application time (not original-string coordinates)
-    means the script replays deterministically when applied in order.
+    The character-level fields (``index``, ``before``, ``after``) are what
+    ``apply_edit_script`` replays. The word-level fields are diagnostic: they
+    let the regime builders check whether an edited word became a nonword
+    (Regime A) or another valid word (Regime B) without re-parsing the string.
     """
 
-    op: str   # insert | delete | substitute | transpose | word_substitute
-    index: int   # character index in the string at moment of application
-    before: str = ""   # character(s) removed / pre-state
-    after: str = ""   # character(s) added / post-state
-    word_index: int = - 1   # index of the affected word at moment of application
-    word_before: str = ""
-    word_after: str = ""
+    operation: Operation         # insert | delete | substitute | transpose | word_substitute
+    index: int                   # character index in the string when applied
+    before: str = ""             # character(s) removed or pre-edit state
+    after: str = ""              # character(s) added or post-edit state
+
+    word_index: int = -1         # index of the affected word when applied
+    word_before: str = ""        # the affected word before the edit
+    word_after: str = ""         # the affected word after the edit
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-class PerturbationError(Exception):
-    """Raised when a requested perturbation cannot be applied exactly."""
+def damerau_levenshtein_distance(first_string: str, second_string: str) -> int:
+    """The Damerau-Levenshtein distance: minimum number of insertions,
+    deletions, substitutions, and adjacent transpositions to turn one string
+    into the other (Damerau, 1964)."""
+    first_length, second_length = len(first_string), len(second_string)
 
+    distance = [[0] * (second_length + 1) for _ in range(first_length + 1)]
 
-_RECONST_ERR = "reconstruction mismatch at {0}"
+    for i in range(first_length + 1):
+        distance[i][0] = i
+    for j in range(second_length + 1):
+        distance[0][j] = j
 
+    for i in range(1, first_length + 1):
+        for j in range(1, second_length + 1):
 
-def apply_edit_script(text: str, edits: Sequence[Edit | dict]) -> str:
-    """Replay an edit script over text; must reproduce perturbed_text exactly."""
+            substitution_cost = 0 if first_string[i - 1] == second_string[j - 1] else 1
 
-    result = text
-
-    for edit in edits:
-        entry = edit.to_dict() if isinstance(edit, Edit) else dict(edit)
-        op, index = entry["op"], entry["index"]
-
-        if op == "substitute":
-            assert result[index] == entry["before"], _RECONST_ERR.format(index)
-            result = result[:index] + entry["after"] + result[index + 1:]
-
-        elif op == "insert":
-            result = result[:index] + entry["after"] + result[index:]
-
-        elif op == "delete":
-            assert result[index] == entry["before"], _RECONST_ERR.format(index)
-            result = result[:index] + result[index + 1:]
-
-        elif op == "transpose":
-            assert result[index:index + 2] == entry["before"], _RECONST_ERR.format(index)
-            result = result[:index] + entry["after"] + result[index + 2:]
-
-        elif op == "word_substitute":
-            word_length = len(entry["before"])
-            assert result[index:index + word_length] == entry["before"], _RECONST_ERR.format(index)
-            result = result[:index] + entry["after"] + result[index + word_length:]
-
-        else:
-            raise PerturbationError(f"unknown op in script: {op!r}")
-
-    return result
-
-
-def edited_words(edits: Sequence[Edit]) -> list[tuple[str, str]]
-    """Return (word_before, word_after) pairs for each edit, for regime checks."""
-
-    return [(edit.word_before, edit.word_after) for edit in edits]
-
-
-# -- Damerau-Levenshtein distance --
-
-def damerau_levenshtein(a: str, b: str) -> int:
-    """Standard Damerau–Levenshtein distance including adjacent transposition."""
-
-    len_a, len_b = len(a), len(b)
-
-    distance_matrix = [[0] * (len_b + 1) for _ in range(len_a + 1)]
-    for i in range(len_a + 1):
-        distance_matrix[i][0] = i
-    for j in range(len_b + 1):
-        distance_matrix[0][j] = j
-
-    for i in range(1, len_a + 1):
-        for j in range(1, len_b + 1):
-            substitution_cost = 0 if a[i - 1] == b[j - 1] else 1
-            distance_matrix[i][j] = min(
-                distance_matrix[i - 1][j] + 1,   # deletion
-                distance_matrix[i][j - 1] + 1,   # insertion
-                distance_matrix[i - 1][j - 1] + substitution_cost   # substitution
+            distance[i][j] = min(
+                distance[i - 1][j] + 1,                       # deletion
+                distance[i][j - 1] + 1,                       # insertion
+                distance[i - 1][j - 1] + substitution_cost,   # substitution
             )
 
-            is_transposition = (
+            is_adjacent_transposition = (
                 i > 1 and j > 1
-                and a[i - 1] == b[j - 2]
-                and a[i - 2] == b[j - 1]
+                and first_string[i - 1] == second_string[j - 2]
+                and first_string[i - 2] == second_string[j - 1]
             )
+            if is_adjacent_transposition:
+                distance[i][j] = min(distance[i][j], distance[i - 2][j - 2] + 1)
 
-            if is_transposition:
-                distance_matrix[i][j] = min(
-                    distance_matrix[i][j],
-                    distance_matrix[i - 2][j - 2] + 1
-                )
-
-    return distance_matrix[len_a][len_b]
+    return distance[first_length][second_length]
 
 
-def single_edit_candidates(word: str) -> set[str]:
-    """All Damerau–Levenshtein distance-1 letter variants of word."""
+# ---------------------------------------------------------------------------
+# Internal helpers operating on the [character, original_index] representation.
+# A "cell" below is one [character, original_index] pair.
+# ---------------------------------------------------------------------------
 
-    candidates: set[str] = set()
-
-    for i in range(len(word)):
-        for character in ALPHABET:
-            if character != word[i].lower():
-                substituted = (
-                    word[:i]
-                    + (character.upper() if word[i].isupper() else character)
-                    + word[i + 1:]
-                )
-
-                # subsitution
-                candidates.add(substituted)
-
-        # deletion
-        candidates.add(word[:i] + word[i + 1:])
-
-    for i in range(len(word) + 1):
-        for character in ALPHABET:
-            # insertion
-            candidates.add(word[:i] + character + word[i:])
-
-    for i in range(len(word) - 1):
-        if word[i] != word[i + 1]:
-            candidates.add(word[:i] + word[i + 1] + word[i] + word[i + 2:])
-
-    candidates.discard(word)
-
-    return candidates
-
-
-# -- Enum validation helper --
-
-def _resolve(enum_class, value, param_name):
-    """Coerce value into enum_class, raising PerturbationError on failure."""
-
-    try:
-        return enum_class(value)
-    except ValueError:
-        raise PerturbationError(f"unknown {param_name} {value!r}")
-
-
-# -- Eligibility helpers (internal) --
-
-def _word_spans(chars: list) -> list[tuple[int, int]]:
-    """(start, end) current-index spans of whitespace-delimited words."""
-
+def _word_spans(character_cells: list) -> list[tuple[int, int]]:
+    """Return the (start, end) current-index spans of whitespace-delimited
+    words in the current character-cell list."""
     spans: list[tuple[int, int]] = []
-    span_start = None
+    word_start: Optional[int] = None
 
-    for i, (character, _) in enumerate(chars):
+    for current_index, (character, _original_index) in enumerate(character_cells):
         if not character.isspace():
-            if span_start is None:
-                span_start = i
+            if word_start is None:
+                word_start = current_index
         else:
-            if span_start is not None:
-                spans.append((span_start, i))
-                span_start = None
+            if word_start is not None:
+                spans.append((word_start, current_index))
+                word_start = None
 
-    if span_start is not None:
-        spans.append((span_start, len(chars)))
+    if word_start is not None:
+        spans.append((word_start, len(character_cells)))
 
     return spans
 
 
-def _word_at(chars: list, index: int) -> tuple[int, str]:
-    """(word_index, word_string) containing current char index, or (-1, '')."""
-
-    for word_index, (span_start, span_end) in enumerate(_word_spans(chars)):
-        if span_start <= index < span_end:
-            return word_index, "".join(ch for ch, _ in chars[span_start:span_end])
-
+def _word_containing_index(character_cells: list, target_index: int) -> tuple[int, str]:
+    """Return the (word_index, word_text) of the word containing the character
+    at ``target_index``, or (-1, "") if that index is not inside a word."""
+    for word_index, (start, end) in enumerate(_word_spans(character_cells)):
+        if start <= target_index < end:
+            word_text = "".join(character for character, _ in character_cells[start:end])
+            return word_index, word_text
     return -1, ""
 
 
-def _protected_ids(
-    protected_spans: Sequence[tuple[int, int]] | None,
-) -> set[int]:
-    """Original-text character ids that must never be touched."""
-
-    original_ids: set[int] = set()
-
-    for span_start, span_end in (protected_spans or []):
-        original_ids.update(range(span_start, span_end))
-
-    return original_ids
+def _original_indices_in_protected_spans(
+        protected_spans: Optional[Sequence[tuple[int, int]]]) -> set[int]:
+    """Flatten a list of (start, end) protected spans into the set of original
+    character indices they cover."""
+    protected_indices: set[int] = set()
+    for start, end in (protected_spans or []):
+        protected_indices.update(range(start, end))
+    return protected_indices
 
 
-def _scope_ids(
-    text: str,
-    scope: Scope,
-    scope_spans: dict[str, tuple[int, int]] | None,
-    key_terms: Sequence[str] | None,
-) -> set[int]:
-    """Original character-id set eligible under the requested scope."""
+def _original_indices_eligible_for_scope(
+        text: str,
+        scope: Scope,
+        scope_spans: Optional[dict],
+        key_terms: Optional[Sequence[str]]) -> set[int]:
+    """Return the set of original character indices that the requested scope
+    permits editing.
 
-    total_length = len(text)
+    - ANYWHERE        : every index.
+    - ANSWER_CRITICAL : indices covered by any occurrence of a key term.
+    - INSTRUCTION /
+      CONTENT         : the (start, end) span supplied by the task loader in
+                        ``scope_spans`` (the engine cannot guess where the
+                        instruction ends and the content begins).
+    """
+    text_length = len(text)
 
     if scope == Scope.ANYWHERE:
-        return set(range(total_length))
+        return set(range(text_length))
 
     if scope == Scope.ANSWER_CRITICAL:
         if not key_terms:
-            raise PerturbationError("scope=ANSWER_CRITICAL requires key_terms")
-
-        eligible_ids: set[int] = set()
-
+            raise PerturbationError("scope 'answer_critical' requires key_terms")
+        eligible_indices: set[int] = set()
         for term in key_terms:
             for match in re.finditer(re.escape(term), text):
-                eligible_ids.update(range(match.start(), match.end()))
+                eligible_indices.update(range(match.start(), match.end()))
+        if not eligible_indices:
+            raise PerturbationError("none of the key_terms were found in the text")
+        return eligible_indices
 
-        if not eligible_ids:
-            raise PerturbationError("no key_terms found in text")
-
-        return eligible_ids
-
-    if not scope_spans or scope.value not in scope_spans:
+    # INSTRUCTION or CONTENT require explicit spans from the task loader.
+    scope_key = str(scope)
+    if not scope_spans or scope_key not in scope_spans:
         raise PerturbationError(
-            f"scope={scope.value!r} requires scope_spans[{scope.value!r}]=(start, end)"
-        )
-
-    span_start, span_end = scope_spans[scope.value]
-    return set(range(span_start, span_end))
+            f"scope {scope!r} requires scope_spans[{scope!r}] = (start, end)")
+    start, end = scope_spans[scope_key]
+    return set(range(start, end))
 
 
-def _numeric_ids(text: str) -> set[int]:
-    """Original ids of characters in purely-numeric tokens.
+def _original_indices_of_numeric_tokens(text: str) -> set[int]:
+    """Return the original indices of characters inside purely-numeric tokens.
 
-    Protected by default in Regime A: corrupting a number changes the answer,
-    making the edit meaning-changing rather than intent-preserving.
+    Numeric tokens are protected by default in Regime A: corrupting a number
+    changes the answer, which would turn an intent-preserving typo into a
+    meaning-changing edit (design/04 §4.7). Regime C, which deliberately changes
+    numbers, does not go through this engine for the operand swap.
     """
-
-    original_ids: set[int] = set()
-
+    numeric_indices: set[int] = set()
     for match in re.finditer(r"\S+", text):
-        token = match.group(0).strip(".,;:!?()")
+        stripped_token = match.group(0).strip(".,;:!?()")
+        token_is_numeric = bool(stripped_token) and bool(re.fullmatch(r"[\d,.$%]+", stripped_token))
+        if token_is_numeric:
+            numeric_indices.update(range(match.start(), match.end()))
+    return numeric_indices
 
-        if token and re.fullmatch(r"[\d,.$%]+", token):
-            original_ids.update(range(match.start(), match.end()))
 
-    return original_ids
+def _make_eligibility_test(
+        character_cells: list,
+        allowed_original_indices: set[int],
+        locked_original_indices: set[int]) -> Callable[[int], bool]:
+    """Return a predicate ``is_eligible(current_index)`` that decides whether the
+    character currently at ``current_index`` may be edited. Inserted characters
+    (original_index is None) are always eligible; original characters are
+    eligible only if they are in the allowed set and not in the locked set."""
 
+    def is_eligible(current_index: int) -> bool:
+        _character, original_index = character_cells[current_index]
 
-def _is_eligible(
-    chars: list,
-    allowed_original_ids: set[int],
-    locked_original_ids: set[int],
-) -> Callable[[int], bool]:
-    """Return a predicate: is the character at current index i eligible for editing?"""
+        character_was_inserted = original_index is None
+        if character_was_inserted:
+            return True
 
-    def check(i: int) -> bool:
-        _, original_id = chars[i]
-
-        if original_id is not None and original_id in locked_original_ids:
+        if original_index in locked_original_indices:
             return False
-
-        if original_id is not None and original_id not in allowed_original_ids:
+        if original_index not in allowed_original_indices:
             return False
-
         return True
 
-    return check
+    return is_eligible
 
 
-def _letter_positions(chars: list, eligible: Callable[[int], bool]) -> list[int]:
-    return [i for i, (ch, _) in enumerate(chars) if ch.isalpha() and eligible(i)]
+def _eligible_letter_positions(character_cells: list, is_eligible) -> list[int]:
+    return [index for index, (character, _) in enumerate(character_cells)
+            if character.isalpha() and is_eligible(index)]
 
 
-def _space_positions(chars: list, eligible: Callable[[int], bool]) -> list[int]:
-    return [i for i, (ch, _) in enumerate(chars) if ch == " " and eligible(i)]
+def _eligible_space_positions(character_cells: list, is_eligible) -> list[int]:
+    return [index for index, (character, _) in enumerate(character_cells)
+            if character == " " and is_eligible(index)]
 
 
-# -- Character pool registry (internal) --
-
-def _uniform_pool(character: str) -> list[str]:
-    return list(ALPHABET.upper() if character.isupper() else ALPHABET)
-
-
-def _keyboard_pool(character: str) -> list[str]:
-    return list(keyboard_neighbors(character))
-
-
-def _keyboard_insert_pool(anchor_character: str) -> list[str]:
-    """Keyboard neighbors of anchor plus the anchor itself (double-typing error)."""
-
-    return list(keyboard_neighbors(anchor_character) + anchor_character)
-
-
-def _uniform_insert_pool(anchor_character: str) -> list[str]:
-    return list(ALPHABET.upper() if anchor_character.isupper() else ALPHABET)
-
-
-# Maps selection_policy value to (substitude_pool_fn, insert_pool_fn)
-
-# real_word and whitespace are dispatched separately in perturb
-_CHAR_POOL_REGISTRY: dict[str, tuple[
-    Callable[[str], list[str]],
-    Callable[[str], list[str]],
-]] = {
-    SelectionPolicy.KEYBOARD_NEIGHBOR.value: (_keyboard_pool, _keyboard_insert_pool),
-    SelectionPolicy.UNIFORM.value: (_uniform_pool, _uniform_insert_pool),
-    SelectionPolicy.INFORMATIVE_WORD.value: (_keyboard_pool, _keyboard_insert_pool),
-}
-
-# -- Primitive operations (internal) --
-
-def _apply_substitute(
-    chars: list,
-    rng: random.Random,
-    eligible: Callable[[int], bool],
-    character_pool_fn: Callable[[str], list[str]],
-) -> Edit:
-    """Substitute one eligible letter with a character from the pool."""
-
-    candidates = _letter_positions(chars, eligible)
-    rng.shuffle(candidates)
-
-    for i in candidates:
-        old_character = chars[i][0]
-        pool = [ch for ch in character_pool_fn(old_character) if ch != old_character]
-
-        if not pool:
-            continue
-
-        new_character = rng.choice(pool)
-        word_index, word_before = _word_at(chars, i)
-        chars[i][0] = new_character
-        _, word_after = _word_at(chars, i)
-
-        return Edit(
-            "substitute",
-            i,
-            before=old_character,
-            after=new_character,
-            word_index=word_index,
-            word_before=word_before,
-            word_after=word_after
-        )
-
-    raise PerturbationError("no eligible substitution position")
-
-
-def _apply_delete(
-    chars: list,
-    rng: random.Random,
-    eligible: Callable[[int], bool],
-) -> Edit:
-    """Delete one eligible letter, only from words of length >= 2."""
-
-    candidates = [
-        i for i in _letter_positions(chars, eligible)
-        if len(_word_at(chars, i)[1]) >= 2
-    ]
-
-    if not candidates:
-        raise PerturbationError("no eligible deletion position")
-
-    i = rng.choice(candidates)
-    old_character = chars[i][0]
-    word_index, word_before = _word_at(chars, i)
-    del chars[i]
-
-    _, word_after = _word_at(chars, min(i, len(chars) - 1)) if chars else (-1, "")
-
-    return Edit(
-        "delete",
-        i,
-        before=old_character,
-        after="",
-        word_index=word_index,
-        word_before=word_before,
-        word_after=word_after,
-    )
-
-
-def _apply_insert(
-    chars: list,
-    rng: random.Random,
-    eligible: Callable[[int], bool],
-    character_pool_fn: Callable[[str], list[str]],
-) -> Edit:
-    """Insert a character adjacent to an eligible anchor letter."""
-
-    anchors = _letter_positions(chars, eligible)
-    rng.shuffle(anchors)
-
-    for i in anchors:
-        anchor_character = chars[i][0]
-        pool = list(character_pool_fn(anchor_character))
-
-        new_character = rng.choice(pool)
-        word_index, word_before = _word_at(chars, i)
-
-        insertion_offset = rng.choice([0, 1])
-        insertion_index = i + insertion_offset
-        chars.insert(insertion_index, [new_character, None])
-
-        _, word_after = _word_at(chars, insertion_index)
-
-        return Edit(
-            "insert",
-            insertion_index,
-            before="",
-            after=new_character,
-            word_index=word_index,
-            word_before=word_before,
-            word_after=word_after,
-        )
-
-    raise PerturbationError("no eligible insertion anchor")
-
-
-def _apply_transpose(
-    chars: list,
-    rng: random.Random,
-    eligible: Callable[[int], bool],
-) -> Edit:
-    """Swap two adjacent eligible letters that differ."""
-
-    candidates = []
-
-    for i in range(len(chars) - 1):
-        left, right = chars[i][0], chars[i + 1][0]
-        both_are_letters = left.isalpha() and right.isalpha()
-        both_are_eligible = eligible(i) and eligible(i + 1)
-
-        if both_are_letters and left != right and both_are_eligible:
-            candidates.append(i)
-
-    if not candidates:
-        raise PerturbationError("no eligible transposition position")
-
-    i = rng.choice(candidates)
-    left, right = chars[i][0], chars[i + 1][0]
-    word_index, word_before = _word_at(chars, i)
-
-    chars[i][0], chars[i + 1][0] = right, left
-    _, word_after = _word_at(chars, i)
-
-    return Edit(
-        "transpose",
-        i,
-        before=left + right,
-        after=right + left,
-        word_index=word_index,
-        word_before=word_before,
-        word_after=word_after,
-    )
-
-
-def _apply_whitespace(
-    chars: list,
-    rng: random.Random,
-    eligible: Callable[[int], bool],
-    operation: Operation,
-) -> Edit:
-    """Whitespace split (insert space mid-word) or merge (delete space between words)."""
-
-    if operation in (Operation.INSERT, Operation.SUBSTITUTE, Operation.TRANSPOSE):
-        candidates = []
-
-        for span_start, span_end in _word_spans(chars):
-            for i in range(span_start + 1, span_end):
-                if eligible(i):
-                    candidates.append(i)
-
-        if not candidates:
-            raise PerturbationError("no eligible whitespace-split position")
-        i = rng.choice(candidates)
-        word_index, word_before = _word_at(chars, i)
-        chars.insert(i, [" ", None])
-
-        return Edit(
-            "insert",
-            i,
-            before="",
-            after=" ",
-            word_index=word_index,
-            word_before=word_before,
-            word_after="",
-        )
-
-    # DELETE: merge two words by removing space between them
-    candidates = _space_positions(chars, eligible)
-
-    if not candidates:
-        raise PerturbationError("no eligible whitespace-merge position")
-
-    i = rng.choice(candidates)
-    word_index, word_before = _word_at(chars, max(0, i - 1))
-    del chars[i]
-
-    return Edit(
-        "delete",
-        i,
-        before=" ",
-        after="",
-        word_index=word_index,
-        word_before=word_before,
-        word_after="",
-    )
-
-
-def _apply_real_word(
-    chars: list,
-    rng: random.Random,
-    eligible: Callable[[int], bool],
-    is_word: Callable[[str], bool] | None,
-) -> Edit:
-    """Word-level substitution to a valid-dictionary DL-1 neighbor (Regime B)."""
-
-    if is_word is None:
-        raise PerturbationError("real_word policy requires an is_word callable")
-
-    def _span_qualifies(span_start: int, span_end: int) -> bool:
-        all_positions_eligible = all(eligible(i) for i in range(span_start, span_end))
-        all_positions_letters = all(chars[i][0].isalpha() for i in range(span_start, span_end))
-        long_enough = span_end - span_start >= 3
-
-        return all_positions_eligible and all_positions_letters and long_enough
-
-    eligible_spans = [
-        (span_start, span_end)
-        for span_start, span_end in _word_spans(chars)
-        if _span_qualifies(span_start, span_end)
-    ]
-
-    rng.shuffle(eligible_spans)
-
-    for span_start, span_end in eligible_spans:
-        word = "".join(ch for ch, _ in chars[span_start:span_end])
-        if not is_word(word.lower()):
-            continue
-
-        word_candidates = sorted(
-            candidate
-            for candidate in single_edit_candidates(word)
-            if is_word(candidate.lower()) and candidate.lower() != word.lower()
-        )
-
-        if not word_candidates:
-            continue
-
-        new_word = rng.choice(word_candidates)
-        word_index, _ = _word_at(chars, span_start)
-        del chars[span_start:span_end]
-
-        for offset, character in enumerate(new_word):
-            chars.insert(span_start + offset, [character, None])
-
-        return Edit(
-            "word_substitute",
-            span_start,
-            before=word,
-            after=new_word,
-            word_index=word_index,
-            word_before=word,
-            word_after=new_word,
-        )
-
-
-# -- Public entry point --
+# ---------------------------------------------------------------------------
+# The public entry point.
+# ---------------------------------------------------------------------------
 
 def perturb(
-    text: str,
-    operation: Operation | str,
-    unit: Unit | str,
-    scope: Scope | str,
-    edit_budget: int,
-    selection_policy: SelectionPolicy | str,
-    regime: Regime | str,
-    seed: int,
-    *,
-    protected_spans: Sequence[tuple[int, int]] | None = None,
-    key_terms: Sequence[str] | None = None,
-    scope_spans: dict[str, tuple[int, int]] | None = None,
-    is_word: Callable[[str], bool] | None = None,
-    exclude_numeric: bool = True,
+        text: str,
+        operation: Operation,
+        unit: Unit,
+        scope: Scope,
+        edit_budget: int,
+        selection_policy: SelectionPolicy,
+        semantic_class: SemanticClass,
+        seed: int,
+        protected_spans: Optional[Sequence[tuple[int, int]]] = None,
+        key_terms: Optional[Sequence[str]] = None,
+        scope_spans: Optional[dict] = None,
+        is_word: Optional[Callable[[str], bool]] = None,
+        exclude_numeric_tokens: bool = True,
 ) -> tuple[str, list[Edit]]:
-    """Apply exactly edit_budget primitive edits to text.
+    """Apply exactly ``edit_budget`` primitive edits to ``text`` and return the
+    perturbed string together with the edit script. See the module docstring for
+    the full contract.
 
-    Arguments:
-        text             — the clean prompt string to perturb.
-        operation        — DL primitive: insert, delete, substitute, or transpose.
-        unit             — granularity: char, word, or span (metadata; char is default).
-        scope            — which part of the prompt is eligible: anywhere, content,
-                           instruction, or answer_critical.
-        edit_budget      — exact number of primitive edits to apply (k in the design).
-        selection_policy — how edits are chosen: keyboard_neighbor, uniform,
-                           informative_word, real_word, or whitespace.
-        regime           — target semantic regime: A (nonword), B (real-word), C (meaning-change).
-        seed             — integer RNG seed for full reproducibility.
-
-    Keyword arguments:
-        protected_spans  — character ranges in the ORIGINAL text that must never be edited.
-        key_terms        — required for informative_word policy and answer_critical scope.
-        scope_spans      — required for instruction or content scope: maps scope name to
-                           (start, end) character offsets in the full prompt.
-        is_word          — required for real_word policy: callable(word) -> bool.
-        exclude_numeric  — if True (default), numeric tokens are also protected.
-
-    Returns:
-        (perturbed_text, edit_script) — the modified string and the ordered list of
-        Edit records that exactly reproduce it via apply_edit_script().
+    Parameters mirror the perturbation state vector r = (operation, unit, scope,
+    edit_budget, selection_policy, semantic_class, seed) of design/02 §2.3, plus
+    the structural inputs (protected_spans, key_terms, scope_spans, is_word) that
+    the task loader supplies.
     """
+    operation = Operation(operation)
+    unit = Unit(unit)
+    scope = Scope(scope)
+    selection_policy = SelectionPolicy(selection_policy)
 
-    op = _resolve(Operation, operation, "operation")
-    policy = _resolve(SelectionPolicy, selection_policy, "selection_policy")
-    scope_num = _resolve(Scope, scope, "scope")
-    _resolve(Unit, unit, "unit")
-    _resolve(Regime, regime, "regime")
+    if operation not in PRIMITIVE_OPERATIONS:
+        raise PerturbationError(f"unknown operation {operation!r}")
+    if selection_policy not in SELECTION_POLICIES:
+        raise PerturbationError(f"unknown selection_policy {selection_policy!r}")
+    if scope not in PERTURBATION_SCOPES:
+        raise PerturbationError(f"unknown scope {scope!r}")
 
-    if policy == SelectionPolicy.ASR_TRANSCRIPTION:
+    if selection_policy == SelectionPolicy.ASR_TRANSCRIPTION:
         raise PerturbationError(
-            "asr_transcription items are produced by asr.py, not perturb()"
-        )
+            "asr_transcription items are produced by asr.py, not perturb()")
 
     if edit_budget < 0:
         raise PerturbationError("edit_budget must be >= 0")
     if edit_budget == 0:
         return text, []
 
-    rng = random.Random(seed)
-    allowed_original_ids = _scope_ids(text, scope_enum, scope_spans, key_terms)
+    random_generator = random.Random(seed)
 
-    if policy == SelectionPolicy.INFORMATIVE_WORD:
+    allowed_original_indices = _original_indices_eligible_for_scope(
+        text, scope, scope_spans, key_terms)
+
+    if selection_policy == SelectionPolicy.INFORMATIVE_WORD:
         if not key_terms:
-            raise PerturbationError("informative_word policy requires key_terms")
+            raise PerturbationError("the informative_word policy requires key_terms")
+        # Restrict edits to the key terms themselves, intersected with the scope.
+        allowed_original_indices &= _original_indices_eligible_for_scope(
+            text, Scope.ANSWER_CRITICAL, None, key_terms)
 
-        allowed_original_ids &= _scope_ids(text, Scope.ANSWER_CRITICAL, None, key_terms)
+    locked_original_indices = _original_indices_in_protected_spans(protected_spans)
+    if exclude_numeric_tokens:
+        locked_original_indices |= _original_indices_of_numeric_tokens(text)
 
-    locked_original_ids = _protected_ids(protected_spans)
-    if exclude_numeric:
-        locked_original_ids |= _numeric_ids(text)
-
-    chars: list = [[ch, i] for i, ch in enumerate(text)]
-    edits: list[Edit] = []
+    character_cells: list = [[character, index] for index, character in enumerate(text)]
+    applied_edits: list[Edit] = []
 
     for _ in range(edit_budget):
-        eligible = _is_eligible(chars, allowed_original_ids, locked_original_ids)
+        # Rebind eligibility against the current cell list each iteration,
+        # because indices shift as characters are inserted and deleted.
+        is_eligible = _make_eligibility_test(
+            character_cells, allowed_original_indices, locked_original_indices)
 
-        if policy == SelectionPolicy.REAL_WORD:
-            edit = _apply_real_word(chars, rng, eligible, is_word)
+        if selection_policy == SelectionPolicy.REAL_WORD:
+            edit = _apply_real_word_substitution(character_cells, random_generator, is_eligible, is_word)
+        elif selection_policy == SelectionPolicy.WHITESPACE:
+            edit = _apply_whitespace_edit(character_cells, random_generator, is_eligible, operation)
+        else:
+            edit = _apply_character_edit(
+                character_cells, random_generator, is_eligible, operation, selection_policy)
 
-        elif policy == SelectionPolicy.WHITESPACE:
-            edit = _apply_whitespace(chars, rng, eligible, op)
+        applied_edits.append(edit)
+
+    perturbed_text = "".join(character for character, _ in character_cells)
+
+    if perturbed_text == text:
+        raise PerturbationError("the edits produced no net change (degenerate)")
+
+    return perturbed_text, applied_edits
+
+
+# ---------------------------------------------------------------------------
+# Per-operation appliers. Each mutates ``character_cells`` in place and returns
+# the Edit it applied, or raises PerturbationError if no eligible position
+# exists for the requested operation.
+# ---------------------------------------------------------------------------
+
+def _apply_character_edit(character_cells, random_generator, is_eligible,
+                          operation, selection_policy) -> Edit:
+    """Apply one character-level edit (substitute / delete / insert / transpose)
+    under the keyboard_neighbor, informative_word, or uniform policy."""
+
+    policy_uses_keyboard = selection_policy in (SelectionPolicy.KEYBOARD_NEIGHBOR, SelectionPolicy.INFORMATIVE_WORD)
+
+    if operation == Operation.SUBSTITUTE:
+        candidate_positions = _eligible_letter_positions(character_cells, is_eligible)
+        random_generator.shuffle(candidate_positions)
+
+        for position in candidate_positions:
+            original_character = character_cells[position][0]
+
+            if policy_uses_keyboard:
+                replacement_pool = keyboard_neighbors_of(original_character)
+            else:
+                replacement_pool = (LOWERCASE_ALPHABET.upper()
+                                    if original_character.isupper() else LOWERCASE_ALPHABET)
+
+            replacement_pool = [c for c in replacement_pool if c != original_character]
+            if not replacement_pool:
+                continue
+
+            replacement_character = random_generator.choice(replacement_pool)
+
+            word_index, word_before = _word_containing_index(character_cells, position)
+            character_cells[position][0] = replacement_character
+            _, word_after = _word_containing_index(character_cells, position)
+
+            return Edit(Operation.SUBSTITUTE, position,
+                        before=original_character, after=replacement_character,
+                        word_index=word_index, word_before=word_before, word_after=word_after)
+
+        raise PerturbationError("no eligible substitution position")
+
+    if operation == Operation.DELETE:
+        # Only delete from words of length >= 2, so a deletion never erases a
+        # whole one-letter word.
+        candidate_positions = [
+            position for position in _eligible_letter_positions(character_cells, is_eligible)
+            if len(_word_containing_index(character_cells, position)[1]) >= 2
+        ]
+        if not candidate_positions:
+            raise PerturbationError("no eligible deletion position")
+
+        position = random_generator.choice(candidate_positions)
+        deleted_character = character_cells[position][0]
+        word_index, word_before = _word_containing_index(character_cells, position)
+
+        del character_cells[position]
+
+        if character_cells:
+            _, word_after = _word_containing_index(
+                character_cells, min(position, len(character_cells) - 1))
+        else:
+            word_after = ""
+
+        return Edit(Operation.DELETE, position,
+                    before=deleted_character, after="",
+                    word_index=word_index, word_before=word_before, word_after=word_after)
+
+    if operation == Operation.INSERT:
+        anchor_positions = _eligible_letter_positions(character_cells, is_eligible)
+        random_generator.shuffle(anchor_positions)
+
+        for anchor_position in anchor_positions:
+            anchor_character = character_cells[anchor_position][0]
+
+            if policy_uses_keyboard:
+                # Keyboard neighbors plus the anchor itself (double-typing),
+                # matching MulTypo's "simultaneous keystrokes" insertion.
+                insertion_pool = keyboard_neighbors_of(anchor_character) + anchor_character
+            else:
+                insertion_pool = (LOWERCASE_ALPHABET.upper()
+                                  if anchor_character.isupper() else LOWERCASE_ALPHABET)
+
+            inserted_character = random_generator.choice(list(insertion_pool))
+
+            word_index, word_before = _word_containing_index(character_cells, anchor_position)
+            insertion_position = anchor_position + random_generator.choice([0, 1])
+            character_cells.insert(insertion_position, [inserted_character, None])
+            _, word_after = _word_containing_index(character_cells, insertion_position)
+
+            return Edit(Operation.INSERT, insertion_position,
+                        before="", after=inserted_character,
+                        word_index=word_index, word_before=word_before, word_after=word_after)
+
+        raise PerturbationError("no eligible insertion anchor")
+
+    if operation == Operation.TRANSPOSE:
+        candidate_positions = []
+        for position in range(len(character_cells) - 1):
+            left_character = character_cells[position][0]
+            right_character = character_cells[position + 1][0]
+            both_are_distinct_letters = (
+                left_character.isalpha() and right_character.isalpha()
+                and left_character != right_character
+            )
+            if both_are_distinct_letters and is_eligible(position) and is_eligible(position + 1):
+                candidate_positions.append(position)
+
+        if not candidate_positions:
+            raise PerturbationError("no eligible transposition position")
+
+        position = random_generator.choice(candidate_positions)
+        left_character = character_cells[position][0]
+        right_character = character_cells[position + 1][0]
+        word_index, word_before = _word_containing_index(character_cells, position)
+
+        character_cells[position][0], character_cells[position + 1][0] = right_character, left_character
+        _, word_after = _word_containing_index(character_cells, position)
+
+        return Edit(Operation.TRANSPOSE, position,
+                    before=left_character + right_character,
+                    after=right_character + left_character,
+                    word_index=word_index, word_before=word_before, word_after=word_after)
+
+    raise PerturbationError(f"unhandled operation {operation!r}")
+
+
+def _apply_whitespace_edit(character_cells, random_generator, is_eligible, operation) -> Edit:
+    """Apply a whitespace split or merge — a common human and OCR/ASR error.
+
+    An "insert"-flavored operation splits a word by inserting a space inside it;
+    a "delete"-flavored operation merges two words by deleting the space between
+    them.
+    """
+    treat_as_split = operation in (Operation.INSERT, Operation.SUBSTITUTE, Operation.TRANSPOSE)
+
+    if treat_as_split:
+        candidate_positions = []
+        for start, end in _word_spans(character_cells):
+            for position in range(start + 1, end):     # strictly inside the word
+                if is_eligible(position):
+                    candidate_positions.append(position)
+        if not candidate_positions:
+            raise PerturbationError("no eligible whitespace-split position")
+
+        position = random_generator.choice(candidate_positions)
+        word_index, word_before = _word_containing_index(character_cells, position)
+        character_cells.insert(position, [" ", None])
+
+        return Edit(Operation.INSERT, position, before="", after=" ",
+                    word_index=word_index, word_before=word_before, word_after="")
+
+    # Merge: delete a space.
+    candidate_positions = _eligible_space_positions(character_cells, is_eligible)
+    if not candidate_positions:
+        raise PerturbationError("no eligible whitespace-merge position")
+
+    position = random_generator.choice(candidate_positions)
+    word_index, word_before = _word_containing_index(character_cells, max(0, position - 1))
+    del character_cells[position]
+
+    return Edit(Operation.DELETE, position, before=" ", after="",
+                word_index=word_index, word_before=word_before, word_after="")
+
+
+def _damerau_levenshtein_one_neighbors(word: str) -> set[str]:
+    """Return every Damerau-Levenshtein-distance-1 letter variant of ``word``
+    (substitution, deletion, insertion, adjacent transposition). Used by the
+    real-word policy to find valid-word neighbors."""
+    variants: set[str] = set()
+
+    for i in range(len(word)):
+        for replacement in LOWERCASE_ALPHABET:                       # substitution
+            if replacement != word[i].lower():
+                cased = replacement.upper() if word[i].isupper() else replacement
+                variants.add(word[:i] + cased + word[i + 1:])
+        variants.add(word[:i] + word[i + 1:])                        # deletion
+
+    for i in range(len(word) + 1):
+        for inserted in LOWERCASE_ALPHABET:                          # insertion
+            variants.add(word[:i] + inserted + word[i:])
+
+    for i in range(len(word) - 1):                                   # transposition
+        if word[i] != word[i + 1]:
+            variants.add(word[:i] + word[i + 1] + word[i] + word[i + 2:])
+
+    variants.discard(word)
+    return variants
+
+
+def _apply_real_word_substitution(character_cells, random_generator, is_eligible, is_word) -> Edit:
+    """Replace a whole word with a valid-word neighbor at Damerau-Levenshtein
+    distance 1 (the WikiTypos-style real-word shift used by Regime B)."""
+    if is_word is None:
+        raise PerturbationError("the real_word policy requires an is_word callable")
+
+    eligible_word_spans = [
+        (start, end) for start, end in _word_spans(character_cells)
+        if all(is_eligible(index) for index in range(start, end))
+        and all(character_cells[index][0].isalpha() for index in range(start, end))
+        and (end - start) >= 3
+    ]
+    random_generator.shuffle(eligible_word_spans)
+
+    for start, end in eligible_word_spans:
+        word = "".join(character for character, _ in character_cells[start:end])
+        if not is_word(word.lower()):
+            continue
+
+        valid_word_neighbors = sorted(
+            candidate for candidate in _damerau_levenshtein_one_neighbors(word)
+            if is_word(candidate.lower()) and candidate.lower() != word.lower()
+        )
+        if not valid_word_neighbors:
+            continue
+
+        replacement_word = random_generator.choice(valid_word_neighbors)
+        word_index, _ = _word_containing_index(character_cells, start)
+
+        del character_cells[start:end]
+        for offset, character in enumerate(replacement_word):
+            character_cells.insert(start + offset, [character, None])
+
+        return Edit(Operation.WORD_SUBSTITUTE, start,
+                    before=word, after=replacement_word,
+                    word_index=word_index, word_before=word, word_after=replacement_word)
+
+    raise PerturbationError("no real-word substitution available")
+
+
+# ---------------------------------------------------------------------------
+# Reconstruction (contract clause 5).
+# ---------------------------------------------------------------------------
+
+def apply_edit_script(original_text: str, edits: Sequence) -> str:
+    """Replay an edit script over ``original_text`` and return the result, which
+    must equal the perturbed text the engine produced. Accepts both ``Edit``
+    objects and their dict form (so a script round-tripped through JSON
+    replays identically)."""
+    current_text = original_text
+
+    for edit in edits:
+        fields = edit.to_dict() if isinstance(edit, Edit) else dict(edit)
+        operation = fields["operation"]
+        index = fields["index"]
+
+        if operation == "substitute":
+            assert current_text[index] == fields["before"], f"reconstruction mismatch at {index}"
+            current_text = current_text[:index] + fields["after"] + current_text[index + 1:]
+
+        elif operation == "insert":
+            current_text = current_text[:index] + fields["after"] + current_text[index:]
+
+        elif operation == "delete":
+            assert current_text[index] == fields["before"], f"reconstruction mismatch at {index}"
+            current_text = current_text[:index] + current_text[index + 1:]
+
+        elif operation == "transpose":
+            assert current_text[index:index + 2] == fields["before"], f"reconstruction mismatch at {index}"
+            current_text = current_text[:index] + fields["after"] + current_text[index + 2:]
+
+        elif operation == "word_substitute":
+            length_before = len(fields["before"])
+            assert current_text[index:index + length_before] == fields["before"], \
+                f"reconstruction mismatch at {index}"
+            current_text = current_text[:index] + fields["after"] + current_text[index + length_before:]
 
         else:
-            substitute_pool_fn, insert_pool_fn = _CHAR_POOL_REGISTRY[policy.value]
+            raise PerturbationError(f"unknown operation in edit script: {operation!r}")
 
-            if op == Operation.SUBSTITUTE:
-                edit = _apply_substitute(chars, rng, eligible, substitute_pool_fn)
-            elif op == Operation.DELETE:
-                edit = _apply_delete(chars, rng, eligible)
-            elif op == Operation.INSERT:
-                edit = _apply_insert(chars, rng, eligible, insert_pool_fn)
-            elif op == Operation.TRANSPOSE:
-                edit = _apply_transpose(chars, rng, eligible)
-            else:
-                raise PerturbationError(f"unhandled operation {operation!r}")
-
-        edits.append(edit)
-
-    out = "".join(ch for ch, _ in chars)
-
-    if out == text:
-        raise PerturbationError("edits produced no net change (degenerate)")
-
-    return out, edits
-
+    return current_text
