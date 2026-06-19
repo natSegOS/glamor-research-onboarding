@@ -1,33 +1,41 @@
-# Free-T4 fallback
-# Keeps Module 1 at full N on the
-# models a T4 can run; drops conditions, never items
+# Reduced configuration for a single 16 GB T4 (e.g. free Colab), for debugging
+# the full pipeline on real models before scaling to the cluster (design/07
+# §7.9). NOT a confirmatory run — item counts are too small to power a claim.
+#
+# Use only the smallest models (Llama-3.2-1B/3B, or a single 7-8B AWQ model that
+# fits in 16 GB) when running against this config.
 
-run_name: fallback_t4
+run_id: fallback_t4
 seed: 1729
 
-models:
-  - {key: llama-1b, model_id: meta-llama/Llama-3.2-1B-Instruct, revision: PIN_ME, precision: fp16}
-  - {key: llama-3b, model_id: meta-llama/Llama-3.2-3B-Instruct, revision: PIN_ME, precision: fp16}
-  - {key: llama-8b-awq, model_id: hugging-quants/Meta-LLama-3.1-8B-Instruct-AWQ-INT4, revision: PIN_ME, precision: awq}
+reasoning_item_count: 60
+multiple_choice_item_count: 40
 
-tasks:
-  - family: gsm_symbolic
-    n_items: 600
+include_reasoning: true
+include_multiple_choice: true
 
-regimes: [A, C]
-operations: [substitute, delete]
-edit_budgets: [1, 2]
-selection_policies: [keyboard_neighbor]
+multiple_choice_items_path: null
+asr_items_path: null
 
-asr:
-  enabled: true
-  voice: en-US-AriaNeural
-  whisper_model: large-v3
-  snr_levels: [null]
+is_confirmatory: false
 
-decoding:
-  greedy: true
-  max_new_tokens: 512
+max_new_tokens_reasoning: 384
+max_new_tokens_multiple_choice: 200
 
-outputs:
-  results_dir: results/fallback_t4
+conditions:
+  - name: regime_a_substitute_keyboard
+    semantic_class: A
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_b_real_word
+    semantic_class: B
+    operation: substitute
+    selection_policy: real_word
+    scope: anywhere
+    edit_budgets: [1]
+    source: synthetic
+
