@@ -141,4 +141,3 @@ def build_inference_engine(specification: ModelSpecification, backend: str = "vl
     if backend == "huggingface":
         return HuggingFaceEngine(specification, **keyword_arguments)
     raise ValueError(f"unknown backend {backend!r}")
-

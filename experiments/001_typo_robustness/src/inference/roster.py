@@ -93,4 +93,3 @@ def assert_revisions_pinned(specifications) -> None:
             "these models still have unpinned revisions (PIN_ME): "
             f"{unpinned}. Pin them with resolve_current_revision() before a "
             "confirmatory run (docs/PROVENANCE.md §4).")
-

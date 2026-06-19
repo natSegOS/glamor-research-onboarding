@@ -362,4 +362,3 @@ def build_asr_items(
                 asr_items.append(asr_item)
 
     return asr_items
-

@@ -236,4 +236,3 @@ def load_generation_rows(paths: Sequence[Path]) -> list[dict]:
             if line.strip():
                 rows.append(json.loads(line))
     return rows
-

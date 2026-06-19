@@ -362,4 +362,3 @@ def summarize_cell(clean_correctness: Sequence[int], perturbed_correctness: Sequ
         "mcnemar_p_value": mcnemar.p_value,
         "mcnemar_method": mcnemar.method,
     }
-

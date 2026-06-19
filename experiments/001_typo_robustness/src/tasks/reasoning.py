@@ -384,4 +384,3 @@ def load_reasoning_jsonl(
         items = items[:item_count]
 
     return items
-

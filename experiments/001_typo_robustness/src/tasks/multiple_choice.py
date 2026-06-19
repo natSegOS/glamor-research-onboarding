@@ -231,4 +231,3 @@ def make_demonstration_multiple_choice_items() -> list[MultipleChoiceItem]:
         for index, (question, options, gold_letter, gold_if_negated, key_terms)
         in enumerate(raw_items)
     ]
-
