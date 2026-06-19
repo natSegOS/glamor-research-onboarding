@@ -1,39 +1,87 @@
-# Stage-1 pilot (design/11): one model, Reigme A keyboard arm at k=1
-# across all four operations + a Regime C control slice. Purpose: validate
-# the pipeline, measure discordant-pair rate p_d (fixer per-cell N), measure
-# throughput, validate clean accuracy A0.
+# Pilot configuration (design/11 §11.2, Stage-1 and Stage-2 pilot).
+#
+# Purpose: validate the pipeline end-to-end, estimate per-cell discordant-pair
+# rates (which fix the main-study sample size via Connor 1987), and surface
+# failure modes — NOT to draw confirmatory conclusions.
+#
+# This pilot deliberately includes BOTH task archetypes (reasoning AND
+# multiple-choice), because the earlier review found an earlier pilot omitted
+# MCQ (review item S4). A pilot that does not exercise every task path cannot
+# de-risk the main run.
 
-run_name: pilot
+run_id: pilot
 seed: 1729
 
-models:
-  - key: llama-1b
-    model_id: meta-llama/Llama-3.2-1B-Instruct
-    revision: PIN_ME # pin the HF commit hash at pre-registration
-    precision: fp16
+# Small item counts: enough to debug and estimate effect sizes, not to power a
+# claim. The main study scales these up per the Connor sample-size result.
+reasoning_item_count: 150
+multiple_choice_item_count: 150
 
-tasks:
-  - family: gsm_symbolic
-    n_items: 200
+include_reasoning: true
+include_multiple_choice: true
 
-regimes: [A, C]
-operations: [substitute, delete, insert, transpose]
-edit_budgets: [1]
-selection_policies: [keyboard_neighbor]
+# Offline by default (synthetic reasoning + committed MCQ subsample). For the
+# real pilot, point multiple_choice_items_path at an exported MMLU-Pro subsample
+# and swap load_task_items to the official GSM-Symbolic loader.
+multiple_choice_items_path: null
+asr_items_path: null
 
-asr:
-  enabled: true
-  voice: en-US-AriaNeural
-  whisper_model: large-v3
-  snr_levels: [null, 10]
+is_confirmatory: false
 
-decoding:
-  greedy: true
-  max_new_tokens: 512
+max_new_tokens_reasoning: 512
+max_new_tokens_multiple_choice: 256
 
-outputs:
-  results_dir: results/pilot
+# Perturbation conditions. The pilot spans the primary regimes (A and B) and the
+# operations/scopes/severities the main study will use, at low replication.
+conditions:
+  - name: regime_a_substitute_keyboard
+    semantic_class: A
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4]
+    source: synthetic
 
-gates:
-  min_clean_accuracy: 0.35
-  record: [discordant_rate, tokens_per_second, asr_word_accuracy]
+  - name: regime_a_delete_keyboard
+    semantic_class: A
+    operation: delete
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_a_substitute_content
+    semantic_class: A
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: content
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_a_informative_word
+    semantic_class: A
+    operation: substitute
+    selection_policy: informative_word
+    scope: answer_critical
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_b_real_word
+    semantic_class: B
+    operation: substitute
+    selection_policy: real_word
+    scope: anywhere
+    edit_budgets: [1]
+    source: synthetic
+
+  # ASR arm (requires a pre-built AsrItems JSONL at asr_items_path; left here as
+  # the documented condition so the pilot config is the template for the main
+  # run). The ASR edit budget is measured, so edit_budgets is ignored for ASR.
+  - name: regime_b_asr_clean
+    semantic_class: B
+    operation: asr
+    selection_policy: asr_clean
+    scope: content
+    edit_budgets: [0]
+    source: asr
+
