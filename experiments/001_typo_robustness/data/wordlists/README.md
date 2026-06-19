@@ -44,4 +44,3 @@ python tools/build_dictionary.py --source hunspell
 
 This writes `data/wordlists/en_us_pinned.txt` and
 `data/wordlists/PROVENANCE.json`.
-
