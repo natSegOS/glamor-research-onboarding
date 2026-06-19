@@ -1,49 +1,85 @@
-"""keyboard.py — QWERTY adjacency map (keyboard-neighbor selection policy)."""
+"""The QWERTY keyboard adjacency graph used by the keyboard-neighbor typo policy.
+
+Provenance
+----------
+The keyboard-neighbor substitution policy follows MulTypo (Liu et al., 2025,
+arXiv:2510.09536), whose "replacement" operation replaces a single character
+with a neighboring key on the language-specific keyboard layout. We implement
+the English QWERTY layout. See docs/PROVENANCE.md §2.2.
+
+This module has no internal dependencies; it is the bottom of the import graph.
+"""
 
 from __future__ import annotations
 
 
-_QWERTY_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+# The three physical letter rows of a US-English QWERTY keyboard. We model only
+# letters; digits and punctuation are handled by their own policies (numeric
+# tokens are protected by default, and whitespace/punctuation have dedicated
+# policies in the perturbation engine).
+QWERTY_PHYSICAL_ROWS: tuple[str, ...] = (
+    "qwertyuiop",
+    "asdfghjkl",
+    "zxcvbnm",
+)
 
 
-def _build_qwerty_neighbors() -> dict[str, str]:
-    position: dict[str, tuple[int, int]] = {}
+def _build_adjacency_graph() -> dict[str, str]:
+    """Return a mapping from each lowercase letter to the sorted string of its
+    physically adjacent keys (the eight-neighbor Moore neighborhood on the
+    staggered row grid, clipped to keys that actually exist).
 
-    for row_index, row in enumerate(_QWERTY_ROWS):
-        for col_index, character in enumerate(row):
-            position[character] = (row_index, col_index)
+    The result is computed once at import time and exposed as
+    ``QWERTY_NEIGHBORS``. We sort the neighbor strings so the structure is
+    deterministic and easy to assert against in tests.
+    """
+    position_of_key: dict[str, tuple[int, int]] = {}
+    for row_index, row in enumerate(QWERTY_PHYSICAL_ROWS):
+        for column_index, key in enumerate(row):
+            position_of_key[key] = (row_index, column_index)
 
-    neighbors: dict[str, set[str]] = {ch: set() for ch in position}
+    neighbors_of_key: dict[str, set[str]] = {key: set() for key in position_of_key}
 
-    for character, (row_index, col_index) in position.items():
-        for delta_row in (-1, 0, 1):
-            for delta_col in (-1, 0, 1):
-                if delta_row == 0 and delta_col == 0:
+    for key, (row_index, column_index) in position_of_key.items():
+        for row_offset in (-1, 0, 1):
+            for column_offset in (-1, 0, 1):
+
+                is_the_key_itself = (row_offset == 0 and column_offset == 0)
+                if is_the_key_itself:
                     continue
 
-                neighbor_row = row_index + delta_row
-                neighbor_col = col_index + delta_col
+                neighbor_row = row_index + row_offset
+                neighbor_column = column_index + column_offset
 
-                if (
-                    0 <= neighbor_row < len(_QWERTY_ROWS)
-                    and 0 <= neighbor_col < len(_QWERTY_ROWS[neighbor_row])
-                ):
-                    neighbors[character].add(_QWERTY_ROWS[neighbor_row][neighbor_col])
+                row_exists = 0 <= neighbor_row < len(QWERTY_PHYSICAL_ROWS)
+                if not row_exists:
+                    continue
 
-    return {ch: "".join(sorted(adjacent)) for ch, adjacent in neighbors.items()}
+                column_exists = 0 <= neighbor_column < len(QWERTY_PHYSICAL_ROWS[neighbor_row])
+                if not column_exists:
+                    continue
+
+                neighbors_of_key[key].add(QWERTY_PHYSICAL_ROWS[neighbor_row][neighbor_column])
+
+    return {key: "".join(sorted(neighbor_set))
+            for key, neighbor_set in neighbors_of_key.items()}
 
 
-QWERTY_NEIGHBORS: dict[str, str] = _build_qwerty_neighbors()
+# Public mapping: lowercase letter -> sorted string of adjacent lowercase keys.
+QWERTY_NEIGHBORS: dict[str, str] = _build_adjacency_graph()
 
-ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
+def keyboard_neighbors_of(character: str) -> str:
+    """Return the QWERTY-adjacent keys of ``character``, preserving its case.
 
-def keyboard_neighbors(character: str) -> str:
-    """QWERTY neighbors of character, case-preserved. Empty string if non-letter."""
+    Returns the empty string for any non-letter (digits, punctuation, space),
+    which the caller treats as "no keyboard-neighbor substitution available
+    here" and skips.
+    """
+    lowercase_character = character.lower()
 
-    lower = character.lower()
-    if lower not in QWERTY_NEIGHBORS:
+    if lowercase_character not in QWERTY_NEIGHBORS:
         return ""
 
-    neighbor_string = QWERTY_NEIGHBORS[lower]
-    return neighbor_string.upper() if character.isupper() else neighbor_string
+    neighbors = QWERTY_NEIGHBORS[lowercase_character]
+    return neighbors.upper() if character.isupper() else neighbors
