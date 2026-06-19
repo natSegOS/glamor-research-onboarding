@@ -1,15 +1,41 @@
-# Core (analysis + tests run with these alone; tests need nothing beyond stdlib + numpy + scipy)
-numpy>=1.26
-scipy>=1.11
+# Core dependencies — analysis, statistics, perturbation, and the full test
+# suite run with these alone. No GPU, no audio, no model weights required.
+#
+# Versions verified against PyPI in June 2026. Pin exact versions at
+# pre-registration (replace >= with ==) so the registered analysis is frozen.
+# Rationale for the CPU/GPU split: see docs/PROVENANCE.md §8.
+
+# Numerical and statistical core.
+numpy>=1.26,<3.0          # array math; 2.x is fine, capped below a hypothetical 3.0
+scipy>=1.11               # bootstrap, McNemar binomial/chi-square, norm.ppf
+
+# Config files.
 pyyaml>=6.0
-matplotlib>=3.8 # figures (optional; analyze.py degrades gracefully)
 
-# GPU side (Colab / USC cluster only) - pin exact versions at pre-registration
-vllm>=0.6
-transformers>=4.44
-accelerate>=0.33
+# Dataset loading (HuggingFace `datasets`). Pulls the official GSM-Symbolic and
+# MMLU-Pro data. CPU-only; does not require torch for plain dataset loading.
+datasets>=3.0
 
-# ASR arm (pre-processing step only)
-openai-whisper
-edge-tts
-soundfile
+# HuggingFace Hub client — used to resolve and assert pinned model revisions
+# (commit SHAs) even on the analysis machine.
+huggingface-hub>=0.34
+
+# Figures. analysis/results.py degrades gracefully (returns None) if matplotlib
+# is absent, so this is effectively optional, but the figures are part of the
+# deliverable so it is listed here.
+matplotlib>=3.8
+
+# Mixed-effects logistic regression (the full-design model, design/06 §6.6).
+# statsmodels provides binomial GLM and, via formula, mixed effects; for the
+# maximal crossed random-effects structure we document a fallback to a
+# Bayesian/penalized fit in design/06 §6.6 if statsmodels fails to converge.
+statsmodels>=0.14
+pandas>=2.0               # statsmodels and the cell-table I/O depend on it
+
+# Real-study English lexicon for the is_word predicate (Regime A / B boundary).
+# tools/build_dictionary.py fetches the vocabulary, pins the installed version,
+# and writes data/wordlists/en_us_pinned.txt (the format regimes.load_wordlist
+# already reads). Not needed for offline/smoke runs; only required when running
+# tools/build_dictionary.py with --source wordfreq (the default).
+wordfreq>=3.0
+
