@@ -1,43 +1,29 @@
-"""perturbation — The typographical perturbation engine for Experiment 001.
+"""The perturbation sub-package: QWERTY keyboard adjacency and the four primitive
+edits over Damerau-Levenshtein space, applied deterministically with a fully
+reconstructible edit script.
 
-Import from here rather than from sub-modules:
+Re-exports the full public surface of both modules so callers can import from
+the sub-package rather than drilling into the individual files:
 
-    from perturbation import perturb, Edit, apply_edit_script, PerturbationError
-    from perturbation import Operation, SelectionPolicy, Scope, Unit, Regime
-    from perturbation import damerau_levenshtein, single_edit_candidates
-    from perturbation import keyboard_neighbors, QWERTY_NEIGHBORS, ALPHABET
+    from perturbation import perturb, Edit, PerturbationError
+    from perturbation import keyboard_neighbors_of, QWERTY_NEIGHBORS
 """
 
-from .engine import (
-    Edit,
-    Operation,
-    PerturbationError,
-    Regime,
-    Scope,
-    SelectionPolicy,
-    Unit,
-    apply_edit_script,
-    damerau_levenshtein,
-    edited_words,
-    perturb,
-    single_edit_candidates,
+from perturbation.keyboard import (
+    QWERTY_PHYSICAL_ROWS,
+    QWERTY_NEIGHBORS,
+    keyboard_neighbors_of,
 )
-from .keyboard import ALPHABET, QWERTY_NEIGHBORS, keyboard_neighbors
 
-__all__ = [
-    "Edit",
-    "PerturbationError",
-    "apply_edit_script",
-    "edited_words",
-    "Operation",
-    "SelectionPolicy",
-    "Scope",
-    "Unit",
-    "Regime",
-    "perturb",
-    "ALPHABET",
-    "QWERTY_NEIGHBORS",
-    "keyboard_neighbors",
-    "damerau_levenshtein",
-    "single_edit_candidates",
-]
+from perturbation.engine import (
+    LOWERCASE_ALPHABET,
+    PRIMITIVE_OPERATIONS,
+    SELECTION_POLICIES,
+    PERTURBATION_SCOPES,
+    PerturbationError,
+    Edit,
+    damerau_levenshtein_distance,
+    perturb,
+    apply_edit_script,
+)
+
