@@ -42,10 +42,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from enums import Operation, SelectionPolicy, Scope, SemanticClass, Unit
+from lexicons import compile_phrase_regex, load_phrase_lexicon
 from perturbation import (
     Edit,
     PerturbationError,
-    apply_edit_script,
     damerau_levenshtein_distance,
     perturb,
 )
@@ -292,7 +292,10 @@ def make_regime_c_reasoning_operand_swap(
     return perturbed_text, [edit], metadata
 
 
-_NEGATABLE_VERB = re.compile(r"\b(is|are|was|were|does|do|can|will)\b(?! not)")
+_NEGATABLE_VERB = re.compile(
+    r"\b(?:" + "|".join(re.escape(v) for v in load_phrase_lexicon("negatable_verbs.txt"))
+    + r")\b(?! not)"
+)
 
 
 def make_regime_c_mcq_negation(
@@ -325,4 +328,3 @@ def make_regime_c_mcq_negation(
         "damerau_levenshtein_distance": damerau_levenshtein_distance(question, perturbed_question),
     }
     return perturbed_question, [edit], metadata
-

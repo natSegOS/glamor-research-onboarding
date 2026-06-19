@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
-from enums import SelectionPolicy, INTERACTIONAL_FAILURE_STATUSES
+from enums import SelectionPolicy
 from analysis import statistics
 
 
@@ -258,4 +258,3 @@ def figure_keyboard_versus_asr_profile(
     figure.savefig(output_path, dpi=150)
     pyplot.close(figure)
     return output_path
-

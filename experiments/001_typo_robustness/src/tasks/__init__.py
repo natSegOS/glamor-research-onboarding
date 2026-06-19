@@ -27,4 +27,3 @@ from tasks.multiple_choice import (
     load_multiple_choice_jsonl,
     make_demonstration_multiple_choice_items,
 )
-

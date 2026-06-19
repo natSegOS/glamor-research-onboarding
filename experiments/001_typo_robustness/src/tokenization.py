@@ -143,4 +143,3 @@ def build_fragmentation_matched_pair(
         low_fragmentation_subword_change=subword_change_by_variant[chosen_low],
         high_fragmentation_subword_change=subword_change_by_variant[chosen_high],
     )
-

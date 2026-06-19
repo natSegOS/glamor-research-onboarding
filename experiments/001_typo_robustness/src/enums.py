@@ -135,18 +135,6 @@ class FragmentationStratum(_StrEnum):
 
 
 # ---------------------------------------------------------------------------
-# Audit vocabulary
-# ---------------------------------------------------------------------------
-
-class AuditStatus(_StrEnum):
-    """Whether an item is included in, excluded from, or reassigned within the
-    primary endpoint after the human audit (design/09)."""
-    INCLUDED = "included"
-    EXCLUDED = "excluded"
-    REASSIGNED = "reassigned"
-
-
-# ---------------------------------------------------------------------------
 # Pipeline / inference vocabulary
 # ---------------------------------------------------------------------------
 
@@ -173,4 +161,3 @@ class Precision(_StrEnum):
 class Decoding(_StrEnum):
     """Decoding strategy used for generation."""
     GREEDY = "greedy"
-

@@ -12,11 +12,18 @@ refuses) is not silently lumped in with a wrong answer:
 Clarifications and refusals score as INCORRECT for accuracy (the conservative
 choice) and are also counted separately for the invalid/clarification rate
 (design/04 §4.5) — the dual-accounting rule.
+
+Interactional-failure detection uses a deliberately conservative lexical proxy
+(not an ML classifier). The phrase lists live in data/lexicons/ so they are
+auditable and versionable independently of source code. Conservatism is by
+design: ICR is a diagnostic metric, not a primary endpoint. The proxy
+under-counts rather than over-counts, which is the safer direction when the
+primary endpoint is accuracy. See AdversarialOverSensitivity_Niu for the
+over-sensitivity framing and ResilienceOfLLMsForNoisyInstructions_Wang for
+the empirical characterization of interactional failures under noisy input.
 """
 
 from __future__ import annotations
-
-import re
 
 from dataclasses import dataclass
 from typing import Optional
@@ -27,6 +34,9 @@ from enums import (
     REASONING_FAMILIES,
     MCQ_FAMILIES,
 )
+from lexicons import compile_phrase_regex, load_phrase_lexicon
+
+import re
 
 
 _ANY_NUMBER = re.compile(r"-?\$?\d[\d,]*\.?\d*")
@@ -37,13 +47,10 @@ _MCQ_EXPLICIT_MARKER = re.compile(
 _MCQ_LINE_LEADING_LETTER = re.compile(
     r"^\(?([A-J])\)?[\).:\s]", re.MULTILINE)
 
-_CLARIFICATION_PHRASES = re.compile(
-    r"\b(did you mean|do you mean|could you clarify|can you clarify|"
-    r"please clarify|not sure what you mean|what do you mean)\b",
-    re.IGNORECASE)
-_REFUSAL_PHRASES = re.compile(
-    r"\b(i cannot|i can't|i won't|i am unable|i'm unable|i refuse|as an ai)\b",
-    re.IGNORECASE)
+_CLARIFICATION_PHRASES = compile_phrase_regex(
+    load_phrase_lexicon("clarification_phrases.txt"))
+_REFUSAL_PHRASES = compile_phrase_regex(
+    load_phrase_lexicon("refusal_phrases.txt"))
 
 
 @dataclass
@@ -170,4 +177,3 @@ def score(generation: str, gold_answer, task_family: str) -> ScoreResult:
     if task_family in MCQ_FAMILIES:
         return score_multiple_choice(generation, gold_answer)
     raise ValueError(f"unknown task_family {task_family!r}")
-

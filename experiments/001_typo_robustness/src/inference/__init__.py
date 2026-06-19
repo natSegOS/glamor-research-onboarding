@@ -20,4 +20,3 @@ from inference.engines import (
     HuggingFaceEngine,
     build_inference_engine,
 )
-
