@@ -1,0 +1,121 @@
+# Main study configuration (design/11 §11.3).
+#
+# Sample sizes are set so each confirmatory cell can detect ~5 points of paired
+# degradation: Connor (1987) gives ~595 paired items at a discordant-pair rate of
+# 0.19, so the provisional target is 600 items per cell (design/06 §6.3). The
+# pilot's measured discordant rates replace 0.19 before this is finalized.
+#
+# This config is confirmatory: the run script must assert every model revision is
+# pinned (inference.assert_revisions_pinned) before generating, and the dataset
+# revisions must be pinned in the loaders.
+
+run_id: main
+seed: 1729
+
+# Per-archetype item counts. The orchestrator generates this many CLEAN items;
+# each condition x edit-budget multiplies into perturbed items, and cells are
+# aggregated to >= 600 paired observations per headline claim.
+reasoning_item_count: 600
+multiple_choice_item_count: 600
+
+include_reasoning: true
+include_multiple_choice: true
+
+# Task sources for the confirmatory run.
+# Run tools/build_task_items.py once (with network access) to populate these
+# paths; it pins the HuggingFace dataset revision at fetch time and writes
+# data/items/PROVENANCE.json with the resolved SHA.
+reasoning_source: jsonl
+reasoning_items_path: data/items/gsm_symbolic.jsonl
+multiple_choice_items_path: data/items/mmlu_pro.jsonl
+asr_items_path: data/perturbations/asr_items.jsonl
+
+is_confirmatory: true
+
+max_new_tokens_reasoning: 512
+max_new_tokens_multiple_choice: 256
+
+# The five keyboard perturbation families (design/11 §11.4) plus the ASR arm.
+# These mirror the literature's recurring operation set: keyboard-neighbor
+# substitution, deletion, insertion/double, transposition, and whitespace.
+conditions:
+  - name: regime_a_substitute_keyboard
+    semantic_class: A
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4, 8]
+    source: synthetic
+
+  - name: regime_a_delete_keyboard
+    semantic_class: A
+    operation: delete
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_insert_keyboard
+    semantic_class: A
+    operation: insert
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_transpose
+    semantic_class: A
+    operation: transpose
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_whitespace
+    semantic_class: A
+    operation: insert
+    selection_policy: whitespace
+    scope: content
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_a_substitute_content
+    semantic_class: A
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: content
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_informative_word
+    semantic_class: A
+    operation: substitute
+    selection_policy: informative_word
+    scope: answer_critical
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_b_real_word
+    semantic_class: B
+    operation: substitute
+    selection_policy: real_word
+    scope: anywhere
+    edit_budgets: [1]
+    source: synthetic
+
+  - name: regime_b_asr_clean
+    semantic_class: B
+    operation: asr
+    selection_policy: asr_clean
+    scope: content
+    edit_budgets: [0]
+    source: asr
+
+  - name: regime_b_asr_noisy
+    semantic_class: B
+    operation: asr
+    selection_policy: asr_noisy
+    scope: content
+    edit_budgets: [0]
+    source: asr
+

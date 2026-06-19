@@ -1,0 +1,27 @@
+# Clarification-request phrases used to classify interactional failures.
+#
+# A generation matching any of these (as whole words, case-insensitive) is
+# classified as ParseStatus.CLARIFICATION rather than ParseStatus.VALID or
+# ParseStatus.UNPARSEABLE.
+#
+# Pre-registration rationale (design/04 §4.5):
+#   This is a deliberately *conservative* lexical proxy — it under-counts
+#   rather than over-counts clarification requests, so ICR figures are a
+#   lower bound. The list covers the most common explicit reformulation
+#   markers in LLM output. It intentionally excludes hedging phrases
+#   ("I think", "I believe") that do not request clarification.
+#
+#   Conservatism is a design choice: ICR is a *diagnostic* metric, not a
+#   primary endpoint. Inflating it with false positives would misrepresent
+#   the model's output behavior.
+#
+# Version: 2026-06-19 (pre-registration freeze)
+# Implements: design/04 §4.5
+# See also: data/lexicons/PROVENANCE.json
+did you mean
+do you mean
+could you clarify
+can you clarify
+please clarify
+not sure what you mean
+what do you mean
