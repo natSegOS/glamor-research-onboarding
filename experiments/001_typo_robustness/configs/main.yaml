@@ -1,46 +1,121 @@
-# Main study (design/03): all four modules, full roster, both arms
-# Per-cell N is PROVISIONAL 600 (5pp MDE at p_d <= 0.19) until the pilot
-# confirms p_d (design/06). USC cluster footprint ~250k generations.
+# Main study configuration (design/11 §11.3).
+#
+# Sample sizes are set so each confirmatory cell can detect ~5 points of paired
+# degradation: Connor (1987) gives ~595 paired items at a discordant-pair rate of
+# 0.19, so the provisional target is 600 items per cell (design/06 §6.3). The
+# pilot's measured discordant rates replace 0.19 before this is finalized.
+#
+# This config is confirmatory: the run script must assert every model revision is
+# pinned (inference.assert_revisions_pinned) before generating, and the dataset
+# revisions must be pinned in the loaders.
 
-run_name: main
+run_id: main
 seed: 1729
 
-models:
-  - {key: llama-1b, model_id: meta-llama/Llama-3.2-1B-Instruct, revision: PIN_ME, precision: fp16}
-  - {key: llama-3b, model_id: meta-llama/Llama-3.2-3B-Instruct, revision: PIN_ME, precision: fp16}
-  - {key: llama-8b, model_id: meta-llama/Llama-3.2-8B-Instruct, revision: PIN_ME, precision: fb16}
-  - {key: llama-8b-awq, model_id: hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4, revision: PIN_ME, precision: awq}
-  - {key: qwen-7b, model_id: Qwen/Qwen2.5-7B-Instruct, revision: PIN_ME, precision: fp16}
-  - {key: qwen-7b-awq, model_id: Qwen/Qwen2.5-7B-Instruct-AWQ, revision: PIN_ME, precision: awq}
-  - {key: mistral-7b, model_id: mistralai/Mistral-7B-Instruct-v0.3, revision: PIN_ME, precision: fp16}
+# Per-archetype item counts. The orchestrator generates this many CLEAN items;
+# each condition x edit-budget multiplies into perturbed items, and cells are
+# aggregated to >= 600 paired observations per headline claim.
+reasoning_item_count: 600
+multiple_choice_item_count: 600
 
-tasks:
-  - family: gsm_symbolic
-    n_items: 600 # provisional; pilot-gated
-  - family: mmlu_pro
-    path: data/items/mmlu_pro.jsonl # subject-stratified subsample
-    n_items: 600
+include_reasoning: true
+include_multiple_choice: true
 
-regimes: [A, B, C]
-operations: [substitute, delete, insert, transpose]
-edit_budgets: [1, 2, 4] # k=8 exploratory, run separately
-selection_policies: [keyboard_neighbor, uniform, informative_word]
+# Task sources for the confirmatory run.
+# Run tools/build_task_items.py once (with network access) to populate these
+# paths; it pins the HuggingFace dataset revision at fetch time and writes
+# data/items/PROVENANCE.json with the resolved SHA.
+reasoning_source: jsonl
+reasoning_items_path: data/items/gsm_symbolic.jsonl
+multiple_choice_items_path: data/items/mmlu_pro.jsonl
+asr_items_path: data/perturbations/asr_items.jsonl
 
-asr:
-  enabled: true
-  voice: en-US-AriaNeural
-  whisper_model: large-v3
-  snr_levels: [null, 10]
+is_confirmatory: true
 
-decoding:
-  greedy: true
-  max_new_tokens: 512
+max_new_tokens_reasoning: 512
+max_new_tokens_multiple_choice: 256
 
-outputs:
-  results_dir: results/main
+# The five keyboard perturbation families (design/11 §11.4) plus the ASR arm.
+# These mirror the literature's recurring operation set: keyboard-neighbor
+# substitution, deletion, insertion/double, transposition, and whitespace.
+conditions:
+  - name: regime_a_substitute_keyboard
+    semantic_class: A
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4, 8]
+    source: synthetic
 
-analysis:
-  bca_resamples: 10000
-  fdr_q: 0.05 # Benjamini-Hochberg across cells
-  audit_n_per_regime: 385
-  kappa_gate: 0.60
+  - name: regime_a_delete_keyboard
+    semantic_class: A
+    operation: delete
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_insert_keyboard
+    semantic_class: A
+    operation: insert
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_transpose
+    semantic_class: A
+    operation: transpose
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_whitespace
+    semantic_class: A
+    operation: insert
+    selection_policy: whitespace
+    scope: content
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_a_substitute_content
+    semantic_class: A
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: content
+    edit_budgets: [1, 2, 4]
+    source: synthetic
+
+  - name: regime_a_informative_word
+    semantic_class: A
+    operation: substitute
+    selection_policy: informative_word
+    scope: answer_critical
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  - name: regime_b_real_word
+    semantic_class: B
+    operation: substitute
+    selection_policy: real_word
+    scope: anywhere
+    edit_budgets: [1]
+    source: synthetic
+
+  - name: regime_b_asr_clean
+    semantic_class: B
+    operation: asr
+    selection_policy: asr_clean
+    scope: content
+    edit_budgets: [0]
+    source: asr
+
+  - name: regime_b_asr_noisy
+    semantic_class: B
+    operation: asr
+    selection_policy: asr_noisy
+    scope: content
+    edit_budgets: [0]
+    source: asr
+
