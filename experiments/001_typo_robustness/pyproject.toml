@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "typo_robustness"
+version = "0.1.0"
+description = "Tokenization-mediated LLM robustness to ASR transcription errors and typographical noise"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# Runtime dependencies are tracked in requirements.txt (core) and
+# requirements-gpu.txt (GPU/ASR). They are intentionally NOT duplicated here as
+# version specifiers, because the two-file split (CPU-only analysis vs the heavy
+# GPU/audio stack) is part of the design (docs/PROVENANCE.md §8) and pip's
+# extras would blur that line. Install with:
+#     pip install -e .                       # the package itself
+#     pip install -r requirements.txt        # core
+#     pip install -r requirements-gpu.txt    # GPU/ASR, on the cluster only
+
+# The source layout is flat under src/:
+#   sub-packages: perturbation/, tasks/, inference/, pipeline/, analysis/
+#   root modules: regimes.py, tokenization.py, scoring.py, asr.py
+# `pip install -e .` adds src/ to the path, making all of these importable
+# directly (e.g. `import regimes`, `from perturbation import perturb`).
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["enums", "regimes", "tokenization", "scoring", "asr"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `pip install -e .` puts src/ on the path, so tests import modules directly:
+# `import regimes`, `from perturbation import ...`, etc.
+
