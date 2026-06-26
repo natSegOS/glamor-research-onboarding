@@ -49,6 +49,13 @@ class ModelSpecification:
 # The roster. Identifiers verified on HuggingFace, June 2026 (docs/PROVENANCE.md
 # §4). Revisions are PIN_ME until pre-registration.
 MODEL_ROSTER: dict[str, ModelSpecification] = {
+    # Colab pilot (T4 GPU, ungated, fp16). Qwen2.5-1.5B fits a T4 comfortably
+    # and needs no HF gating approval — use for the pilot; swap to a main-study
+    # model for the confirmatory run.
+    "qwen_1b5_pilot": ModelSpecification(
+        "qwen_1b5_pilot", "Qwen/Qwen2.5-1.5B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
+
+    # Main study models (gated; pin revisions before a confirmatory run).
     "llama_1b": ModelSpecification(
         "llama_1b", "meta-llama/Llama-3.2-1B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
     "llama_3b": ModelSpecification(
