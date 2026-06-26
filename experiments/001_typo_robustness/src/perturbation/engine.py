@@ -70,65 +70,91 @@ PERTURBATION_SCOPES: tuple[Scope, ...] = (
 # Phonetic-confusion infrastructure (lazy; requires the ``pronouncing`` package).
 # ---------------------------------------------------------------------------
 
-_PRONOUNCING_AVAILABLE: Optional[bool] = None
-_PHONEME_TO_WORDS: dict = {}     # (phoneme, ...) -> [word, ...]
+# ``None`` means "not yet checked"; True / False means checked and available
+# or unavailable, respectively.  Set once per process by _load_phoneme_index.
+_phoneme_index_available: Optional[bool] = None
+
+# Inverse index: stress-stripped phoneme tuple -> list of dictionary words.
+# Populated by _load_phoneme_index on first call.
+_phoneme_sequence_to_words: dict = {}
 
 
-def _ensure_phonetic_index() -> bool:
+def _load_phoneme_index() -> bool:
     """Build the CMU Pronouncing Dictionary inverse index on first use.
 
-    Returns True if the ``pronouncing`` package is installed and the index
-    was built, False if absent (offline runs continue with the orthographic
-    band only).  The index is built once per process and cached.
+    Strips lexical-stress markers (the digits 0, 1, 2 appended to vowel
+    phonemes) before indexing, so "rain" and "rein" share the same phoneme
+    key regardless of stress pattern.
+
+    Returns True when the index was successfully built, False when the
+    ``pronouncing`` package is absent (offline runs continue with the
+    orthographic Damerau-Levenshtein band only).  Results are cached for the
+    lifetime of the process.
     """
-    global _PRONOUNCING_AVAILABLE, _PHONEME_TO_WORDS
-    if _PRONOUNCING_AVAILABLE is not None:
-        return _PRONOUNCING_AVAILABLE
+
+    global _phoneme_index_available, _phoneme_sequence_to_words
+
+    if _phoneme_index_available is not None:
+        return _phoneme_index_available
+
     try:
         import pronouncing  # noqa: PLC0415 — lazy import by design
-        index: dict = {}
-        for word, phones in pronouncing.entries():
-            # Strip stress markers (0/1/2 numerals after vowel phonemes) so
-            # "rain" and "rein" share the same key regardless of lexical stress.
-            import re as _re
-            phones_key = tuple(_re.sub(r"\d", "", phones).split())
-            index.setdefault(phones_key, []).append(word)
-        _PHONEME_TO_WORDS = index
-        _PRONOUNCING_AVAILABLE = True
+
+        phoneme_to_words_index: dict = {}
+
+        for dictionary_word, space_separated_phones in pronouncing.pronunciations:
+            stress_stripped_phoneme_key = tuple(
+                re.sub(r"\d", "", phoneme)
+                for phoneme in space_separated_phones.split()
+            )
+            phoneme_to_words_index.setdefault(
+                stress_stripped_phoneme_key, []).append(dictionary_word)
+
+        _phoneme_sequence_to_words = phoneme_to_words_index
+        _phoneme_index_available = True
+
     except ImportError:
-        _PRONOUNCING_AVAILABLE = False
-    return _PRONOUNCING_AVAILABLE
+        _phoneme_index_available = False
+
+    return _phoneme_index_available
 
 
-def _phonetic_confusion_neighbors(
+def _cmu_homophone_neighbors(
         word: str,
         is_word: Optional[Callable[[str], bool]]) -> list[str]:
-    """Return valid-word exact homophones of ``word`` per the CMU Pronouncing
+    """Return valid-word exact homophones of ``word`` from the CMU Pronouncing
     Dictionary.
 
     These are the most ecologically valid Regime-B candidates: acoustic
-    confusions where the ASR recognizer outputs a word whose phoneme sequence
-    is identical to the intended word (e.g. "weather"↔"whether", "France"↔
-    matching entries in CMUdict).  Falls back silently to an empty list when the
-    ``pronouncing`` package is absent, the word has no CMUdict entry, or
-    ``is_word`` is not supplied — in those cases the orthographic band still
-    applies.
+    confusions where an ASR system outputs a different word with an identical
+    phoneme sequence (e.g. "weather" / "whether", "there" / "their").
+
+    Falls back silently to an empty list when the ``pronouncing`` package is
+    absent, the word has no CMUdict entry, or ``is_word`` is not supplied — in
+    those cases the orthographic Damerau-Levenshtein band still applies.
     """
-    if is_word is None or not _ensure_phonetic_index():
+
+    if is_word is None or not _load_phoneme_index():
         return []
+
     try:
-        import pronouncing
-        import re as _re
+        import pronouncing  # noqa: PLC0415 — lazy import by design
     except ImportError:
         return []
 
-    candidates: set[str] = set()
-    for phones in pronouncing.phones_for_word(word.lower()):
-        phones_key = tuple(_re.sub(r"\d", "", phones).split())
-        for candidate in _PHONEME_TO_WORDS.get(phones_key, []):
-            if candidate != word.lower() and is_word(candidate):
-                candidates.add(candidate)
-    return sorted(candidates)
+    homophone_candidates: set[str] = set()
+
+    for space_separated_phones in pronouncing.phones_for_word(word.lower()):
+        stress_stripped_phoneme_key = tuple(
+            re.sub(r"\d", "", phoneme)
+            for phoneme in space_separated_phones.split()
+        )
+        for candidate_word in _phoneme_sequence_to_words.get(
+                stress_stripped_phoneme_key, []):
+            if candidate_word != word.lower() and is_word(candidate_word):
+                homophone_candidates.add(candidate_word)
+
+    return sorted(homophone_candidates)
 
 
 class PerturbationError(Exception):
@@ -420,7 +446,7 @@ def perturb(
             edit = _apply_whitespace_edit(character_cells, random_generator, is_eligible, operation)
         else:
             edit = _apply_character_edit(
-                character_cells, random_generator, is_eligible, operation, selection_policy)
+                character_cells, random_generator, is_eligible, operation)
 
         applied_edits.append(edit)
 
@@ -439,7 +465,7 @@ def perturb(
 # ---------------------------------------------------------------------------
 
 def _apply_character_edit(character_cells, random_generator, is_eligible,
-                          operation, selection_policy) -> Edit:
+                          operation) -> Edit:
     """Apply one character-level edit (substitute / delete / insert / transpose)
     under the keyboard_neighbor or informative_word policy."""
 
@@ -681,7 +707,7 @@ def _apply_real_word_substitution(
             if is_word(candidate.lower()) and candidate.lower() != word.lower()
         }
         # Phonetic homophones (exact CMUdict pronunciation match).
-        phonetic = set(_phonetic_confusion_neighbors(word, is_word))
+        phonetic = set(_cmu_homophone_neighbors(word, is_word))
         phonetic.discard(word.lower())
 
         valid_word_neighbors = sorted(orthographic | phonetic)

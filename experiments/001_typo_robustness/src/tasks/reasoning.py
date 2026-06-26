@@ -22,25 +22,51 @@ from __future__ import annotations
 
 import json
 import random
+import re
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 from enums import TaskFamily
+from lexicons import load_word_lexicon
 
 
-# Names and operation words for the synthetic generator. The synthetic templates
-# below sample a name and numeric operands, mirroring Figure 1 of the paper.
+_NUMERIC_TOKEN_PATTERN = re.compile(r'\b\d[\d,]*(?:\.\d+)?\b')
+
+OPERATION_WORDS: frozenset[str] = load_word_lexicon("operation_words.txt")
+
+# Names for the synthetic generator; sampled to personalize template questions,
+# mirroring Figure 1 of Mirzadeh et al. (2024) GSM-Symbolic.
 SYNTHETIC_NAMES = (
     "Ava", "Ben", "Carla", "Dev", "Elena", "Farid", "Grace", "Hiro",
     "Imani", "Jonas", "Keiko", "Liam", "Mara", "Noor", "Omar", "Priya",
 )
 
-OPERATION_WORDS = (
-    "each", "more", "total", "twice", "remaining", "altogether",
-    "left", "per", "half", "buys", "gives", "sells",
-)
+
+def extract_key_terms_from_reasoning_question(question_text: str) -> list[str]:
+    """Extract semantically critical tokens from a reasoning question.
+
+    Returns numeric tokens (e.g. "950", "1,000", "3.5") that drive the math,
+    followed by any OPERATION_WORDS found in the text. Deduplicates while
+    preserving order. Mirrors the strategy the synthetic generator uses for
+    template-based items, extended to work on raw question text.
+    """
+
+    lower_text = question_text.lower()
+    numeric_tokens = _NUMERIC_TOKEN_PATTERN.findall(question_text)
+    operation_keywords = [
+        word for word in sorted(OPERATION_WORDS)
+        if f" {word}" in lower_text or lower_text.startswith(word)
+    ]
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for term in numeric_tokens + operation_keywords:
+        if term not in seen:
+            seen.add(term)
+            result.append(term)
+    return result
 
 
 REASONING_INSTRUCTION = (
@@ -339,7 +365,7 @@ def _fetch_gsm_from_hf(
             question_text=record["question"],
             instruction=REASONING_INSTRUCTION,
             gold_answer=gold,
-            key_terms=[],
+            key_terms=extract_key_terms_from_reasoning_question(record["question"]),
             template=None,
             parameters={},
         ))

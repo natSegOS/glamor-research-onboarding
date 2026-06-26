@@ -174,3 +174,27 @@ class Precision(_StrEnum):
 class Decoding(_StrEnum):
     """Decoding strategy used for generation."""
     GREEDY = "greedy"
+
+
+class ShardType(_StrEnum):
+    """Shard type labels used in the run manifest and output file names.
+
+    The generation runner groups requests by shard type so each group can use
+    the correct ``max_new_tokens`` budget (reasoning answers are much longer
+    than multiple-choice answers).
+    """
+    REASONING = "reasoning"
+    MULTIPLE_CHOICE = "multiple_choice"
+
+
+class TaskType(_StrEnum):
+    """High-level task category; determines which scorer is applied."""
+    REASONING = "reasoning"
+    MULTIPLE_CHOICE = "mcq"
+
+
+class DatasetRole(_StrEnum):
+    """The role of a dataset in the study design."""
+    PRIMARY = "primary"
+    CONTAMINATION_CONTRAST = "contamination_contrast"
+    SMOKE_TEST = "smoke_test"
