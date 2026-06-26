@@ -166,35 +166,49 @@ def make_regime_b_real_word_shift(
         scope_spans: Optional[dict] = None,
         protected_spans=None,
         max_attempts: int = 64,
+        edit_budget: int = 1,
+        max_word_distance: int = 2,
 ) -> tuple[str, list[Edit], dict]:
-    """Substitute one word for a valid-word neighbor at Damerau-Levenshtein
-    distance 1 (the WikiTypos-style real-word shift)."""
+    """Substitute ``edit_budget`` word(s) for valid-word neighbors, using the
+    union of an orthographic band (DL ≤ ``max_word_distance``) and phonetic
+    homophones (via the CMU Pronouncing Dictionary, when the ``pronouncing``
+    package is available).
+
+    The wider candidate pool better reflects the dominant ASR confusion type
+    (acoustic look-alikes) while the distinct-valid-word post-condition is
+    preserved: every substituted word must be a recognised word distinct from
+    the original.  ``max_word_distance=2`` is the Regime B default; call with
+    ``max_word_distance=1`` to restore the original orthographic-only DL=1
+    behaviour for ablation comparisons.
+    """
     last_error: Optional[PerturbationError] = None
 
     for attempt in range(max_attempts):
         attempt_seed = derived_seed(seed, SemanticClass.B, attempt)
         try:
             perturbed_text, edits = perturb(
-                text, Operation.SUBSTITUTE, Unit.WORD, scope, 1,
+                text, Operation.SUBSTITUTE, Unit.WORD, scope, edit_budget,
                 SelectionPolicy.REAL_WORD, SemanticClass.B, attempt_seed,
                 protected_spans=protected_spans,
-                scope_spans=scope_spans, is_word=is_word)
+                scope_spans=scope_spans, is_word=is_word,
+                max_word_distance=max_word_distance)
         except PerturbationError as error:
             last_error = error
             continue
 
-        edit = edits[0]
-        result_is_a_distinct_real_word = (
-            is_word(edit.word_after)
-            and edit.word_after.lower() != edit.word_before.lower()
+        all_changed_words_are_distinct_real_words = all(
+            is_word(edit.word_after) and edit.word_after.lower() != edit.word_before.lower()
+            for edit in edits
         )
-        if result_is_a_distinct_real_word:
+        if all_changed_words_are_distinct_real_words:
+            edited_words = [(edit.word_before, edit.word_after) for edit in edits]
             metadata = {
                 "regime": SemanticClass.B,
                 "attempt": attempt,
                 "seed_used": attempt_seed,
-                "edited_words": [(edit.word_before, edit.word_after)],
+                "edited_words": edited_words,
                 "damerau_levenshtein_distance": damerau_levenshtein_distance(text, perturbed_text),
+                "max_word_distance": max_word_distance,
             }
             return perturbed_text, edits, metadata
 
