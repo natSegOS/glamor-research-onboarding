@@ -1,12 +1,13 @@
 """Fetch, pin, and export the official task items for a confirmatory run.
 
-This is a **one-time pre-processing step** that must run on a networked machine
-with HuggingFace access before the main sweep. It resolves the dataset commit
-SHA at fetch time (so the version is captured as of the moment this script
-runs), downloads the official items, exports them to JSONL, and records full
-provenance. The exported JSONL files are what the pipeline reads during
-generation via the config keys ``reasoning_items_path`` and
-``multiple_choice_items_path``.
+This is a **one-time pre-processing step** (safely re-runnable) that must run
+on a networked machine with HuggingFace access before the main sweep. It
+resolves the dataset commit SHA at fetch time, downloads the official items,
+exports them to JSONL, and records full provenance. The exported JSONL files are
+what the pipeline reads during generation via the config's ``datasets:`` list.
+
+Re-running this script fetches fresh revisions and overwrites the JSONL files
+cleanly — it is safe to re-run when you want updated dataset hashes.
 
 Usage:
 
@@ -23,9 +24,11 @@ Or with explicit options:
         --output-directory data/items
 
 Outputs (in --output-directory):
-    gsm_symbolic.jsonl       reasoning items (ReasoningItem schema as JSON lines)
-    mmlu_pro.jsonl           multiple-choice items (MultipleChoiceItem schema)
-    PROVENANCE.json          resolved revision SHAs, item counts, fetch timestamp
+    gsm_symbolic.jsonl   GSM-Symbolic reasoning items (primary)
+    mmlu_pro.jsonl       MMLU-Pro multiple-choice items (primary)
+    gsm8k.jsonl          GSM8K reasoning items (contamination contrast)
+    mmlu.jsonl           MMLU multiple-choice items (contamination contrast)
+    PROVENANCE.json      resolved revision SHAs, item counts, fetch timestamp
 """
 
 from __future__ import annotations
@@ -41,7 +44,9 @@ from tasks import (
     ReasoningItem,
     MultipleChoiceItem,
     load_official_gsm_symbolic,
+    load_official_gsm8k,
     load_official_mmlu_pro,
+    load_official_mmlu,
 )
 
 
@@ -131,19 +136,19 @@ def parse_arguments() -> argparse.Namespace:
         "--reasoning-items",
         type=int,
         default=600,
-        help="number of GSM-Symbolic items to export (default: 600)",
+        help="number of reasoning items per dataset to export (default: 600)",
     )
     parser.add_argument(
         "--mcq-items",
         type=int,
         default=600,
-        help="number of MMLU-Pro items to export (default: 600)",
+        help="number of MCQ items per dataset to export (default: 600)",
     )
     parser.add_argument(
         "--categories",
         nargs="*",
         default=None,
-        help="restrict MMLU-Pro to these subject categories; default: all categories",
+        help="restrict MMLU-Pro and MMLU to these subject categories; default: all",
     )
     parser.add_argument(
         "--seed",
@@ -154,83 +159,130 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _write_jsonl(items, record_fn, output_path: Path) -> None:
+    """Write items to a JSONL file, truncating any existing content."""
+    with output_path.open("w") as output_file:
+        for item in items:
+            output_file.write(json.dumps(record_fn(item)) + "\n")
+
+
 def main() -> None:
     arguments = parse_arguments()
     output_directory = arguments.output_directory
     output_directory.mkdir(parents=True, exist_ok=True)
 
+    categories_label = arguments.categories if arguments.categories else "all"
     provenance: dict = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "seed": arguments.seed,
         "gsm_symbolic": None,
         "mmlu_pro": None,
+        "gsm8k": None,
+        "mmlu": None,
     }
 
-    # --- GSM-Symbolic ---
+    # --- GSM-Symbolic (primary reasoning) ---
 
     print(f"resolving apple/GSM-Symbolic revision (config={arguments.gsm_config!r}) ...")
-    gsm_revision = resolve_dataset_revision("apple/GSM-Symbolic")
-    print(f"  resolved: {gsm_revision}")
-
-    print(f"fetching {arguments.reasoning_items} reasoning items ...")
-    reasoning_items = load_official_gsm_symbolic(
+    gsm_sym_revision = resolve_dataset_revision("apple/GSM-Symbolic")
+    print(f"  resolved: {gsm_sym_revision}")
+    print(f"fetching {arguments.reasoning_items} GSM-Symbolic items ...")
+    gsm_sym_items = load_official_gsm_symbolic(
         configuration_name=arguments.gsm_config,
-        dataset_revision=gsm_revision,
+        dataset_revision=gsm_sym_revision,
         item_count=arguments.reasoning_items,
         seed=arguments.seed,
     )
-
-    gsm_output_path = output_directory / "gsm_symbolic.jsonl"
-    with gsm_output_path.open("w") as output_file:
-        for item in reasoning_items:
-            output_file.write(json.dumps(_reasoning_item_to_record(item)) + "\n")
-
+    gsm_sym_path = output_directory / "gsm_symbolic.jsonl"
+    _write_jsonl(gsm_sym_items, _reasoning_item_to_record, gsm_sym_path)
     provenance["gsm_symbolic"] = {
         "repo_id": "apple/GSM-Symbolic",
         "configuration_name": arguments.gsm_config,
-        "resolved_revision_sha": gsm_revision,
-        "item_count": len(reasoning_items),
-        "output_file": str(gsm_output_path),
+        "resolved_revision_sha": gsm_sym_revision,
+        "item_count": len(gsm_sym_items),
+        "output_file": str(gsm_sym_path),
     }
-    print(f"  wrote {len(reasoning_items)} items to {gsm_output_path}")
+    print(f"  wrote {len(gsm_sym_items)} items to {gsm_sym_path}")
 
-    # --- MMLU-Pro ---
+    # --- MMLU-Pro (primary MCQ) ---
 
     print("resolving TIGER-Lab/MMLU-Pro revision ...")
-    mmlu_revision = resolve_dataset_revision("TIGER-Lab/MMLU-Pro")
-    print(f"  resolved: {mmlu_revision}")
-
-    categories_label = arguments.categories if arguments.categories else "all"
-    print(f"fetching {arguments.mcq_items} MCQ items (categories: {categories_label}) ...")
-    mcq_items = load_official_mmlu_pro(
-        dataset_revision=mmlu_revision,
+    mmlu_pro_revision = resolve_dataset_revision("TIGER-Lab/MMLU-Pro")
+    print(f"  resolved: {mmlu_pro_revision}")
+    print(f"fetching {arguments.mcq_items} MMLU-Pro items (categories: {categories_label}) ...")
+    mmlu_pro_items = load_official_mmlu_pro(
+        dataset_revision=mmlu_pro_revision,
         item_count=arguments.mcq_items,
-        categories=arguments.categories,
         seed=arguments.seed,
+        categories=arguments.categories,
     )
-
-    mmlu_output_path = output_directory / "mmlu_pro.jsonl"
-    with mmlu_output_path.open("w") as output_file:
-        for item in mcq_items:
-            output_file.write(json.dumps(_multiple_choice_item_to_record(item)) + "\n")
-
+    mmlu_pro_path = output_directory / "mmlu_pro.jsonl"
+    _write_jsonl(mmlu_pro_items, _multiple_choice_item_to_record, mmlu_pro_path)
     provenance["mmlu_pro"] = {
         "repo_id": "TIGER-Lab/MMLU-Pro",
-        "resolved_revision_sha": mmlu_revision,
-        "item_count": len(mcq_items),
+        "resolved_revision_sha": mmlu_pro_revision,
+        "item_count": len(mmlu_pro_items),
         "categories": arguments.categories,
-        "output_file": str(mmlu_output_path),
+        "output_file": str(mmlu_pro_path),
     }
-    print(f"  wrote {len(mcq_items)} items to {mmlu_output_path}")
+    print(f"  wrote {len(mmlu_pro_items)} items to {mmlu_pro_path}")
+
+    # --- GSM8K (contamination-contrast reasoning) ---
+
+    print("resolving openai/gsm8k revision ...")
+    gsm8k_revision = resolve_dataset_revision("openai/gsm8k")
+    print(f"  resolved: {gsm8k_revision}")
+    print(f"fetching {arguments.reasoning_items} GSM8K items ...")
+    gsm8k_items = load_official_gsm8k(
+        dataset_revision=gsm8k_revision,
+        item_count=arguments.reasoning_items,
+        seed=arguments.seed,
+    )
+    gsm8k_path = output_directory / "gsm8k.jsonl"
+    _write_jsonl(gsm8k_items, _reasoning_item_to_record, gsm8k_path)
+    provenance["gsm8k"] = {
+        "repo_id": "openai/gsm8k",
+        "configuration_name": "main",
+        "resolved_revision_sha": gsm8k_revision,
+        "item_count": len(gsm8k_items),
+        "output_file": str(gsm8k_path),
+    }
+    print(f"  wrote {len(gsm8k_items)} items to {gsm8k_path}")
+
+    # --- MMLU (contamination-contrast MCQ) ---
+
+    print("resolving cais/mmlu revision ...")
+    mmlu_revision = resolve_dataset_revision("cais/mmlu")
+    print(f"  resolved: {mmlu_revision}")
+    print(f"fetching {arguments.mcq_items} MMLU items (categories: {categories_label}) ...")
+    mmlu_items = load_official_mmlu(
+        dataset_revision=mmlu_revision,
+        item_count=arguments.mcq_items,
+        seed=arguments.seed,
+        categories=arguments.categories,
+    )
+    mmlu_path = output_directory / "mmlu.jsonl"
+    _write_jsonl(mmlu_items, _multiple_choice_item_to_record, mmlu_path)
+    provenance["mmlu"] = {
+        "repo_id": "cais/mmlu",
+        "configuration_name": "all",
+        "resolved_revision_sha": mmlu_revision,
+        "item_count": len(mmlu_items),
+        "categories": arguments.categories,
+        "output_file": str(mmlu_path),
+    }
+    print(f"  wrote {len(mmlu_items)} items to {mmlu_path}")
 
     # --- Provenance sidecar ---
 
     provenance_path = output_directory / "PROVENANCE.json"
     provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
     print(f"\nprovenance written to {provenance_path}")
-    print("\nNext step: update configs/main.yaml:")
-    print(f"  reasoning_items_path: {gsm_output_path}")
-    print(f"  multiple_choice_items_path: {mmlu_output_path}")
+    print("\nAdd these paths to configs/main.yaml under 'datasets:'")
+    print(f"  gsm_symbolic_jsonl:  path: {gsm_sym_path}")
+    print(f"  mmlu_pro_jsonl:      path: {mmlu_pro_path}")
+    print(f"  gsm8k_jsonl:         path: {gsm8k_path}")
+    print(f"  mmlu_jsonl:          path: {mmlu_path}")
 
 
 if __name__ == "__main__":
