@@ -1,9 +1,9 @@
 # Core dependencies — analysis, statistics, perturbation, and the full test
 # suite run with these alone. No GPU, no audio, no model weights required.
 #
-# Versions verified against PyPI in June 2026. Pin exact versions at
-# pre-registration (replace >= with ==) so the registered analysis is frozen.
-# Rationale for the CPU/GPU split: see docs/PROVENANCE.md §8.
+# Pin exact versions at pre-registration (replace >= with ==) so the
+# registered analysis is frozen. Rationale for the CPU/GPU split: see
+# docs/PROVENANCE.md §8.
 
 # Numerical and statistical core.
 numpy>=1.26,<3.0          # array math; 2.x is fine, capped below a hypothetical 3.0
@@ -37,6 +37,10 @@ pandas>=2.0               # statsmodels and the cell-table I/O depend on it
 # Falls back gracefully (orthographic DL band only) if absent, so offline /
 # smoke-test runs continue without audio dependencies.
 pronouncing>=0.2
+
+# Progress bars for long-running pipeline steps. Uses tqdm's auto-detection to
+# render a notebook widget in Colab and a terminal bar on the cluster.
+tqdm>=4.66
 
 # Real-study English lexicon for the is_word predicate (Regime A / B boundary).
 # tools/build_dictionary.py fetches the vocabulary, pins the installed version,
