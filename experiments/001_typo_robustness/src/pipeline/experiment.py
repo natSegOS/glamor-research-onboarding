@@ -41,7 +41,7 @@ import yaml
 
 from enums import (
     SemanticClass, Operation, SelectionPolicy, Scope,
-    ReasoningSource, ConditionSource, Precision,
+    ConditionSource, Precision,
     REASONING_FAMILIES,
 )
 import regimes
@@ -51,19 +51,38 @@ from pipeline.runner import (
     ShardManifest,
     run_shard,
 )
-from tasks import (
-    generate_synthetic_reasoning_items,
-    load_official_gsm_symbolic,
-    load_reasoning_jsonl,
-    load_multiple_choice_jsonl,
-    make_demonstration_multiple_choice_items,
-)
+from tasks import get_spec
+from tasks.registry import call_loader
 import tokenization
 
 
 # ---------------------------------------------------------------------------
 # Configuration.
 # ---------------------------------------------------------------------------
+
+@dataclass
+class DatasetConfig:
+    """One entry in the config's ``datasets:`` list.
+
+    Specifying datasets by key drives registry-based loading (preferred for
+    new configs).  A plain string key uses registry defaults for item_count
+    and sources.
+
+    Attributes
+    ----------
+    key:
+        Registry key — must be present in ``tasks.DATASET_REGISTRY``.
+    item_count:
+        Override the registry's ``default_n``; falls back to that default
+        if not supplied.
+    path:
+        Required for ``*_jsonl`` keys; the JSONL file produced by
+        ``tools/build_task_items.py``.
+    """
+    key: str
+    item_count: Optional[int] = None
+    path: Optional[str] = None
+
 
 @dataclass
 class PerturbationCondition:
@@ -76,6 +95,10 @@ class PerturbationCondition:
     scope: Scope = Scope.ANYWHERE
     edit_budgets: Sequence[int] = (1, 2, 4)
     source: ConditionSource = ConditionSource.SYNTHETIC
+    # PILOT-DECISION (remove the unused lever after pilot): max_word_distance
+    # widens the DL orthographic band used by make_regime_b_real_word_shift
+    # beyond the builder default of 2. None = use the builder default.
+    max_word_distance: Optional[int] = None
 
     def __post_init__(self):
         if not isinstance(self.semantic_class, SemanticClass):
@@ -93,27 +116,31 @@ class PerturbationCondition:
 @dataclass
 class ExperimentConfiguration:
     run_id: str
-    reasoning_item_count: int
-    multiple_choice_item_count: int
     seed: int
     conditions: list
-    include_reasoning: bool = True
-    include_multiple_choice: bool = True
+    # List of DatasetConfig (or plain strings / dicts from YAML).
+    # Every entry is a key from tasks.DATASET_REGISTRY with optional per-dataset
+    # ``item_count`` and ``path`` (required for ``*_jsonl`` keys) overrides.
+    datasets: Optional[list] = None
     max_new_tokens_reasoning: int = 512
     max_new_tokens_multiple_choice: int = 256
-    asr_items_path: Optional[str] = None      # JSONL of pre-built AsrItems, if any
-    multiple_choice_items_path: Optional[str] = None
-    # Reasoning source: "synthetic" (offline generator, default), "official"
-    # (loads apple/GSM-Symbolic live from HuggingFace), or "jsonl" (reads a
-    # pre-exported file at reasoning_items_path — produced by
-    # tools/build_task_items.py, recommended for confirmatory runs).
-    reasoning_source: ReasoningSource = ReasoningSource.SYNTHETIC
-    reasoning_items_path: Optional[str] = None
+    asr_items_path: Optional[str] = None
+    is_confirmatory: bool = False
 
     def __post_init__(self):
-        if not isinstance(self.reasoning_source, ReasoningSource):
-            self.reasoning_source = ReasoningSource(self.reasoning_source)
-    is_confirmatory: bool = False
+        if self.datasets is not None:
+            normalised = []
+            for entry in self.datasets:
+                if isinstance(entry, DatasetConfig):
+                    normalised.append(entry)
+                elif isinstance(entry, str):
+                    normalised.append(DatasetConfig(key=entry))
+                elif isinstance(entry, dict):
+                    normalised.append(DatasetConfig(**entry))
+                else:
+                    raise ValueError(
+                        f"datasets entries must be a key string or dict, got {type(entry)}")
+            self.datasets = normalised
 
     @staticmethod
     def from_yaml(path: Path) -> "ExperimentConfiguration":
@@ -127,59 +154,19 @@ class ExperimentConfiguration:
 # ---------------------------------------------------------------------------
 
 def load_task_items(configuration: ExperimentConfiguration) -> list:
-    """Load the task items for a run.
-
-    Reasoning source is controlled by ``configuration.reasoning_source``:
-      ``"synthetic"`` (default) — offline generator, no network required.
-      ``"official"``            — loads ``apple/GSM-Symbolic`` live from HuggingFace.
-      ``"jsonl"``               — reads a pre-exported file at
-                                  ``configuration.reasoning_items_path``
-                                  (produced by ``tools/build_task_items.py``).
-
-    Multiple-choice source is controlled by ``configuration.multiple_choice_items_path``:
-      ``null`` (default)  — uses the 5-item demo set (smoke runs only).
-      a JSONL path        — loads from the pre-exported subsample.
-    """
+    """Load task items by dispatching each entry in ``configuration.datasets``
+    through the registry. Add or swap datasets by editing the config's
+    ``datasets:`` list — no code changes required."""
+    if not configuration.datasets:
+        raise ValueError(
+            "ExperimentConfiguration.datasets is empty; set a 'datasets:' list "
+            "in the config file (e.g. [{key: gsm_symbolic_jsonl, path: ..., "
+            "item_count: 600}]).")
     items: list = []
-
-    if configuration.include_reasoning:
-        reasoning_source = configuration.reasoning_source
-
-        if reasoning_source == ReasoningSource.SYNTHETIC:
-            items.extend(generate_synthetic_reasoning_items(
-                configuration.reasoning_item_count, configuration.seed))
-
-        elif reasoning_source == ReasoningSource.OFFICIAL:
-            items.extend(load_official_gsm_symbolic(
-                item_count=configuration.reasoning_item_count,
-                seed=configuration.seed,
-            ))
-
-        elif reasoning_source == ReasoningSource.JSONL:
-            if not configuration.reasoning_items_path:
-                raise ValueError(
-                    "reasoning_source is 'jsonl' but reasoning_items_path is null; "
-                    "set reasoning_items_path in the config or run "
-                    "tools/build_task_items.py first.")
-            items.extend(load_reasoning_jsonl(
-                Path(configuration.reasoning_items_path),
-                item_count=configuration.reasoning_item_count,
-            ))
-
-        else:
-            raise ValueError(
-                f"unknown reasoning_source {reasoning_source!r}; "
-                f"expected one of {list(ReasoningSource)}.")
-
-    if configuration.include_multiple_choice:
-        if configuration.multiple_choice_items_path:
-            mcq_items = load_multiple_choice_jsonl(Path(configuration.multiple_choice_items_path))
-            items.extend(mcq_items[:configuration.multiple_choice_item_count])
-        else:
-            demo_items = make_demonstration_multiple_choice_items()
-            repeats = (configuration.multiple_choice_item_count // len(demo_items)) + 1
-            items.extend((demo_items * repeats)[:configuration.multiple_choice_item_count])
-
+    for dataset_config in configuration.datasets:
+        spec = get_spec(dataset_config.key)
+        n = dataset_config.item_count or spec.default_n
+        items.extend(call_loader(spec, n, configuration.seed, path=dataset_config.path))
     return items
 
 
@@ -313,9 +300,16 @@ def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
             scope_spans=scope_spans, key_terms=key_terms)
 
     if condition.semantic_class == SemanticClass.B:
+        # PILOT-DECISION (remove the unused lever after pilot): pass
+        # max_word_distance when the condition specifies it; otherwise
+        # fall back to the builder default of 2.
+        regime_b_kwargs = {}
+        if condition.max_word_distance is not None:
+            regime_b_kwargs["max_word_distance"] = condition.max_word_distance
         return regimes.make_regime_b_real_word_shift(
             content_text, item_seed, is_word,
-            scope=condition.scope, scope_spans=scope_spans)
+            scope=condition.scope, scope_spans=scope_spans,
+            edit_budget=edit_budget, **regime_b_kwargs)
 
     raise PerturbationError(
         f"semantic class {condition.semantic_class!r} is not built by the engine "
