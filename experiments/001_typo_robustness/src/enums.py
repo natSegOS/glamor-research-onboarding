@@ -38,7 +38,6 @@ class Operation(_StrEnum):
 
 class SelectionPolicy(_StrEnum):
     """How replacement characters or words are chosen."""
-    UNIFORM = "uniform"
     KEYBOARD_NEIGHBOR = "keyboard_neighbor"
     INFORMATIVE_WORD = "informative_word"
     REAL_WORD = "real_word"
@@ -82,8 +81,29 @@ class SemanticClass(_StrEnum):
 # ---------------------------------------------------------------------------
 
 class TaskFamily(_StrEnum):
-    """Which task / dataset a row belongs to."""
-    GSM_SYMBOLIC = "gsm_symbolic"
+    """Which task / dataset a row belongs to.
+
+    Primary datasets (N=600, confirmatory)
+    --------------------------------------
+    GSM_SYMBOLIC_OFFICIAL    apple/GSM-Symbolic (fresh reasoning)
+    MMLU_PRO                 TIGER-Lab/MMLU-Pro (MCQ)
+
+    Contamination-contrast datasets (standard benchmarks, paired with primaries)
+    ---------------------------------------------------------------------------
+    GSM8K                    openai/gsm8k — standard arithmetic reasoning
+    MMLU                     cais/mmlu — standard MCQ (4-option)
+
+    Offline generators (unit tests / pilot / Regime C operand swap)
+    ---------------------------------------------------------------
+    GSM_SYMBOLIC_SYNTHETIC   offline templated generator
+    MCQ_DEMO                 5-item hardcoded smoke-test set
+
+    Historical (backward-compat with old JSONL output only)
+    --------------------------------------------------------
+    GSM_SYMBOLIC             old tag written by early load_reasoning_jsonl versions;
+                             not in REASONING_FAMILIES — re-tag on load if present.
+    """
+    GSM_SYMBOLIC = "gsm_symbolic"               # historical; avoid in new code
     GSM_SYMBOLIC_OFFICIAL = "gsm_symbolic_official"
     GSM_SYMBOLIC_SYNTHETIC = "gsm_symbolic_synthetic"
     GSM8K = "gsm8k"
@@ -100,8 +120,8 @@ REASONING_FAMILIES: frozenset[TaskFamily] = frozenset({
 
 MCQ_FAMILIES: frozenset[TaskFamily] = frozenset({
     TaskFamily.MMLU_PRO,
-    TaskFamily.MMLU,
     TaskFamily.MCQ_DEMO,
+    TaskFamily.MMLU,
 })
 
 
@@ -137,13 +157,6 @@ class FragmentationStratum(_StrEnum):
 # ---------------------------------------------------------------------------
 # Pipeline / inference vocabulary
 # ---------------------------------------------------------------------------
-
-class ReasoningSource(_StrEnum):
-    """Where reasoning task items come from."""
-    SYNTHETIC = "synthetic"
-    OFFICIAL = "official"
-    JSONL = "jsonl"
-
 
 class ConditionSource(_StrEnum):
     """How a perturbation condition's samples are produced."""
