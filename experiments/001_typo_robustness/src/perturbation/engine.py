@@ -55,7 +55,6 @@ PRIMITIVE_OPERATIONS: tuple[Operation, ...] = (
     Operation.INSERT, Operation.DELETE, Operation.SUBSTITUTE, Operation.TRANSPOSE)
 
 SELECTION_POLICIES: tuple[SelectionPolicy, ...] = (
-    SelectionPolicy.UNIFORM,            # any letter, drawn uniformly
     SelectionPolicy.KEYBOARD_NEIGHBOR,  # QWERTY-adjacent letter (MulTypo replacement)
     SelectionPolicy.INFORMATIVE_WORD,   # keyboard_neighbor, but restricted to key terms
     SelectionPolicy.REAL_WORD,          # whole-word substitution to a valid-word neighbor
@@ -65,6 +64,71 @@ SELECTION_POLICIES: tuple[SelectionPolicy, ...] = (
 
 PERTURBATION_SCOPES: tuple[Scope, ...] = (
     Scope.INSTRUCTION, Scope.CONTENT, Scope.ANSWER_CRITICAL, Scope.ANYWHERE)
+
+
+# ---------------------------------------------------------------------------
+# Phonetic-confusion infrastructure (lazy; requires the ``pronouncing`` package).
+# ---------------------------------------------------------------------------
+
+_PRONOUNCING_AVAILABLE: Optional[bool] = None
+_PHONEME_TO_WORDS: dict = {}     # (phoneme, ...) -> [word, ...]
+
+
+def _ensure_phonetic_index() -> bool:
+    """Build the CMU Pronouncing Dictionary inverse index on first use.
+
+    Returns True if the ``pronouncing`` package is installed and the index
+    was built, False if absent (offline runs continue with the orthographic
+    band only).  The index is built once per process and cached.
+    """
+    global _PRONOUNCING_AVAILABLE, _PHONEME_TO_WORDS
+    if _PRONOUNCING_AVAILABLE is not None:
+        return _PRONOUNCING_AVAILABLE
+    try:
+        import pronouncing  # noqa: PLC0415 — lazy import by design
+        index: dict = {}
+        for word, phones in pronouncing.entries():
+            # Strip stress markers (0/1/2 numerals after vowel phonemes) so
+            # "rain" and "rein" share the same key regardless of lexical stress.
+            import re as _re
+            phones_key = tuple(_re.sub(r"\d", "", phones).split())
+            index.setdefault(phones_key, []).append(word)
+        _PHONEME_TO_WORDS = index
+        _PRONOUNCING_AVAILABLE = True
+    except ImportError:
+        _PRONOUNCING_AVAILABLE = False
+    return _PRONOUNCING_AVAILABLE
+
+
+def _phonetic_confusion_neighbors(
+        word: str,
+        is_word: Optional[Callable[[str], bool]]) -> list[str]:
+    """Return valid-word exact homophones of ``word`` per the CMU Pronouncing
+    Dictionary.
+
+    These are the most ecologically valid Regime-B candidates: acoustic
+    confusions where the ASR recognizer outputs a word whose phoneme sequence
+    is identical to the intended word (e.g. "weather"↔"whether", "France"↔
+    matching entries in CMUdict).  Falls back silently to an empty list when the
+    ``pronouncing`` package is absent, the word has no CMUdict entry, or
+    ``is_word`` is not supplied — in those cases the orthographic band still
+    applies.
+    """
+    if is_word is None or not _ensure_phonetic_index():
+        return []
+    try:
+        import pronouncing
+        import re as _re
+    except ImportError:
+        return []
+
+    candidates: set[str] = set()
+    for phones in pronouncing.phones_for_word(word.lower()):
+        phones_key = tuple(_re.sub(r"\d", "", phones).split())
+        for candidate in _PHONEME_TO_WORDS.get(phones_key, []):
+            if candidate != word.lower() and is_word(candidate):
+                candidates.add(candidate)
+    return sorted(candidates)
 
 
 class PerturbationError(Exception):
@@ -289,6 +353,7 @@ def perturb(
         scope_spans: Optional[dict] = None,
         is_word: Optional[Callable[[str], bool]] = None,
         exclude_numeric_tokens: bool = True,
+        max_word_distance: int = 1,
 ) -> tuple[str, list[Edit]]:
     """Apply exactly ``edit_budget`` primitive edits to ``text`` and return the
     perturbed string together with the edit script. See the module docstring for
@@ -297,7 +362,9 @@ def perturb(
     Parameters mirror the perturbation state vector r = (operation, unit, scope,
     edit_budget, selection_policy, semantic_class, seed) of design/02 §2.3, plus
     the structural inputs (protected_spans, key_terms, scope_spans, is_word) that
-    the task loader supplies.
+    the task loader supplies.  ``max_word_distance`` controls the DL band used by
+    the real_word policy: 1 (default, backward-compatible) or 2 (Regime B; also
+    enables phonetic-homophone candidates when ``pronouncing`` is installed).
     """
     operation = Operation(operation)
     unit = Unit(unit)
@@ -346,7 +413,9 @@ def perturb(
             character_cells, allowed_original_indices, locked_original_indices)
 
         if selection_policy == SelectionPolicy.REAL_WORD:
-            edit = _apply_real_word_substitution(character_cells, random_generator, is_eligible, is_word)
+            edit = _apply_real_word_substitution(
+                character_cells, random_generator, is_eligible, is_word,
+                max_word_distance=max_word_distance)
         elif selection_policy == SelectionPolicy.WHITESPACE:
             edit = _apply_whitespace_edit(character_cells, random_generator, is_eligible, operation)
         else:
@@ -372,9 +441,7 @@ def perturb(
 def _apply_character_edit(character_cells, random_generator, is_eligible,
                           operation, selection_policy) -> Edit:
     """Apply one character-level edit (substitute / delete / insert / transpose)
-    under the keyboard_neighbor, informative_word, or uniform policy."""
-
-    policy_uses_keyboard = selection_policy in (SelectionPolicy.KEYBOARD_NEIGHBOR, SelectionPolicy.INFORMATIVE_WORD)
+    under the keyboard_neighbor or informative_word policy."""
 
     if operation == Operation.SUBSTITUTE:
         candidate_positions = _eligible_letter_positions(character_cells, is_eligible)
@@ -383,12 +450,7 @@ def _apply_character_edit(character_cells, random_generator, is_eligible,
         for position in candidate_positions:
             original_character = character_cells[position][0]
 
-            if policy_uses_keyboard:
-                replacement_pool = keyboard_neighbors_of(original_character)
-            else:
-                replacement_pool = (LOWERCASE_ALPHABET.upper()
-                                    if original_character.isupper() else LOWERCASE_ALPHABET)
-
+            replacement_pool = keyboard_neighbors_of(original_character)
             replacement_pool = [c for c in replacement_pool if c != original_character]
             if not replacement_pool:
                 continue
@@ -438,13 +500,9 @@ def _apply_character_edit(character_cells, random_generator, is_eligible,
         for anchor_position in anchor_positions:
             anchor_character = character_cells[anchor_position][0]
 
-            if policy_uses_keyboard:
-                # Keyboard neighbors plus the anchor itself (double-typing),
-                # matching MulTypo's "simultaneous keystrokes" insertion.
-                insertion_pool = keyboard_neighbors_of(anchor_character) + anchor_character
-            else:
-                insertion_pool = (LOWERCASE_ALPHABET.upper()
-                                  if anchor_character.isupper() else LOWERCASE_ALPHABET)
+            # Keyboard neighbors plus the anchor itself (double-typing),
+            # matching MulTypo's "simultaneous keystrokes" insertion.
+            insertion_pool = keyboard_neighbors_of(anchor_character) + anchor_character
 
             inserted_character = random_generator.choice(list(insertion_pool))
 
@@ -553,9 +611,53 @@ def _damerau_levenshtein_one_neighbors(word: str) -> set[str]:
     return variants
 
 
-def _apply_real_word_substitution(character_cells, random_generator, is_eligible, is_word) -> Edit:
-    """Replace a whole word with a valid-word neighbor at Damerau-Levenshtein
-    distance 1 (the WikiTypos-style real-word shift used by Regime B)."""
+def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> set[str]:
+    """Return all string variants of ``word`` within Damerau-Levenshtein distance
+    ``max_distance``.
+
+    For ``max_distance == 1`` this is identical to
+    ``_damerau_levenshtein_one_neighbors``.  For ``max_distance == 2`` the
+    result is the complete DL ≤ 2 neighbourhood, computed by expanding every
+    level-1 variant by one additional DL-1 step.  The original word is excluded.
+    """
+    level1 = _damerau_levenshtein_one_neighbors(word)
+    if max_distance < 2:
+        return level1
+    # Level 2: expand from every level-1 variant; include both levels.
+    result: set[str] = set(level1)
+    for neighbor in level1:
+        result |= _damerau_levenshtein_one_neighbors(neighbor)
+    result.discard(word)
+    return result
+
+
+def _apply_real_word_substitution(
+        character_cells,
+        random_generator,
+        is_eligible,
+        is_word,
+        *,
+        max_word_distance: int = 1) -> Edit:
+    """Replace a whole word with a valid-word neighbor.
+
+    Candidates are drawn from the union of two pools:
+
+    1. **Orthographic band** — all strings within DL distance ``max_word_distance``
+       of the source word that are recognised as valid words.  At distance 1 this
+       is the WikiTypos-style real-word shift (the original behaviour).  At
+       distance 2 the band is wider, catching common substitutions like
+       "France" → "Finance" that are orthographically close but not distance-1.
+
+    2. **Phonetic homophones** — words that share the source word's CMU
+       pronunciation (exact homophones such as "weather"↔"whether").  These are
+       the dominant ASR confusion type and are added to the candidate pool when
+       the ``pronouncing`` package is installed.  If the package is absent the
+       pool falls back to the orthographic band only.
+
+    The final candidate list is the sorted union of both pools, filtered to
+    valid words distinct from the source word, and selection is deterministic
+    given the random generator state.
+    """
     if is_word is None:
         raise PerturbationError("the real_word policy requires an is_word callable")
 
@@ -572,10 +674,17 @@ def _apply_real_word_substitution(character_cells, random_generator, is_eligible
         if not is_word(word.lower()):
             continue
 
-        valid_word_neighbors = sorted(
-            candidate for candidate in _damerau_levenshtein_one_neighbors(word)
+        # Orthographic band (DL ≤ max_word_distance).
+        orthographic = {
+            candidate for candidate in
+            _damerau_levenshtein_band_neighbors(word, max_word_distance)
             if is_word(candidate.lower()) and candidate.lower() != word.lower()
-        )
+        }
+        # Phonetic homophones (exact CMUdict pronunciation match).
+        phonetic = set(_phonetic_confusion_neighbors(word, is_word))
+        phonetic.discard(word.lower())
+
+        valid_word_neighbors = sorted(orthographic | phonetic)
         if not valid_word_neighbors:
             continue
 
