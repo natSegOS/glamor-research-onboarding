@@ -2,8 +2,8 @@
 #
 # Sample sizes are set so each confirmatory cell can detect ~5 points of paired
 # degradation: Connor (1987) gives ~595 paired items at a discordant-pair rate of
-# 0.19, so the provisional target is 600 items per cell (design/06 §6.3). The
-# pilot's measured discordant rates replace 0.19 before this is finalized.
+# 0.19, so the target is 600 items per cell (design/06 §6.3). The pilot's measured
+# discordant rates replace 0.19 before this is finalized.
 #
 # This config is confirmatory: the run script must assert every model revision is
 # pinned (inference.assert_revisions_pinned) before generating, and the dataset
@@ -12,22 +12,33 @@
 run_id: main
 seed: 1729
 
-# Per-archetype item counts. The orchestrator generates this many CLEAN items;
-# each condition x edit-budget multiplies into perturbed items, and cells are
-# aggregated to >= 600 paired observations per headline claim.
-reasoning_item_count: 600
-multiple_choice_item_count: 600
+# Dataset selection — registry-driven (tasks.DATASET_REGISTRY).
+# Run tools/build_task_items.py once (with network access) to pre-fetch and pin
+# dataset revisions; it writes data/items/PROVENANCE.json with resolved HuggingFace
+# SHAs. Re-running overwrites cleanly and updates the SHAs (safe and idempotent).
+# To add a dataset, register it in tasks/registry.py and append its key here.
+#
+# Primary confirmatory (N=600, McNemar-powered):
+#   gsm_symbolic_jsonl  — fresh arithmetic reasoning (contamination-controlled)
+#   mmlu_pro_jsonl      — 10-option MCQ, subject-stratified
+#
+# Contamination contrasts (same N; run on all models; paired directly with primaries):
+#   gsm8k_jsonl         — standard arithmetic reasoning (potential memorisation)
+#   mmlu_jsonl          — standard 4-option MCQ (potential memorisation)
+datasets:
+  - key: gsm_symbolic_jsonl
+    path: data/items/gsm_symbolic.jsonl
+    item_count: 600
+  - key: mmlu_pro_jsonl
+    path: data/items/mmlu_pro.jsonl
+    item_count: 600
+  - key: gsm8k_jsonl
+    path: data/items/gsm8k.jsonl
+    item_count: 600
+  - key: mmlu_jsonl
+    path: data/items/mmlu.jsonl
+    item_count: 600
 
-include_reasoning: true
-include_multiple_choice: true
-
-# Task sources for the confirmatory run.
-# Run tools/build_task_items.py once (with network access) to populate these
-# paths; it pins the HuggingFace dataset revision at fetch time and writes
-# data/items/PROVENANCE.json with the resolved SHA.
-reasoning_source: jsonl
-reasoning_items_path: data/items/gsm_symbolic.jsonl
-multiple_choice_items_path: data/items/mmlu_pro.jsonl
 asr_items_path: data/perturbations/asr_items.jsonl
 
 is_confirmatory: true
@@ -100,7 +111,14 @@ conditions:
     operation: substitute
     selection_policy: real_word
     scope: anywhere
-    edit_budgets: [1]
+    # edit_budgets controls the NUMBER of words substituted per item.
+    # The within-word DL band is widened to 2 and phonetic homophones are
+    # added automatically in make_regime_b_real_word_shift (design/02 §2.4).
+    # PILOT-DECISION (remove the unused lever after pilot): budget raised from
+    # [1, 2] to [2, 3, 4] to produce more divergent real-word shifts; the engine-
+    # knob lever (max_word_distance on PerturbationCondition) is implemented
+    # independently — keep whichever shows more meaningful effect in the pilot.
+    edit_budgets: [2, 3, 4]
     source: synthetic
 
   - name: regime_b_asr_clean
@@ -118,4 +136,3 @@ conditions:
     scope: content
     edit_budgets: [0]
     source: asr
-

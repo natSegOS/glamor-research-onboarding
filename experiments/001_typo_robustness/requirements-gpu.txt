@@ -32,4 +32,3 @@ bitsandbytes>=0.43
 openai-whisper>=20240930
 edge-tts>=6.1             # neural TTS, single fixed voice en-US-AriaNeural
 soundfile>=0.12           # WAV read/write for the SNR noise-mixing step
-
