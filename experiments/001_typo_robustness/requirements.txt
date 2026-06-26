@@ -32,10 +32,15 @@ matplotlib>=3.8
 statsmodels>=0.14
 pandas>=2.0               # statsmodels and the cell-table I/O depend on it
 
+# CMU Pronouncing Dictionary wrapper — used by the real_word selection policy
+# to generate phonetic-homophone candidates for Regime B (design/02 §2.4).
+# Falls back gracefully (orthographic DL band only) if absent, so offline /
+# smoke-test runs continue without audio dependencies.
+pronouncing>=0.2
+
 # Real-study English lexicon for the is_word predicate (Regime A / B boundary).
 # tools/build_dictionary.py fetches the vocabulary, pins the installed version,
 # and writes data/wordlists/en_us_pinned.txt (the format regimes.load_wordlist
 # already reads). Not needed for offline/smoke runs; only required when running
 # tools/build_dictionary.py with --source wordfreq (the default).
 wordfreq>=3.0
-
