@@ -213,7 +213,7 @@ def figure_keyboard_versus_asr_profile(
     if pyplot is None:
         return None
 
-    keyboard_policies = {SelectionPolicy.KEYBOARD_NEIGHBOR, SelectionPolicy.INFORMATIVE_WORD, SelectionPolicy.UNIFORM}
+    keyboard_policies = {SelectionPolicy.KEYBOARD_NEIGHBOR, SelectionPolicy.INFORMATIVE_WORD}
     asr_policies = {SelectionPolicy.ASR_CLEAN, SelectionPolicy.ASR_NOISY}
 
     degradation_by_model: dict = defaultdict(lambda: {"keyboard": [], "asr": []})
