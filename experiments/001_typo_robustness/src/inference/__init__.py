@@ -17,6 +17,5 @@ from inference.roster import (
 
 from inference.engines import (
     VllmEngine,
-    HuggingFaceEngine,
     build_inference_engine,
 )
