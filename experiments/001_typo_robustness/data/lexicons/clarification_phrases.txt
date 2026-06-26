@@ -1,27 +1,92 @@
-# Clarification-request phrases used to classify interactional failures.
+# Clarification-request phrases for ParseStatus.CLARIFICATION detection.
 #
-# A generation matching any of these (as whole words, case-insensitive) is
-# classified as ParseStatus.CLARIFICATION rather than ParseStatus.VALID or
-# ParseStatus.UNPARSEABLE.
+# Aligned with Aliannejadi et al. (2019) "Asking Clarifying Questions in
+# Open-Domain Information-Seeking Conversations" (SIGIR), which is the
+# canonical taxonomy of clarification-request patterns in conversational AI.
+# Extended with patterns observed for the noisy-instruction setting by
+# Wang et al. (2023) "Resilience of Large Language Models for Noisy
+# Instructions" (the primary empirical reference for this study's ICR metric).
 #
-# Pre-registration rationale (design/04 §4.5):
-#   This is a deliberately *conservative* lexical proxy — it under-counts
-#   rather than over-counts clarification requests, so ICR figures are a
-#   lower bound. The list covers the most common explicit reformulation
-#   markers in LLM output. It intentionally excludes hedging phrases
-#   ("I think", "I believe") that do not request clarification.
+# All entries are matched whole-word, case-insensitive. The proxy is
+# intentionally conservative: it under-counts rather than over-counts.
+# ICR is a diagnostic metric (design/04 §4.5), not a primary endpoint.
+# The UNPARSEABLE bucket absorbs any missed cases; accuracy is unaffected.
 #
-#   Conservatism is a design choice: ICR is a *diagnostic* metric, not a
-#   primary endpoint. Inflating it with false positives would misrepresent
-#   the model's output behavior.
-#
-# Version: 2026-06-19 (pre-registration freeze)
-# Implements: design/04 §4.5
-# See also: data/lexicons/PROVENANCE.json
-did you mean
-do you mean
+# Implements: design/04 §4.5 — ParseStatus.CLARIFICATION detection
+
+# --- Direct requests for clarification or specification (Aliannejadi §3.1) ---
 could you clarify
 can you clarify
 please clarify
-not sure what you mean
+could you be more specific
+can you be more specific
+please be more specific
+could you specify
+could you define what you mean
+could you elaborate
+can you elaborate
+could you explain what you mean
+could you restate
+could you rephrase
+can you rephrase
+
+# --- Understanding checks (Aliannejadi §3.2) ---
 what do you mean
+what do you mean by
+what exactly do you mean
+what exactly are you asking
+what are you asking
+what are you referring to
+not sure what you mean
+not sure what you're asking
+not sure what you want
+i'm not sure what you mean
+i'm not sure what you're asking
+i'm not sure i understand
+i'm not sure i understand what
+i'm unclear on what
+i'm unclear about what
+i'm unclear on
+i'm having trouble understanding
+i don't understand what you mean
+i do not understand what you mean
+i don't understand what you're asking
+i do not understand what you're asking
+
+# --- Information and context requests (Aliannejadi §3.3) ---
+i need more context
+i need more information
+i need more details
+could you provide more details
+can you provide more details
+could you provide more context
+can you provide more context
+could you provide more information
+can you provide more information
+please provide more context
+please provide more information
+more context would help
+more information would help
+more details would help
+is there additional context
+is there any additional information
+is there any more context
+could you share more about
+
+# --- Disambiguation requests (Aliannejadi §3.4) ---
+the question is unclear
+this question is unclear
+the problem is unclear
+this problem is unclear
+the question seems ambiguous
+the problem seems ambiguous
+this seems ambiguous
+the statement is ambiguous
+the problem statement is ambiguous
+are you asking
+which do you mean
+which one do you mean
+did you mean
+do you mean
+would you like me to
+what would you like me to

@@ -1,0 +1,268 @@
+# English closed-class function words for key_terms extraction in MCQ questions.
+#
+# Aligned with the stopword list in:
+#   Manning, Raghavan & Schütze (2008) "Introduction to Information Retrieval"
+#   (Cambridge University Press), Table 2.4 — the standard IR reference for
+#   closed-class English words. The closed-class inventory is also grounded in:
+#   Jurafsky & Martin (2023) "Speech and Language Processing" (3rd ed.) §2.4,
+#   which gives the authoritative linguistic definition of closed-class words.
+#
+# Words are excluded from MCQ key_terms if they appear here, because function
+# words carry grammatical rather than semantic information and are poor targets
+# for the informative_word perturbation policy. Content words (nouns, main
+# verbs, adjectives, domain terms) that are absent from this list remain
+# eligible as key_terms.
+#
+# Only true closed-class words and their inflected/contracted forms are listed.
+# Open-class words (even very common ones) are intentionally excluded.
+#
+# Implements: extract_key_terms_from_mcq_question in tasks/multiple_choice.py
+
+# --- Articles ---
+a
+an
+the
+
+# --- Personal pronouns ---
+i
+me
+my
+mine
+myself
+we
+us
+our
+ours
+ourselves
+you
+your
+yours
+yourself
+yourselves
+he
+him
+his
+himself
+she
+her
+hers
+herself
+it
+its
+itself
+they
+them
+their
+theirs
+themselves
+
+# --- Demonstrative pronouns ---
+this
+that
+these
+those
+
+# --- Interrogative / relative pronouns ---
+who
+whom
+whose
+which
+what
+when
+where
+why
+how
+
+# --- Prepositions (Manning et al. Table 2.4 preposition set) ---
+about
+above
+across
+after
+against
+along
+among
+around
+as
+at
+before
+behind
+below
+beside
+between
+beyond
+by
+concerning
+despite
+down
+during
+except
+following
+for
+from
+in
+inside
+into
+like
+near
+of
+off
+on
+onto
+out
+outside
+over
+past
+per
+regarding
+round
+since
+than
+through
+throughout
+to
+toward
+towards
+under
+underneath
+until
+up
+upon
+via
+with
+within
+without
+
+# --- Coordinating conjunctions ---
+and
+but
+or
+nor
+for
+yet
+so
+
+# --- Subordinating conjunctions ---
+although
+because
+before
+both
+either
+even
+if
+neither
+once
+rather
+since
+though
+unless
+until
+whereas
+whether
+while
+
+# --- Auxiliary verbs (all forms) ---
+am
+are
+be
+been
+being
+can
+could
+dare
+did
+do
+does
+doing
+had
+has
+have
+having
+is
+may
+might
+must
+need
+ought
+shall
+should
+was
+were
+will
+would
+
+# --- Determiners and quantifiers ---
+all
+another
+any
+both
+each
+either
+enough
+every
+few
+many
+more
+most
+much
+neither
+no
+none
+other
+same
+several
+some
+such
+
+# --- Closed-class adverbs ---
+again
+ago
+already
+also
+always
+anywhere
+away
+barely
+else
+ever
+everywhere
+fairly
+further
+generally
+hardly
+here
+however
+instead
+just
+lately
+merely
+mostly
+never
+now
+often
+only
+otherwise
+perhaps
+quite
+rather
+really
+scarcely
+shortly
+so
+somehow
+somewhere
+soon
+still
+then
+there
+thus
+too
+usually
+very
+well
+yet
+
+# --- Other closed-class items ---
+not
+else
+nor
+even

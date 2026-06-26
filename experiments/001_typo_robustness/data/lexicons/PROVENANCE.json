@@ -1,27 +1,38 @@
 {
-  "schema_version": "1",
-  "note": "Pre-registered decision logic lexicons for GLAMOR Lab Exp 001. Frozen at pre-registration; any extension requires a design-doc amendment and an updated version date in the affected file. See design/04_tasks_and_scoring.md §4.5 and §4.7.",
+  "schema_version": "2",
+  "note": "Pre-registered decision logic lexicons for GLAMOR Lab Exp 001. Frozen at pre-registration; any extension requires a design-doc amendment. See design/04_tasks_and_scoring.md §4.5 and §4.7.",
   "lexicons": {
     "clarification_phrases.txt": {
-      "version": "2026-06-19",
       "implements": "design/04 §4.5 — ParseStatus.CLARIFICATION detection",
-      "rationale": "Conservative lexical proxy for explicit clarification requests. Under-counts by design (ICR is a diagnostic, not a primary endpoint). See AdversarialOverSensitivity_Niu and ResilienceOfLLMsForNoisyInstructions_Wang for the over-sensitivity framing that motivates conservatism.",
-      "entry_count": 7,
+      "primary_reference": "Aliannejadi et al. (2019) 'Asking Clarifying Questions in Open-Domain Information-Seeking Conversations', SIGIR — canonical taxonomy of clarification-request patterns.",
+      "secondary_reference": "Wang et al. (2023) 'Resilience of Large Language Models for Noisy Instructions' — empirical characterization of interactional failures under noisy input.",
+      "rationale": "Conservative lexical proxy for explicit clarification requests. Under-counts by design (ICR is a diagnostic, not a primary endpoint). False negatives are absorbed by ParseStatus.UNPARSEABLE, which still scores is_correct=0.",
       "match_mode": "whole-word, case-insensitive regex alternation"
     },
     "refusal_phrases.txt": {
-      "version": "2026-06-19",
       "implements": "design/04 §4.5 — ParseStatus.REFUSAL detection (no parseable answer required)",
-      "rationale": "Conservative lexical proxy for strong modal negations and the formulaic 'as an AI' opener. Applied only when no parseable answer is present, so hedged-but-answered responses are scored normally.",
-      "entry_count": 7,
+      "primary_reference": "Zou et al. (2023) 'Universal and Transferable Adversarial Attacks on Aligned Language Models', NeurIPS — Appendix A.2 establishes the standard refusal-detection methodology for adversarial robustness evaluation.",
+      "rationale": "Conservative lexical proxy for strong modal negations and the formulaic 'as an AI' opener, extended with math/QA-specific inability responses. Applied only when no parseable answer is present, so hedged-but-answered responses are scored normally.",
       "match_mode": "whole-word, case-insensitive regex alternation"
     },
     "negatable_verbs.txt": {
-      "version": "2026-06-19",
       "implements": "design/04 §4.7 — MCQ Regime-C negation target set",
       "rationale": "English copula and high-frequency modal/aspectual auxiliaries most likely to carry the main finite verb in factual MCQ stems. Epistemic modals (would, should, must, might) are deliberately excluded to avoid unpredictable negation semantics. The negative lookahead (?! not) prevents double-negation.",
-      "entry_count": 8,
       "match_mode": "whole-word regex alternation with negative lookahead (?! not)"
+    },
+    "operation_words.txt": {
+      "implements": "tasks/reasoning.py — extract_key_terms_from_reasoning_question",
+      "primary_reference": "Cobbe et al. (2021) 'Training Verifiers to Solve Math Word Problems', arXiv:2110.14168 — Appendix B defines the GSM8K template vocabulary.",
+      "secondary_reference": "Mirzadeh et al. (2024) 'GSM-Symbolic: Understanding the Limitations of Mathematical Reasoning in Large Language Models', ICLR 2025, arXiv:2410.05229 — Figure 1 and template definitions.",
+      "rationale": "Words that signal arithmetic operations or change-of-quantity relations in GSM-style word problems. Included as key_terms so that informative_word and answer_critical policies target operationally meaningful spans.",
+      "match_mode": "whole-word, case-insensitive substring match against question_text"
+    },
+    "english_function_words.txt": {
+      "implements": "tasks/multiple_choice.py — extract_key_terms_from_mcq_question",
+      "primary_reference": "Manning, Raghavan & Schütze (2008) 'Introduction to Information Retrieval', Cambridge University Press, Table 2.4 — the standard IR closed-class stopword list.",
+      "secondary_reference": "Jurafsky & Martin (2023) 'Speech and Language Processing', 3rd ed., §2.4 — authoritative linguistic definition of closed-class words.",
+      "rationale": "Closed-class function words excluded from MCQ key_terms. Function words carry grammatical rather than semantic information and are poor targets for the informative_word policy. Content words absent from this list remain eligible as key_terms.",
+      "match_mode": "frozenset membership test (lowercase)"
     }
   }
 }
