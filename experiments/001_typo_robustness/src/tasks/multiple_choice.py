@@ -1,35 +1,24 @@
-"""Multiple-choice task items: MMLU-Pro.
+"""Multiple-choice task items: MMLU-Pro (primary) and MMLU (contamination contrast).
 
 Provenance
 ----------
-MMLU-Pro (Wang et al., NeurIPS 2024, arXiv:2406.01574) is the multiple-choice
-task. It has ten options (reducing guess-rate confounds) and is markedly more
-prompt-stable than MMLU, which is exactly what a robustness study needs in its
-clean baseline. See docs/PROVENANCE.md §1.2 and design/04 §4.3.
+Items are pre-fetched from HuggingFace once by tools/build_task_items.py using
+the ``load_official_*`` functions below, written to pinned JSONL files with SHA
+provenance, and loaded during a run by ``load_multiple_choice_jsonl``. No live
+HF loading occurs during a run.
 
-Official source (verified June 2026)
-------------------------------------
-HuggingFace dataset ``TIGER-Lab/MMLU-Pro``, license MIT. The test split has
-12,032 examples. Each row's fields are:
-    question_id   int
-    question      str
-    options       sequence[str]   (the option texts, in order)
-    answer        str             (the correct option LETTER, e.g. "C")
-    answer_index  int             (0-based index of the correct option)
-    cot_content   str             (a chain-of-thought exemplar; unused here)
-    category      str             (subject, used for stratified subsampling)
-    src           str
-
-We convert each row into a ``MultipleChoiceItem`` whose options are a dict from
-letter to text, matching the format the rest of the pipeline expects.
+MMLU-Pro (Wang et al., NeurIPS 2024, arXiv:2406.01574): 10-option MCQ,
+  12,032 test items, subject-stratified. HF: ``TIGER-Lab/MMLU-Pro``.
+MMLU (Hendrycks et al., ICLR 2021, arXiv:2009.03300): standard 4-option MCQ.
+  HF: ``cais/mmlu`` (config ``all``). Used as a contamination-contrast partner.
+``make_demonstration_multiple_choice_items`` is a 5-item offline set used ONLY
+  for unit tests; it is not a study dataset.
 """
 
 from __future__ import annotations
 
 import json
-import random
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -94,85 +83,6 @@ def _options_sequence_to_letter_dict(options_sequence) -> dict:
             for index, option_text in enumerate(options_sequence)}
 
 
-def load_official_mmlu_pro(
-        dataset_revision: Optional[str] = None,
-        item_count: Optional[int] = None,
-        categories: Optional[list[str]] = None,
-        seed: int = 1729,
-) -> list[MultipleChoiceItem]:
-    """Load the official ``TIGER-Lab/MMLU-Pro`` test split (design/04 §4.3,
-    docs/PROVENANCE.md §1.2).
-
-    Parameters
-    ----------
-    dataset_revision :
-        Pin the HuggingFace dataset revision for reproducibility (the
-        maintainers have fixed option-formatting issues over time).
-    item_count :
-        If given, take a subject-stratified subsample of about this many items,
-        allocated proportionally across ``category`` so the subsample mirrors the
-        full set's subject distribution.
-    categories :
-        Restrict to these subjects before subsampling, if given.
-    """
-    try:
-        from datasets import load_dataset
-    except ImportError as error:
-        raise ImportError(
-            "loading the official MMLU-Pro dataset requires the 'datasets' "
-            "package (pip install -r requirements.txt)") from error
-
-    dataset = load_dataset(
-        "TIGER-Lab/MMLU-Pro",
-        split="test",
-        revision=dataset_revision,
-    )
-
-    rows = list(dataset)
-    if categories is not None:
-        allowed_categories = set(categories)
-        rows = [row for row in rows if row["category"] in allowed_categories]
-
-    if item_count is not None and item_count < len(rows):
-        rows = _stratified_subsample_by_category(rows, item_count, seed)
-
-    items: list[MultipleChoiceItem] = []
-    for row_index, row in enumerate(rows):
-        options = _options_sequence_to_letter_dict(row["options"])
-        items.append(MultipleChoiceItem(
-            task_id=f"mmlu_pro_{row_index:05d}",
-            task_family=TaskFamily.MMLU_PRO,
-            question=row["question"],
-            options=options,
-            gold_letter=row["answer"],
-            category=row.get("category", ""),
-            key_terms=[],
-        ))
-
-    return items
-
-
-def _stratified_subsample_by_category(rows, item_count, seed):
-    """Return about ``item_count`` rows, allocated proportionally across the
-    ``category`` field so the subsample mirrors the full distribution."""
-    rows_by_category: dict = defaultdict(list)
-    for row in rows:
-        rows_by_category[row["category"]].append(row)
-
-    total_row_count = len(rows)
-    random_generator = random.Random(seed)
-    subsample: list = []
-
-    for category in sorted(rows_by_category):
-        category_rows = rows_by_category[category]
-        proportional_allocation = round(item_count * len(category_rows) / total_row_count)
-        take_count = min(len(category_rows), max(1, proportional_allocation))
-        subsample.extend(random_generator.sample(category_rows, take_count))
-
-    random_generator.shuffle(subsample)
-    return subsample[:item_count]
-
-
 def load_multiple_choice_jsonl(path: Path, task_family: TaskFamily = TaskFamily.MMLU_PRO) -> list[MultipleChoiceItem]:
     """Load multiple-choice items from a JSONL file in the local schema:
         {"question", "options": {"A": ...}, "answer", "gold_letter_if_negated"?,
@@ -231,3 +141,112 @@ def make_demonstration_multiple_choice_items() -> list[MultipleChoiceItem]:
         for index, (question, options, gold_letter, gold_if_negated, key_terms)
         in enumerate(raw_items)
     ]
+
+
+# ---------------------------------------------------------------------------
+# Official HF fetchers (network; called once by tools/build_task_items.py).
+# The ``datasets`` import is lazy so the offline test suite stays network-free.
+# ---------------------------------------------------------------------------
+
+def load_official_mmlu_pro(
+        dataset_revision: Optional[str],
+        item_count: int,
+        seed: int,
+        categories: Optional[list] = None,
+) -> list[MultipleChoiceItem]:
+    """Fetch MMLU-Pro items from HuggingFace (TIGER-Lab/MMLU-Pro).
+
+    Called once by tools/build_task_items.py; requires network access.
+    ``categories`` optionally restricts to a list of MMLU-Pro subject strings;
+    if None, all subjects are included. Items are shuffled deterministically.
+    """
+    try:
+        from datasets import load_dataset as _load_dataset
+    except ImportError as error:
+        raise ImportError(
+            "fetching official datasets requires the 'datasets' package "
+            "(pip install -r requirements.txt)") from error
+
+    import random as _random
+
+    dataset = _load_dataset(
+        "TIGER-Lab/MMLU-Pro", revision=dataset_revision, split="test")
+    records = list(dataset)
+
+    if categories:
+        records = [r for r in records if r.get("category") in categories]
+
+    _random.Random(seed).shuffle(records)
+
+    items: list[MultipleChoiceItem] = []
+    for i, record in enumerate(records):
+        if len(items) >= item_count:
+            break
+        options = _options_sequence_to_letter_dict(record["options"])
+        # Prefer the letter "answer" field; fall back to the integer "answer_index".
+        raw_answer = record.get("answer")
+        if raw_answer and isinstance(raw_answer, str) and raw_answer in options:
+            gold_letter = raw_answer
+        else:
+            answer_index = record.get("answer_index", 0)
+            gold_letter = OPTION_LETTERS[answer_index]
+        items.append(MultipleChoiceItem(
+            task_id=f"mmlu_pro_{i:05d}",
+            task_family=TaskFamily.MMLU_PRO,
+            question=record["question"],
+            options=options,
+            gold_letter=gold_letter,
+            category=record.get("category", ""),
+            key_terms=[],
+        ))
+    return items
+
+
+def load_official_mmlu(
+        dataset_revision: Optional[str],
+        item_count: int,
+        seed: int,
+        categories: Optional[list] = None,
+) -> list[MultipleChoiceItem]:
+    """Fetch standard MMLU items from HuggingFace (cais/mmlu, config ``all``).
+
+    Called once by tools/build_task_items.py; requires network access.
+    Used as the contamination-contrast partner for MMLU-Pro: running the same
+    perturbations on a familiar 4-option benchmark reveals whether degradation
+    patterns hold across option-count and contamination exposure.
+    ``categories`` optionally restricts to a list of MMLU subject strings.
+    """
+    try:
+        from datasets import load_dataset as _load_dataset
+    except ImportError as error:
+        raise ImportError(
+            "fetching official datasets requires the 'datasets' package "
+            "(pip install -r requirements.txt)") from error
+
+    import random as _random
+
+    dataset = _load_dataset("cais/mmlu", "all", revision=dataset_revision, split="test")
+    records = list(dataset)
+
+    if categories:
+        records = [r for r in records if r.get("subject") in categories]
+
+    _random.Random(seed).shuffle(records)
+
+    items: list[MultipleChoiceItem] = []
+    for i, record in enumerate(records):
+        if len(items) >= item_count:
+            break
+        # MMLU choices is a 4-item list; answer is an int 0-3.
+        options = {OPTION_LETTERS[j]: choice for j, choice in enumerate(record["choices"])}
+        gold_letter = OPTION_LETTERS[record["answer"]]
+        items.append(MultipleChoiceItem(
+            task_id=f"mmlu_{i:05d}",
+            task_family=TaskFamily.MMLU,
+            question=record["question"],
+            options=options,
+            gold_letter=gold_letter,
+            category=record.get("subject", ""),
+            key_terms=[],
+        ))
+    return items
