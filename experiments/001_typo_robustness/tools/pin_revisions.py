@@ -67,8 +67,6 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> None:
     arguments = parse_arguments()
 
-    # Import the roster after fixing the sys.path so the package resolves
-    # without `pip install -e .` (the same trick tools/run_tests.py uses).
     sys.path.insert(0, str(_REPO_ROOT / "src"))
     from inference import MODEL_ROSTER, resolve_current_revision
 

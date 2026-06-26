@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from enums import ConditionSource, SemanticClass
-from pipeline.experiment import ExperimentConfiguration, load_task_items
+from pipeline.experiment import DatasetConfig, ExperimentConfiguration, load_task_items
 from perturbation.engine import damerau_levenshtein_distance
 from perturbation import PerturbationError
 import regimes
@@ -309,21 +309,19 @@ def main() -> None:
 
     print(f"loading config:    {args.config}")
     configuration = ExperimentConfiguration.from_yaml(args.config)
-    configuration.reasoning_item_count = args.items
-    configuration.multiple_choice_item_count = args.items
     configuration.seed = args.seed
+    # Force offline mode: override the config's dataset list with the synthetic
+    # generator and the built-in demo MCQ, so this tool works before
+    # build_task_items.py has been run (the main PI review use case).
+    configuration.datasets = [
+        DatasetConfig(key="gsm_symbolic_synthetic", item_count=args.items),
+        DatasetConfig(key="mcq_demo"),
+    ]
+    configuration.asr_items_path = None
 
     print("loading word list ...")
     wordlist = regimes.load_wordlist(args.dictionary)
     is_word = regimes.make_is_word(wordlist)
-
-    # Force offline mode: synthetic reasoning + built-in demo MCQ.
-    # This makes the script work before build_task_items.py has been run,
-    # which is the main use case (PI review before the GPU sweep).
-    from enums import ReasoningSource
-    configuration.reasoning_source = ReasoningSource.SYNTHETIC
-    configuration.multiple_choice_items_path = None
-    configuration.asr_items_path = None
 
     print(f"generating {args.items} items per task type (offline synthetic) ...")
     task_items = load_task_items(configuration)

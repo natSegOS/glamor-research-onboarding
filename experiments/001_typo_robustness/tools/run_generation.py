@@ -7,18 +7,19 @@ itself stays engine-agnostic (so it is testable with the dummy engine), and this
 script holds the one responsibility that needs the model specifications: the
 pin assertion (design/10 §10.5).
 
-Usage (on the GPU machine, after `pip install -r requirements-gpu.txt`):
+Runs on the USC GPU cluster and on Google Colab (T4) via the same vLLM path.
+
+Usage (after `pip install -r requirements-gpu.txt`):
 
     python tools/run_generation.py \\
         --config configs/main.yaml \\
         --model llama_8b_awq \\
-        --backend vllm \\
         --output-directory results/main
 
-For the real study, also:
-  - fill in the model revisions in src/inference/roster.py
-    (resolve_current_revision prints each SHA), and
-  - pin the dataset revisions in the loaders / swap in the official loaders.
+For the main study, also:
+  - fill in model revisions in src/inference/roster.py (use
+    inference.roster.resolve_current_revision), and
+  - pre-fetch dataset JSONL files with tools/build_task_items.py.
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--model", required=True, help="a roster key, e.g. llama_8b_awq")
-    parser.add_argument("--backend", default="vllm", choices=["vllm", "huggingface"])
     parser.add_argument("--output-directory", required=True, type=Path)
     parser.add_argument("--git-commit", default="unpinned",
                         help="the code commit SHA, recorded in every row")
@@ -57,7 +57,7 @@ def main():
     if configuration.is_confirmatory:
         assert_revisions_pinned([specification])
 
-    engine = build_inference_engine(specification, backend=arguments.backend)
+    engine = build_inference_engine(specification)
     is_word = make_is_word(_load_dictionary(arguments.dictionary))
 
     summary = run_experiment(
