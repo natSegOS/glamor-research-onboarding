@@ -18,15 +18,48 @@ MMLU (Hendrycks et al., ICLR 2021, arXiv:2009.03300): standard 4-option MCQ.
 from __future__ import annotations
 
 import json
+import re
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from enums import TaskFamily
+from lexicons import load_word_lexicon
+
+
+_NUMERIC_TOKEN_PATTERN = re.compile(r'\b\d[\d,]*(?:\.\d+)?\b')
+_WORD_PATTERN = re.compile(r'\b[a-zA-Z][a-zA-Z\-]*\b')
+
+ENGLISH_FUNCTION_WORDS: frozenset[str] = load_word_lexicon("english_function_words.txt")
 
 
 OPTION_LETTERS = "ABCDEFGHIJ"          # MMLU-Pro has up to ten options
+
+
+def extract_key_terms_from_mcq_question(question_text: str) -> list[str]:
+    """Extract semantically critical tokens from a multiple-choice question.
+
+    Returns numeric tokens followed by content words: words of 4+ characters
+    that are not common English function words. Deduplicates while preserving
+    order. Used by the informative_word and answer_critical perturbation
+    policies to target high-information spans.
+    """
+
+    numeric_tokens = _NUMERIC_TOKEN_PATTERN.findall(question_text)
+    content_words = [
+        word.lower()
+        for word in _WORD_PATTERN.findall(question_text)
+        if len(word) >= 4 and word.lower() not in ENGLISH_FUNCTION_WORDS
+    ]
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for term in numeric_tokens + content_words:
+        if term not in seen:
+            seen.add(term)
+            result.append(term)
+    return result
 
 
 MULTIPLE_CHOICE_INSTRUCTION = (
@@ -197,7 +230,7 @@ def load_official_mmlu_pro(
             options=options,
             gold_letter=gold_letter,
             category=record.get("category", ""),
-            key_terms=[],
+            key_terms=extract_key_terms_from_mcq_question(record["question"]),
         ))
     return items
 
@@ -247,6 +280,6 @@ def load_official_mmlu(
             options=options,
             gold_letter=gold_letter,
             category=record.get("subject", ""),
-            key_terms=[],
+            key_terms=extract_key_terms_from_mcq_question(record["question"]),
         ))
     return items

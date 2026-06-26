@@ -23,6 +23,25 @@ from typing import Sequence
 _LEXICONS_DIR = Path(__file__).resolve().parent.parent / "data" / "lexicons"
 
 
+def load_word_lexicon(name: str) -> frozenset[str]:
+    """Load a word lexicon by filename from data/lexicons/.
+
+    Returns a frozenset of lowercase stripped words. Lines beginning with '#'
+    and blank lines are ignored. Suitable for fast membership tests.
+    """
+    path = _LEXICONS_DIR / name
+    words: set[str] = set()
+    with open(path, encoding="utf-8") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            words.add(line.lower())
+    if not words:
+        raise ValueError(f"lexicon {name!r} is empty or contains only comments")
+    return frozenset(words)
+
+
 def load_phrase_lexicon(name: str) -> list[str]:
     """Load a phrase lexicon by filename from data/lexicons/.
 

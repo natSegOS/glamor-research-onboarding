@@ -71,6 +71,18 @@ MODEL_ROSTER: dict[str, ModelSpecification] = {
         "qwen_7b_awq", "Qwen/Qwen2.5-7B-Instruct-AWQ", REVISION_PLACEHOLDER, Precision.AWQ),
     "mistral_7b": ModelSpecification(
         "mistral_7b", "mistralai/Mistral-7B-Instruct-v0.3", REVISION_PLACEHOLDER, Precision.FP16),
+
+    # Cross-family regime-audit judge. Gemma 2 9B is from Google DeepMind —
+    # a distinct pre-training corpus and architecture from every generation
+    # model in this study (Llama = Meta, Qwen = Alibaba, Mistral = Mistral AI).
+    # Cross-family selection is required so that the judge's own tendencies
+    # are not correlated with the tendencies of the models being judged.
+    # The judge always runs at temperature=0 (greedy) via run_judge() in
+    # src/judge.py; all decisions are cached content-addressably so the judge
+    # is called at most once per unique (judge_revision, prompt_version, input).
+    "gemma2_9b_judge": ModelSpecification(
+        "gemma2_9b_judge", "google/gemma-2-9b-it", REVISION_PLACEHOLDER, Precision.FP16,
+        gpu_memory_utilization=0.90),
 }
 
 

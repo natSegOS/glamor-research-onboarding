@@ -1,32 +1,24 @@
-"""The config-driven orchestrator: load tasks, build the perturbation conditions,
-attach tokenization metrics, run the models, and analyze.
+"""The config-driven orchestrator: load tasks, build perturbation requests,
+attach tokenization metrics, run the models, and write generation rows.
 
-Provenance
-----------
-This is the top of the import graph; it ties together every module per the
-design suite. It exists so that a single YAML file fully specifies a run
-(design/08 §8.2), which is what makes the experiment reproducible and the pilot
-and main study differ only by configuration.
+A single YAML file fully specifies a run (design/08 §8.2), which is what makes
+the pilot and main study differ only by configuration. The orchestrator is
+deliberately engine-agnostic — it accepts any built engine (or the
+DeterministicDummyEngine), so the full pipeline is testable without a GPU.
 
-What this module guarantees (each was a fix from the code reviews)
-------------------------------------------------------------------
-- Tokenization metrics ARE logged. For every perturbed request, build_requests
-  computes token_inflation_ratio, subword_count_change, and fragmentation_stratum
-  with the model's own tokenizer and writes them into extra_fields, so the
-  primary mediation analysis has its inputs (was review item C2).
-- key_terms ARE passed to the perturbation engine, so the informative_word and
-  answer_critical policies actually target key terms instead of silently
-  skipping (was review item C3).
-- The ASR arm IS wired in. When a run's perturbation families include an ASR
-  source, build_requests reads pre-built AsrItems and emits asr_clean / asr_noisy
-  requests alongside the keyboard ones (was review item S1).
-- scope IS a configurable dimension passed through to the engine via scope_spans,
-  not hardcoded (was review item S2).
+Key guarantees
+--------------
+- Tokenization metrics are logged on every perturbed row: token_inflation_ratio,
+  subword_count_change, and fragmentation_stratum, computed with the model's own
+  tokenizer. These are the inputs to the primary mediation analysis.
+- key_terms are passed to the perturbation engine, so informative_word and
+  answer_critical policies target the correct words.
+- The ASR arm is wired in: when conditions include an ASR source,
+  build_requests reads pre-built AsrItems and emits the corresponding rows.
+- scope is a configurable dimension passed through to the engine via
+  scope_spans, not hardcoded.
 - Confirmatory runs assert every model revision is pinned before generating
   (design/10 §10.5).
-
-The orchestrator is deliberately engine-agnostic: it accepts a built engine (or
-the DeterministicDummyEngine), so the whole flow is testable without a GPU.
 """
 
 from __future__ import annotations
@@ -41,9 +33,11 @@ import yaml
 
 from enums import (
     SemanticClass, Operation, SelectionPolicy, Scope,
-    ConditionSource, Precision,
+    ConditionSource, Precision, ShardType,
     REASONING_FAMILIES,
 )
+
+_UINT32_MAX = 0xFFFFFFFF
 import regimes
 from perturbation import PerturbationError
 from pipeline.runner import (
@@ -183,24 +177,22 @@ def _gold_of(task_item):
 
 
 # ---------------------------------------------------------------------------
-# Request building — where the review fixes live.
+# Request building.
 # ---------------------------------------------------------------------------
 
 def build_requests(
         task_items: Sequence,
         conditions: Sequence[PerturbationCondition],
         is_word: Callable[[str], bool],
-        tokenizer,
+        tokenizer: object,
         seed: int,
         asr_items_by_task: Optional[dict] = None,
 ) -> list[GenerationRequest]:
     """Build the full list of clean and perturbed generation requests.
 
-    For each clean item we emit exactly one clean request, then for each
-    condition and each edit budget we emit perturbed requests. Tokenization
-    metrics are attached to every perturbed request (fix C2); key_terms flow into
-    the engine (fix C3); scope is honored via scope_spans (fix S2); and ASR
-    conditions draw from pre-built AsrItems (fix S1).
+    For each task item we emit exactly one clean request, then for each
+    condition and each edit budget we emit perturbed requests with tokenization
+    metrics attached.
     """
     asr_items_by_task = asr_items_by_task or {}
     requests: list[GenerationRequest] = []
@@ -249,8 +241,8 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
     requests: list[GenerationRequest] = []
 
     content_text = _content_text_of(task_item)
-    key_terms = list(getattr(task_item, "key_terms", []))      # fix C3: pass key terms
-    scope_spans = getattr(task_item, "scope_spans", None)      # fix S2: honor scope
+    key_terms = list(getattr(task_item, "key_terms", []))
+    scope_spans = getattr(task_item, "scope_spans", None)
 
     for edit_budget in condition.edit_budgets:
         item_seed = regimes.derived_seed(
@@ -319,7 +311,7 @@ def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
 
 def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits,
                          is_word, item_seed, edit_budget) -> dict:
-    """Compute the tokenization metrics for a perturbed item (fix C2).
+    """Compute the tokenization metrics for a perturbed item.
 
     Token-inflation is whole-text; subword-count change and fragmentation
     stratum are for the single most-edited word, which is the unit the mediation
@@ -347,7 +339,7 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits,
 
 def _build_asr_requests(task_item, condition, gold_answer, clean_prompt,
                         asr_items, tokenizer, is_word) -> list[GenerationRequest]:
-    """Build requests from pre-built AsrItems for one task (fix S1).
+    """Build requests from pre-built AsrItems for one task.
 
     Each AsrItem already carries its transcription, measured edit distance,
     severity band, and clean/noisy tag. We substitute the transcription for the
@@ -381,7 +373,7 @@ def _build_asr_requests(task_item, condition, gold_answer, clean_prompt,
                 "scope": Scope.CONTENT,
                 "edit_budget": asr_item["damerau_levenshtein_distance"],
             },
-            seed=task_item.task_id.__hash__() & 0xFFFFFFFF,
+            seed=task_item.task_id.__hash__() & _UINT32_MAX,
             clean_prompt=clean_prompt,
             extra_fields=token_metric_fields,
         ))
@@ -444,30 +436,43 @@ def run_experiment(
     manifest = ShardManifest(output_directory / f"{configuration.run_id}_manifest.json")
     output_path = output_directory / f"{configuration.run_id}_generations.jsonl"
 
-    total_rows_written = 0
-    for shard_suffix, shard_requests, max_new_tokens in (
-        ("reasoning", reasoning_requests, configuration.max_new_tokens_reasoning),
-        ("multiple_choice", other_requests, configuration.max_new_tokens_multiple_choice),
-    ):
-        if not shard_requests:
-            continue
-        total_rows_written += run_shard(
-            shard_id=f"{configuration.run_id}_{shard_suffix}",
-            requests=shard_requests,
-            engine=engine,
-            output_path=output_path,
-            manifest=manifest,
-            model_id=model_id,
-            model_revision=model_revision,
-            quantization_method=quantization_method,
-            max_new_tokens=max_new_tokens,
-            git_commit=git_commit,
-        )
+    from progress import ProgressBar
+
+    total_new_rows = 0
+    total_pending = len(requests)
+
+    shard_schedule = [
+        (ShardType.REASONING, reasoning_requests,
+         configuration.max_new_tokens_reasoning),
+        (ShardType.MULTIPLE_CHOICE, other_requests,
+         configuration.max_new_tokens_multiple_choice),
+    ]
+
+    with ProgressBar(
+            total=total_pending,
+            description=f"generating [{model_id}]",
+    ) as progress:
+        for shard_type, shard_requests, max_new_tokens in shard_schedule:
+            if not shard_requests:
+                continue
+            total_new_rows += run_shard(
+                shard_id=f"{configuration.run_id}_{shard_type}",
+                requests=shard_requests,
+                engine=engine,
+                output_path=output_path,
+                manifest=manifest,
+                model_id=model_id,
+                model_revision=model_revision,
+                quantization_method=quantization_method,
+                max_new_tokens=max_new_tokens,
+                git_commit=git_commit,
+                progress_callback=progress.advance,
+            )
 
     return {
         "run_id": configuration.run_id,
         "task_item_count": len(task_items),
         "request_count": len(requests),
-        "rows_written": total_rows_written,
+        "new_rows_written": total_new_rows,
         "output_path": str(output_path),
     }

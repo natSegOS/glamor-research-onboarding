@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from enums import TaskFamily, REASONING_FAMILIES, MCQ_FAMILIES
+from enums import DatasetRole, TaskFamily, TaskType, REASONING_FAMILIES, MCQ_FAMILIES
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ class DatasetSpec:
     loader:
         Callable that returns a list of task items.
     task_type:
-        ``"reasoning"`` (numeric answer) or ``"mcq"`` (letter answer).
+        ``TaskType.REASONING`` or ``TaskType.MULTIPLE_CHOICE``.
     task_family:
         The ``TaskFamily`` enum value; determines scorer routing and is passed
         to JSONL loaders as the default when items lack a ``task_family`` field.
@@ -69,11 +69,11 @@ class DatasetSpec:
     """
     key: str
     loader: Optional[Callable]
-    task_type: str
+    task_type: TaskType
     task_family: TaskFamily
     scorer_families: frozenset
     default_n: int
-    role: str
+    role: DatasetRole
     hf_repo: Optional[str] = None
     hf_config: Optional[str] = None
     hf_split: str = "test"
@@ -108,11 +108,11 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "gsm_symbolic_jsonl": DatasetSpec(
         key="gsm_symbolic_jsonl",
         loader=load_reasoning_jsonl,
-        task_type="reasoning",
+        task_type=TaskType.REASONING,
         task_family=TaskFamily.GSM_SYMBOLIC_OFFICIAL,
         scorer_families=REASONING_FAMILIES,
         default_n=600,
-        role="primary",
+        role=DatasetRole.PRIMARY,
         hf_repo="apple/GSM-Symbolic",
         hf_config="main",
         hf_split="test",
@@ -120,11 +120,11 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "mmlu_pro_jsonl": DatasetSpec(
         key="mmlu_pro_jsonl",
         loader=load_multiple_choice_jsonl,
-        task_type="mcq",
+        task_type=TaskType.MULTIPLE_CHOICE,
         task_family=TaskFamily.MMLU_PRO,
         scorer_families=MCQ_FAMILIES,
         default_n=600,
-        role="primary",
+        role=DatasetRole.PRIMARY,
         hf_repo="TIGER-Lab/MMLU-Pro",
         hf_split="test",
     ),
@@ -138,11 +138,11 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "gsm8k_jsonl": DatasetSpec(
         key="gsm8k_jsonl",
         loader=load_reasoning_jsonl,
-        task_type="reasoning",
+        task_type=TaskType.REASONING,
         task_family=TaskFamily.GSM8K,
         scorer_families=REASONING_FAMILIES,
         default_n=600,
-        role="contamination_contrast",
+        role=DatasetRole.CONTAMINATION_CONTRAST,
         hf_repo="openai/gsm8k",
         hf_config="main",
         hf_split="test",
@@ -150,11 +150,11 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "mmlu_jsonl": DatasetSpec(
         key="mmlu_jsonl",
         loader=load_multiple_choice_jsonl,
-        task_type="mcq",
+        task_type=TaskType.MULTIPLE_CHOICE,
         task_family=TaskFamily.MMLU,
         scorer_families=MCQ_FAMILIES,
         default_n=600,
-        role="contamination_contrast",
+        role=DatasetRole.CONTAMINATION_CONTRAST,
         hf_repo="cais/mmlu",
         hf_config="all",
         hf_split="test",
@@ -167,21 +167,21 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "gsm_symbolic_synthetic": DatasetSpec(
         key="gsm_symbolic_synthetic",
         loader=generate_synthetic_reasoning_items,
-        task_type="reasoning",
+        task_type=TaskType.REASONING,
         task_family=TaskFamily.GSM_SYMBOLIC_SYNTHETIC,
         scorer_families=REASONING_FAMILIES,
         default_n=150,
-        role="smoke_test",
+        role=DatasetRole.SMOKE_TEST,
         hf_repo=None,
     ),
     "mcq_demo": DatasetSpec(
         key="mcq_demo",
         loader=make_demonstration_multiple_choice_items,
-        task_type="mcq",
+        task_type=TaskType.MULTIPLE_CHOICE,
         task_family=TaskFamily.MCQ_DEMO,
         scorer_families=MCQ_FAMILIES,
         default_n=5,
-        role="smoke_test",
+        role=DatasetRole.SMOKE_TEST,
         hf_repo=None,
     ),
 }
