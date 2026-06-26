@@ -1,39 +1,27 @@
-"""Reasoning task items: GSM-Symbolic.
+"""Reasoning task items: GSM-Symbolic (primary) and GSM8K (contamination contrast).
 
 Provenance
 ----------
-GSM-Symbolic (Mirzadeh et al., ICLR 2025, arXiv:2410.05229) generates reasoning
-questions from symbolic templates with sampled names and numeric values under
-explicit constraints. We use it because it is contamination-controlled and
-because the template knows its own answer function, which lets Regime C
-recompute the gold answer exactly after a numeric edit. See docs/PROVENANCE.md
-§1.1 and design/04 §4.2.
+GSM-Symbolic (Mirzadeh et al., ICLR 2025, arXiv:2410.05229) is the primary
+reasoning task. GSM8K (Cobbe et al., 2021, arXiv:2110.14168) is the standard
+benchmark used as a contamination-contrast partner.
 
-Two clearly-separated sources
------------------------------
-1. OFFICIAL  ``load_official_gsm_symbolic`` loads Apple's released dataset
-   (``apple/GSM-Symbolic`` on HuggingFace). This is the primary, citable source.
-   IMPORTANT: Apple released the templates and a sample of 50 generated
-   instances per template, but NOT their data generator, so the official data
-   is capped at 50 instances per template. Use this as the headline source and
-   for the contamination contrast.
+Items are pre-fetched from HuggingFace once by tools/build_task_items.py using
+the ``load_official_*`` functions below, written to pinned JSONL files with SHA
+provenance, and loaded during a run by ``load_reasoning_jsonl``. No live HF
+loading occurs during a run.
 
-2. SYNTHETIC ``generate_synthetic_reasoning_items`` is an in-house generator
-   written in the SPIRIT of GSM-Symbolic, used only when a per-cell sample size
-   needs more items than the official 50-per-template release provides. Every
-   synthetic template's answer function is unit-tested. The paper must describe
-   these as "synthetic, GSM-Symbolic-style" items, never as the Apple dataset.
+``generate_synthetic_reasoning_items`` is an offline generator used for offline
+unit tests and for Regime C operand-swap (which needs the template's answer
+function). It is NOT used in the main study or pilot — those use JSONL.
 
-The official loader returns items with the SAME interface as the synthetic
-generator (``ReasoningItem``), so the rest of the pipeline is agnostic to which
-source produced an item; only the ``source`` field distinguishes them.
+All loaders return ``ReasoningItem`` objects; the pipeline is source-agnostic.
 """
 
 from __future__ import annotations
 
 import json
 import random
-import re
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -255,110 +243,24 @@ def generate_synthetic_reasoning_items(
     return items
 
 
-# ---------------------------------------------------------------------------
-# Official loader (apple/GSM-Symbolic on HuggingFace).
-# ---------------------------------------------------------------------------
-
-# The final-answer line in a GSM-Symbolic answer field is "#### <number>"
-# (the dataset card states the answer format matches GSM8K).
-_FINAL_ANSWER_LINE = re.compile(r"####\s*(-?[\d,]+(?:\.\d+)?)")
-
-
-def _extract_official_gold_answer(answer_field: str) -> int:
-    """Parse the integer gold answer from an official GSM-Symbolic answer field,
-    whose last line is '#### <number>'."""
-    matches = _FINAL_ANSWER_LINE.findall(answer_field)
-    if not matches:
-        raise ValueError(f"no '#### <number>' line in answer field: {answer_field!r}")
-    return int(float(matches[-1].replace(",", "")))
-
-
-def load_official_gsm_symbolic(
-        configuration_name: str = "main",
-        dataset_revision: Optional[str] = None,
-        item_count: Optional[int] = None,
-        seed: int = 1729,
-) -> list[ReasoningItem]:
-    """Load Apple's official ``apple/GSM-Symbolic`` dataset (design/04 §4.2,
-    docs/PROVENANCE.md §1.1).
-
-    Parameters
-    ----------
-    configuration_name : "main" | "p1" | "p2"
-        GSM-Symbolic difficulty variant. p1 and p2 add 1 and 2 extra clauses
-        respectively (harder); "main" is the default difficulty.
-    dataset_revision :
-        Pin the HuggingFace dataset revision for reproducibility. Strongly
-        recommended for any confirmatory run (the maintainers have fixed
-        formatting issues over time).
-    item_count :
-        If given, take a seeded random subsample of this many items.
-
-    Note: the official items do not carry a Python answer function, so they do
-    NOT support the Regime C operand swap (that uses synthetic items). They are
-    used for Regimes A and B and as the contamination-controlled clean baseline.
-    Key terms are extracted by parsing numeric tokens from the question, which is
-    sufficient for the keyboard-typo policies that target content words.
-    """
-    try:
-        from datasets import load_dataset
-    except ImportError as error:
-        raise ImportError(
-            "loading the official GSM-Symbolic dataset requires the 'datasets' "
-            "package (pip install -r requirements.txt)") from error
-
-    dataset = load_dataset(
-        "apple/GSM-Symbolic",
-        name=configuration_name,
-        split="test",
-        revision=dataset_revision,
-    )
-
-    rows = list(dataset)
-    if item_count is not None and item_count < len(rows):
-        random.Random(seed).shuffle(rows)
-        rows = rows[:item_count]
-
-    items: list[ReasoningItem] = []
-    for row_index, row in enumerate(rows):
-        question_text = row["question"]
-        gold_answer = _extract_official_gold_answer(row["answer"])
-        numeric_key_terms = re.findall(r"\d[\d,]*", question_text)
-
-        items.append(ReasoningItem(
-            task_id=f"gsm_symbolic_official_{configuration_name}_{row_index:05d}",
-            task_family=TaskFamily.GSM_SYMBOLIC_OFFICIAL,
-            source=TaskFamily.GSM_SYMBOLIC_OFFICIAL,
-            question_text=question_text,
-            instruction=REASONING_INSTRUCTION,
-            gold_answer=gold_answer,
-            key_terms=numeric_key_terms,
-            template=None,
-            parameters={},
-        ))
-
-    return items
-
-
 def load_reasoning_jsonl(
         path: Path,
-        task_family: TaskFamily = TaskFamily.GSM_SYMBOLIC,
+        task_family: TaskFamily = TaskFamily.GSM_SYMBOLIC_OFFICIAL,
         item_count: Optional[int] = None,
 ) -> list[ReasoningItem]:
-    """Load reasoning items from a JSONL file exported by tools/build_task_items.py.
+    """Load reasoning items from a JSONL file produced by tools/build_task_items.py.
 
-    This is the loader for a pre-exported, pinned subsample so a confirmatory
-    run does not need live network access to HuggingFace. Version pinning and
-    subsampling happen upstream when the subsample is exported.
+    The file is a pre-fetched, SHA-pinned subsample; no network access is required
+    during a run. The registry's ``call_loader`` passes ``task_family`` from the
+    spec so items lacking a per-record field are tagged correctly.
 
     Parameters
     ----------
     path :
         Path to the JSONL file (one JSON object per line).
     task_family :
-        Overrides the ``task_family`` field in the output items. Pass
-        ``TaskFamily.GSM_SYMBOLIC_OFFICIAL`` if the file was produced by
-        ``tools/build_task_items.py``.
+        Default ``task_family`` for items that lack a ``task_family`` field in the
+        JSONL record. The per-record value takes precedence when present.
     item_count :
         If given, return at most this many items.
     """
@@ -384,3 +286,96 @@ def load_reasoning_jsonl(
         items = items[:item_count]
 
     return items
+
+
+# ---------------------------------------------------------------------------
+# Official HF fetchers (network; called once by tools/build_task_items.py).
+# The ``datasets`` import is lazy so the offline test suite stays network-free.
+# ---------------------------------------------------------------------------
+
+def _parse_gsm_answer(answer_text: str) -> Optional[int]:
+    """Extract the integer after ``#### `` in a GSM-style answer string."""
+    import re as _re
+    match = _re.search(r"####\s*([\-\d,]+)", answer_text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _fetch_gsm_from_hf(
+        hf_repo: str,
+        hf_config: str,
+        dataset_revision: Optional[str],
+        item_count: int,
+        seed: int,
+        task_family: TaskFamily,
+) -> list[ReasoningItem]:
+    """Shared HF-fetch helper for GSM-style datasets (one question + #### answer)."""
+    try:
+        from datasets import load_dataset as _load_dataset
+    except ImportError as error:
+        raise ImportError(
+            "fetching official datasets requires the 'datasets' package "
+            "(pip install -r requirements.txt)") from error
+
+    dataset = _load_dataset(hf_repo, hf_config, revision=dataset_revision, split="test")
+    records = list(dataset)
+    random.Random(seed).shuffle(records)
+
+    items: list[ReasoningItem] = []
+    for i, record in enumerate(records):
+        if len(items) >= item_count:
+            break
+        gold = _parse_gsm_answer(record["answer"])
+        if gold is None:
+            continue
+        items.append(ReasoningItem(
+            task_id=f"{task_family}_{i:05d}",
+            task_family=task_family,
+            source=task_family,
+            question_text=record["question"],
+            instruction=REASONING_INSTRUCTION,
+            gold_answer=gold,
+            key_terms=[],
+            template=None,
+            parameters={},
+        ))
+    return items
+
+
+def load_official_gsm_symbolic(
+        configuration_name: str,
+        dataset_revision: Optional[str],
+        item_count: int,
+        seed: int,
+) -> list[ReasoningItem]:
+    """Fetch GSM-Symbolic items from HuggingFace (apple/GSM-Symbolic).
+
+    Called once by tools/build_task_items.py; requires network access.
+    ``configuration_name`` selects the difficulty variant (``"main"``, ``"p1"``,
+    or ``"p2"``). Items are shuffled deterministically with ``seed`` before
+    subsampling so the exported JSONL is reproducible.
+    """
+    return _fetch_gsm_from_hf(
+        "apple/GSM-Symbolic", configuration_name, dataset_revision,
+        item_count, seed, TaskFamily.GSM_SYMBOLIC_OFFICIAL)
+
+
+def load_official_gsm8k(
+        dataset_revision: Optional[str],
+        item_count: int,
+        seed: int,
+) -> list[ReasoningItem]:
+    """Fetch GSM8K items from HuggingFace (openai/gsm8k, config ``main``).
+
+    Called once by tools/build_task_items.py; requires network access.
+    Used as the contamination-contrast partner for GSM-Symbolic: running the same
+    perturbations on familiar memorised items versus fresh items reveals whether
+    degradation is driven by content knowledge or surface-form brittleness.
+    """
+    return _fetch_gsm_from_hf(
+        "openai/gsm8k", "main", dataset_revision,
+        item_count, seed, TaskFamily.GSM8K)
