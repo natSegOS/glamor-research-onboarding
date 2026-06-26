@@ -48,7 +48,7 @@ def _make_request(task_id, is_clean=True, edit_budget=0,
 def test_deterministic_row_id_is_stable():
     """Row ID is independent of dict key order."""
     vector = {"semantic_class": SemanticClass.A, "operation": Operation.SUBSTITUTE,
-              "selection_policy": SelectionPolicy.UNIFORM, "scope": Scope.ANYWHERE, "edit_budget": 2}
+              "selection_policy": SelectionPolicy.KEYBOARD_NEIGHBOR, "scope": Scope.ANYWHERE, "edit_budget": 2}
     first = deterministic_row_id("rev1", "t1", vector, 7, False)
     second = deterministic_row_id("rev1", "t1", dict(reversed(list(vector.items()))), 7, False)
     assert first == second
@@ -56,28 +56,28 @@ def test_deterministic_row_id_is_stable():
 
 def test_row_id_changes_with_model_revision():
     vector = {"semantic_class": SemanticClass.A, "operation": Operation.SUBSTITUTE,
-              "selection_policy": SelectionPolicy.UNIFORM, "scope": Scope.ANYWHERE, "edit_budget": 2}
+              "selection_policy": SelectionPolicy.KEYBOARD_NEIGHBOR, "scope": Scope.ANYWHERE, "edit_budget": 2}
     base = deterministic_row_id("rev1", "t1", vector, 7, False)
     assert base != deterministic_row_id("rev2", "t1", vector, 7, False)
 
 
 def test_row_id_changes_with_task_id():
     vector = {"semantic_class": SemanticClass.A, "operation": Operation.SUBSTITUTE,
-              "selection_policy": SelectionPolicy.UNIFORM, "scope": Scope.ANYWHERE, "edit_budget": 2}
+              "selection_policy": SelectionPolicy.KEYBOARD_NEIGHBOR, "scope": Scope.ANYWHERE, "edit_budget": 2}
     base = deterministic_row_id("rev1", "t1", vector, 7, False)
     assert base != deterministic_row_id("rev1", "t2", vector, 7, False)
 
 
 def test_row_id_changes_with_seed():
     vector = {"semantic_class": SemanticClass.A, "operation": Operation.SUBSTITUTE,
-              "selection_policy": SelectionPolicy.UNIFORM, "scope": Scope.ANYWHERE, "edit_budget": 2}
+              "selection_policy": SelectionPolicy.KEYBOARD_NEIGHBOR, "scope": Scope.ANYWHERE, "edit_budget": 2}
     base = deterministic_row_id("rev1", "t1", vector, 7, False)
     assert base != deterministic_row_id("rev1", "t1", vector, 8, False)
 
 
 def test_row_id_changes_with_is_clean():
     vector = {"semantic_class": SemanticClass.A, "operation": Operation.SUBSTITUTE,
-              "selection_policy": SelectionPolicy.UNIFORM, "scope": Scope.ANYWHERE, "edit_budget": 2}
+              "selection_policy": SelectionPolicy.KEYBOARD_NEIGHBOR, "scope": Scope.ANYWHERE, "edit_budget": 2}
     dirty = deterministic_row_id("rev1", "t1", vector, 7, False)
     clean = deterministic_row_id("rev1", "t1", vector, 7, True)
     assert dirty != clean
@@ -86,7 +86,7 @@ def test_row_id_changes_with_is_clean():
 def test_row_id_changes_with_vector_value():
     """Changing a single value in the state vector must change the ID."""
     v1 = {"semantic_class": SemanticClass.A, "operation": Operation.SUBSTITUTE,
-          "selection_policy": SelectionPolicy.UNIFORM, "scope": Scope.ANYWHERE, "edit_budget": 2}
+          "selection_policy": SelectionPolicy.KEYBOARD_NEIGHBOR, "scope": Scope.ANYWHERE, "edit_budget": 2}
     v2 = {**v1, "edit_budget": 3}
     assert deterministic_row_id("rev1", "t1", v1, 7, False) != deterministic_row_id("rev1", "t1", v2, 7, False)
 

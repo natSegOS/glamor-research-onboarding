@@ -10,7 +10,7 @@ import json
 
 from enums import (
     Operation, SelectionPolicy, Scope, Unit, SemanticClass, TaskFamily,
-    ParseStatus, FragmentationStratum, ReasoningSource, ConditionSource,
+    ParseStatus, FragmentationStratum, ConditionSource,
     Precision, Decoding,
     REASONING_FAMILIES, MCQ_FAMILIES, INTERACTIONAL_FAILURE_STATUSES,
 )
@@ -22,7 +22,7 @@ from enums import (
 
 _ALL_ENUM_CLASSES = [
     Operation, SelectionPolicy, Scope, Unit, SemanticClass, TaskFamily,
-    ParseStatus, FragmentationStratum, ReasoningSource, ConditionSource,
+    ParseStatus, FragmentationStratum, ConditionSource,
     Precision, Decoding,
 ]
 

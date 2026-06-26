@@ -1,8 +1,8 @@
 """Adversarial and property-based tests for task modules.
 
 Covers: gold-template correctness across many fuzzed items, key-term operand
-coverage, scope span slicing, official parser edge cases, MCQ option-letter dict
-conversion, and enum-coercion at the JSONL loader boundary.
+coverage, scope span slicing, MCQ option-letter dict conversion, and
+enum-coercion at the JSONL loader boundary.
 """
 
 from __future__ import annotations
@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-
-import pytest
 
 from tasks import reasoning as tasks_reasoning
 from tasks import multiple_choice as mcq
@@ -103,40 +101,6 @@ def test_synthetic_items_have_task_family_enum():
     items = tasks_reasoning.generate_synthetic_reasoning_items(5, seed=1)
     for item in items:
         assert item.task_family == TaskFamily.GSM_SYMBOLIC_SYNTHETIC
-
-
-# ---------------------------------------------------------------------------
-# Official GSM-Symbolic answer parsing (no network)
-# ---------------------------------------------------------------------------
-
-def test_official_gsm_answer_parsing():
-    answer_field = "Some reasoning here.\nThus the result is 6.\n#### 42"
-    assert tasks_reasoning._extract_official_gold_answer(answer_field) == 42
-
-
-def test_official_gsm_answer_parsing_with_commas():
-    assert tasks_reasoning._extract_official_gold_answer("#### 1,234") == 1234
-
-
-def test_official_gsm_answer_parsing_requires_delimiter():
-    with pytest.raises(ValueError):
-        tasks_reasoning._extract_official_gold_answer("no final answer line here")
-
-
-def test_official_gsm_parsing_last_delimiter_wins():
-    """If multiple '####' lines appear, the last one is authoritative."""
-    # Consistent with scoring.py behavior.
-    result = tasks_reasoning._extract_official_gold_answer("#### 5\n#### 42")
-    assert result == 42
-
-
-def test_official_gsm_parsing_negative_answer():
-    result = tasks_reasoning._extract_official_gold_answer("#### -7")
-    assert result == -7
-
-
-def test_official_gsm_parsing_zero():
-    assert tasks_reasoning._extract_official_gold_answer("#### 0") == 0
 
 
 # ---------------------------------------------------------------------------

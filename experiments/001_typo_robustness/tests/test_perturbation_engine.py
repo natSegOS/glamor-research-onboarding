@@ -43,17 +43,17 @@ def test_same_seed_gives_identical_output():
     for operation in _ALL_CHAR_OPS:
         first_text, first_edits = perturb(
             SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 3,
-            SelectionPolicy.UNIFORM, SemanticClass.A, 42)
+            SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 42)
         second_text, second_edits = perturb(
             SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 3,
-            SelectionPolicy.UNIFORM, SemanticClass.A, 42)
+            SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 42)
         assert first_text == second_text
         assert [e.to_dict() for e in first_edits] == [e.to_dict() for e in second_edits]
 
 
 def test_different_seed_usually_differs():
     outputs = {perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                       SelectionPolicy.UNIFORM, SemanticClass.A, seed)[0] for seed in range(8)}
+                       SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)[0] for seed in range(8)}
     assert len(outputs) > 1
 
 
@@ -63,9 +63,9 @@ def test_determinism_across_many_texts_and_seeds():
         text = _random_alpha_text(rng)
         try:
             a, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                           SelectionPolicy.UNIFORM, SemanticClass.A, seed)
+                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
             b, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                           SelectionPolicy.UNIFORM, SemanticClass.A, seed)
+                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
             assert a == b
         except PerturbationError:
             pass  # impossible budgets are fine
@@ -80,26 +80,26 @@ def test_determinism_across_many_texts_and_seeds():
 def test_edit_budget_is_respected(operation, edit_budget):
     _, edits = perturb(
         SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, edit_budget,
-        SelectionPolicy.UNIFORM, SemanticClass.A, 7)
+        SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 7)
     assert len(edits) == edit_budget
 
 
 def test_impossible_budget_raises():
     with pytest.raises(PerturbationError):
         perturb("ab", Operation.DELETE, Unit.CHAR, Scope.ANYWHERE, 50,
-                SelectionPolicy.UNIFORM, SemanticClass.A, 1)
+                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
 
 
 def test_budget_exhaustion_on_single_char():
     with pytest.raises(PerturbationError):
         perturb("a", Operation.DELETE, Unit.CHAR, Scope.ANYWHERE, 2,
-                SelectionPolicy.UNIFORM, SemanticClass.A, 1)
+                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
 
 
 def test_budget_zero_emits_no_edits():
     for operation in _ALL_CHAR_OPS:
         _, edits = perturb(SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 0,
-                           SelectionPolicy.UNIFORM, SemanticClass.A, 1)
+                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
         assert len(edits) == 0
 
 
@@ -109,7 +109,7 @@ def test_budget_zero_emits_no_edits():
 
 def test_zero_budget_is_identity():
     perturbed, edits = perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 0,
-                               SelectionPolicy.UNIFORM, SemanticClass.A, 1)
+                               SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
     assert perturbed == SAMPLE_TEXT
     assert edits == []
 
@@ -117,7 +117,7 @@ def test_zero_budget_is_identity():
 def test_zero_budget_identity_all_operations():
     for operation in _ALL_CHAR_OPS:
         perturbed, edits = perturb(SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 0,
-                                   SelectionPolicy.UNIFORM, SemanticClass.A, seed=42)
+                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed=42)
         assert perturbed == SAMPLE_TEXT
         assert edits == []
 
@@ -131,7 +131,7 @@ def test_protected_span_is_never_edited():
     protected = [(start, start + len("brown"))]
     for seed in range(40):
         perturbed, _ = perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 3,
-                               SelectionPolicy.UNIFORM, SemanticClass.A, seed,
+                               SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed,
                                protected_spans=protected)
         assert "brown" in perturbed
 
@@ -144,7 +144,7 @@ def test_multiple_protected_spans():
     for seed in range(30):
         try:
             perturbed, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                                   SelectionPolicy.UNIFORM, SemanticClass.A, seed,
+                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed,
                                    protected_spans=protected)
             assert "alpha" in perturbed
             assert "delta" in perturbed
@@ -158,7 +158,7 @@ def test_numeric_tokens_protected_by_default():
     for seed in range(40):
         try:
             perturbed, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                                   SelectionPolicy.UNIFORM, SemanticClass.A, seed)
+                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
         except PerturbationError:
             continue
         assert "12" in perturbed and "7" in perturbed
@@ -171,7 +171,7 @@ def test_multiple_numeric_tokens_all_protected():
     for seed in range(25):
         try:
             perturbed, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 3,
-                                   SelectionPolicy.UNIFORM, SemanticClass.A, seed)
+                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
         except PerturbationError:
             continue
         assert "100" in perturbed and "25" in perturbed
@@ -185,13 +185,13 @@ def test_multiple_numeric_tokens_all_protected():
 def test_edit_script_reconstructs_output(operation):
     for seed in range(20):
         perturbed, edits = perturb(SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 3,
-                                   SelectionPolicy.UNIFORM, SemanticClass.A, seed)
+                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
         assert apply_edit_script(SAMPLE_TEXT, edits) == perturbed
 
 
 def test_edit_script_reconstructs_from_dicts():
     perturbed, edits = perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                               SelectionPolicy.UNIFORM, SemanticClass.A, 3)
+                               SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 3)
     as_dicts = [e.to_dict() for e in edits]
     assert apply_edit_script(SAMPLE_TEXT, as_dicts) == perturbed
 
@@ -203,7 +203,7 @@ def test_reconstruction_holds_over_fuzzed_texts():
         for operation in _ALL_CHAR_OPS:
             try:
                 perturbed, edits = perturb(text, operation, Unit.CHAR, Scope.ANYWHERE, 2,
-                                           SelectionPolicy.UNIFORM, SemanticClass.A, seed)
+                                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
                 assert apply_edit_script(text, edits) == perturbed
             except PerturbationError:
                 pass

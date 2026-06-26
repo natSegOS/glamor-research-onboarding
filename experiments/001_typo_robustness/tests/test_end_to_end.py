@@ -65,9 +65,11 @@ def _correct_clean_engine():
 def test_orchestrator_runs_and_logs_token_metrics(tmp_path):
     configuration = ExperimentConfiguration(
         run_id="e2e",
-        reasoning_item_count=6,
-        multiple_choice_item_count=4,
         seed=1729,
+        datasets=[
+            {"key": "gsm_symbolic_synthetic", "item_count": 6},
+            {"key": "mcq_demo", "item_count": 4},
+        ],
         conditions=[
             PerturbationCondition("kbd_A", SemanticClass.A, Operation.SUBSTITUTE, SelectionPolicy.KEYBOARD_NEIGHBOR, Scope.ANYWHERE, [1, 2]),
             PerturbationCondition("kbd_A_content", SemanticClass.A, Operation.SUBSTITUTE, SelectionPolicy.KEYBOARD_NEIGHBOR, Scope.CONTENT, [1]),
@@ -91,10 +93,8 @@ def test_orchestrator_runs_and_logs_token_metrics(tmp_path):
 def test_analysis_reproduces_matched_pair_counts(tmp_path):
     configuration = ExperimentConfiguration(
         run_id="e2e_analysis",
-        reasoning_item_count=8,
-        multiple_choice_item_count=0,
-        include_multiple_choice=False,
         seed=2024,
+        datasets=[{"key": "gsm_symbolic_synthetic", "item_count": 8}],
         conditions=[PerturbationCondition("kbd_A", SemanticClass.A, Operation.SUBSTITUTE,
                                           SelectionPolicy.KEYBOARD_NEIGHBOR, Scope.ANYWHERE, [1])],
     )
