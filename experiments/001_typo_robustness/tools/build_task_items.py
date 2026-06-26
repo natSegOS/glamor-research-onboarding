@@ -34,11 +34,15 @@ Outputs (in --output-directory):
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
+import sys
 
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from progress import ProgressBar
 
 from tasks import (
     ReasoningItem,
@@ -159,11 +163,14 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _write_jsonl(items, record_fn, output_path: Path) -> None:
+def _write_jsonl(items, record_fn, output_path: Path, description: str = "") -> None:
     """Write items to a JSONL file, truncating any existing content."""
-    with output_path.open("w") as output_file:
+
+    with output_path.open("w") as output_file, \
+         ProgressBar(total=len(items), description=description or str(output_path.name)) as progress:
         for item in items:
             output_file.write(json.dumps(record_fn(item)) + "\n")
+            progress.advance()
 
 
 def main() -> None:
@@ -194,7 +201,8 @@ def main() -> None:
         seed=arguments.seed,
     )
     gsm_sym_path = output_directory / "gsm_symbolic.jsonl"
-    _write_jsonl(gsm_sym_items, _reasoning_item_to_record, gsm_sym_path)
+    _write_jsonl(gsm_sym_items, _reasoning_item_to_record, gsm_sym_path,
+                 description="writing gsm_symbolic.jsonl")
     provenance["gsm_symbolic"] = {
         "repo_id": "apple/GSM-Symbolic",
         "configuration_name": arguments.gsm_config,
@@ -217,7 +225,8 @@ def main() -> None:
         categories=arguments.categories,
     )
     mmlu_pro_path = output_directory / "mmlu_pro.jsonl"
-    _write_jsonl(mmlu_pro_items, _multiple_choice_item_to_record, mmlu_pro_path)
+    _write_jsonl(mmlu_pro_items, _multiple_choice_item_to_record, mmlu_pro_path,
+                 description="writing mmlu_pro.jsonl")
     provenance["mmlu_pro"] = {
         "repo_id": "TIGER-Lab/MMLU-Pro",
         "resolved_revision_sha": mmlu_pro_revision,
@@ -239,7 +248,8 @@ def main() -> None:
         seed=arguments.seed,
     )
     gsm8k_path = output_directory / "gsm8k.jsonl"
-    _write_jsonl(gsm8k_items, _reasoning_item_to_record, gsm8k_path)
+    _write_jsonl(gsm8k_items, _reasoning_item_to_record, gsm8k_path,
+                 description="writing gsm8k.jsonl")
     provenance["gsm8k"] = {
         "repo_id": "openai/gsm8k",
         "configuration_name": "main",
@@ -262,7 +272,8 @@ def main() -> None:
         categories=arguments.categories,
     )
     mmlu_path = output_directory / "mmlu.jsonl"
-    _write_jsonl(mmlu_items, _multiple_choice_item_to_record, mmlu_path)
+    _write_jsonl(mmlu_items, _multiple_choice_item_to_record, mmlu_path,
+                 description="writing mmlu.jsonl")
     provenance["mmlu"] = {
         "repo_id": "cais/mmlu",
         "configuration_name": "all",
