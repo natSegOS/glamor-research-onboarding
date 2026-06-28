@@ -200,7 +200,6 @@ def test_load_multiple_choice_jsonl_coerces_task_family():
             "options": {"A": "Paris", "B": "Berlin"},
             "answer": "A",
             "task_family": "mmlu_pro",   # plain string — must be coerced
-            "gold_letter_if_negated": None,
             "key_terms": ["capital", "France"],
             "category": "Geography",
         }

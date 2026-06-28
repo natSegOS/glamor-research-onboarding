@@ -1,13 +1,11 @@
 """Adversarial and metamorphic tests for the three-regime construction.
 
 Covers: Regime A nonword guarantee across many seeds, Regime B distinct-real-word
-guarantee, Regime C gold recomputation and operand visibility, MCQ negation logic,
-derived-seed determinism, and all documented error paths.
+guarantee, Regime C gold recomputation and operand visibility, MCQ option
+permutation logic, derived-seed determinism, and all documented error paths.
 """
 
 from __future__ import annotations
-
-import pytest
 
 from enums import Operation, SemanticClass
 import regimes as semantic_regimes
@@ -63,7 +61,7 @@ def test_regime_a_nonword_holds_across_many_seeds(is_word):
     successes = 0
     for seed in range(40):
         try:
-            perturbed, edits, metadata = semantic_regimes.make_regime_a_nonword_typo(
+            _, _, metadata = semantic_regimes.make_regime_a_nonword_typo(
                 "capital", Operation.SUBSTITUTE, 2, seed, is_word)
             _, edited_after = metadata["edited_words"][0]
             assert not is_word(edited_after), (
@@ -142,12 +140,13 @@ def test_regime_b_real_word_holds_across_seeds(small_vocabulary_is_word):
 def test_regime_c_reasoning_recomputes_gold():
     items = generate_synthetic_reasoning_items(4, seed=1)
     item = items[0]
-    perturbed_text, edits, metadata = semantic_regimes.make_regime_c_reasoning_operand_swap(item, 5)
+    perturbed_text, _, metadata = semantic_regimes.make_regime_c_reasoning_operand_swap(item, 5)
 
     assert metadata["regime"] == SemanticClass.C
     assert metadata["new_gold_answer"] != metadata["old_gold_answer"]
     swapped_parameters = dict(item.parameters)
     swapped_parameters[metadata["swapped_parameter"]] = metadata["new_value"]
+    assert item.template is not None
     assert int(item.template.answer_function(**swapped_parameters)) == metadata["new_gold_answer"]
     assert str(metadata["new_value"]) in perturbed_text
 
@@ -191,54 +190,78 @@ def test_regime_c_metadata_keys():
 
 
 # ---------------------------------------------------------------------------
-# Regime C MCQ — negation
+# Regime C MCQ — option permutation
 # ---------------------------------------------------------------------------
 
-def test_regime_c_mcq_negation_flips_gold():
-    perturbed, edits, metadata = semantic_regimes.make_regime_c_mcq_negation(
-        "Which statement is true about water?", "A", "B", 1)
-    assert "not" in perturbed
-    assert metadata["new_gold_answer"] == "B"
+from tasks.multiple_choice import make_demonstration_multiple_choice_items
+
+
+def test_regime_c_mcq_option_permutation_changes_gold():
+    items = make_demonstration_multiple_choice_items()
+    item = items[0]
+    _, _, metadata = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=1)
     assert metadata["regime"] == SemanticClass.C
+    assert metadata["new_gold_letter"] != metadata["old_gold_letter"]
+    assert metadata["old_gold_letter"] == item.gold_letter
 
 
-def test_regime_c_mcq_negation_inserts_after_verb():
-    """The word 'not' must be inserted into the question text."""
-    perturbed, _, _ = semantic_regimes.make_regime_c_mcq_negation(
-        "Which element is most abundant?", "A", "C", 1)
-    assert " not " in perturbed or perturbed.endswith(" not")
+def test_regime_c_mcq_option_permutation_gold_tracked_by_content():
+    """The new gold letter must point to the original gold option's text."""
+    items = make_demonstration_multiple_choice_items()
+    item = items[0]
+    _, _, metadata = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=1)
+    old_gold_content = item.options[item.gold_letter]
+    assert metadata["new_options"][metadata["new_gold_letter"]] == old_gold_content
 
 
-def test_regime_c_mcq_edit_script_reconstructs():
-    from perturbation import apply_edit_script
-    question = "Which statement is true about water?"
-    perturbed, edits, _ = semantic_regimes.make_regime_c_mcq_negation(question, "A", "B", 1)
-    assert apply_edit_script(question, edits) == perturbed
+def test_regime_c_mcq_option_permutation_is_deterministic():
+    items = make_demonstration_multiple_choice_items()
+    item = items[0]
+    result_1 = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=5)
+    result_2 = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=5)
+    assert result_1[0] == result_2[0]
+    assert result_1[2]["new_gold_letter"] == result_2[2]["new_gold_letter"]
 
 
-def test_regime_c_mcq_rejects_non_flippable():
-    with pytest.raises(PerturbationError):
-        semantic_regimes.make_regime_c_mcq_negation("Which is true?", "A", None, 1)
+def test_regime_c_mcq_option_permutation_content_in_output():
+    """The question text is unchanged; all option texts appear in the new content."""
+    items = make_demonstration_multiple_choice_items()
+    item = items[0]
+    new_content, _, _ = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=2)
+    assert item.question in new_content
+    for text in item.options.values():
+        assert text in new_content
 
 
-def test_regime_c_mcq_rejects_same_gold_after_negation():
-    """If gold_letter_if_negated == gold_letter, no valid flip exists."""
-    with pytest.raises(PerturbationError):
-        semantic_regimes.make_regime_c_mcq_negation("Is this true?", "A", "A", 1)
+def test_regime_c_mcq_option_permutation_metadata_keys():
+    items = make_demonstration_multiple_choice_items()
+    item = items[0]
+    _, _, metadata = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=3)
+    for key in ("regime", "old_gold_letter", "new_gold_letter",
+                "old_options", "new_options", "damerau_levenshtein_distance"):
+        assert key in metadata
 
 
-def test_regime_c_mcq_no_verb_raises():
-    """A question with no negatable verb must raise PerturbationError."""
-    with pytest.raises(PerturbationError):
-        semantic_regimes.make_regime_c_mcq_negation(
-            "Oxygen nitrogen carbon hydrogen?", "A", "B", 1)
+def test_regime_c_mcq_option_permutation_dl_distance():
+    items = make_demonstration_multiple_choice_items()
+    item = items[0]
+    _, _, metadata = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=4)
+    assert metadata["damerau_levenshtein_distance"] >= 1
 
 
-def test_regime_c_mcq_old_and_new_gold_in_metadata():
-    _, _, metadata = semantic_regimes.make_regime_c_mcq_negation(
-        "Which element is most abundant?", "A", "C", 1)
-    assert metadata["old_gold_answer"] == "A"
-    assert metadata["new_gold_answer"] == "C"
+def test_regime_c_mcq_option_permutation_all_demo_items():
+    """Every demo item must produce a valid permutation for some seed."""
+    items = make_demonstration_multiple_choice_items()
+    for item in items:
+        for seed in range(5):
+            try:
+                _, _, metadata = semantic_regimes.make_regime_c_mcq_option_permutation(item, seed=seed)
+                assert metadata["new_gold_letter"] != item.gold_letter
+                break
+            except PerturbationError:
+                pass
+        else:
+            raise AssertionError(f"no valid permutation found for item {item.task_id}")
 
 
 # ---------------------------------------------------------------------------
