@@ -100,9 +100,14 @@ def _load_phoneme_index() -> bool:
     try:
         import pronouncing  # noqa: PLC0415 — lazy import by design
 
+        raw_pronunciations = pronouncing.pronunciations
+        if not raw_pronunciations:
+            _phoneme_index_available = False
+            return False
+
         phoneme_to_words_index: dict = {}
 
-        for dictionary_word, space_separated_phones in pronouncing.pronunciations:
+        for dictionary_word, space_separated_phones in raw_pronunciations:
             stress_stripped_phoneme_key = tuple(
                 re.sub(r"\d", "", phoneme)
                 for phoneme in space_separated_phones.split()
