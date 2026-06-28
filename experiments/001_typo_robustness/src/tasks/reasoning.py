@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import random
-import re
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,43 +29,35 @@ from typing import Callable, Optional
 
 from enums import TaskFamily
 from lexicons import load_word_lexicon
+from tasks._shared import (
+    HASH_DELIMITED_ANSWER_PATTERN,
+    build_full_prompt,
+    build_instruction_and_content_scope_spans,
+)
 
-
-_NUMERIC_TOKEN_PATTERN = re.compile(r'\b\d[\d,]*(?:\.\d+)?\b')
-
+# Operation words used by the offline synthetic generator to record which
+# mathematical-operation terms appear in the generated question text.  These
+# are derived from the template vocabulary (the templates embed words like
+# "buys", "gives away", "saves") rather than from a free-text heuristic, so
+# they remain appropriate for the synthetic context.
+#
+# Note: this list is NOT used in any runtime path or JSONL loader.  Key terms
+# for JSONL items are frozen at data-preparation time by the linguistic
+# annotation stage (src/dataprep/annotate.py), which replaces the old
+# runtime heuristic that previously called this list on raw question text.
+# See design/04 §4.6 and the data-preparation provenance record.
 OPERATION_WORDS: frozenset[str] = load_word_lexicon("operation_words.txt")
 
-# Names for the synthetic generator; sampled to personalize template questions,
+# Maximum number of times the synthetic generator tries to sample operands
+# that satisfy the template's constraint before skipping a template.
+_PARAMETER_SAMPLING_MAX_ATTEMPTS = 64
+
+# Names for the synthetic generator; sampled to personalise template questions,
 # mirroring Figure 1 of Mirzadeh et al. (2024) GSM-Symbolic.
 SYNTHETIC_NAMES = (
     "Ava", "Ben", "Carla", "Dev", "Elena", "Farid", "Grace", "Hiro",
     "Imani", "Jonas", "Keiko", "Liam", "Mara", "Noor", "Omar", "Priya",
 )
-
-
-def extract_key_terms_from_reasoning_question(question_text: str) -> list[str]:
-    """Extract semantically critical tokens from a reasoning question.
-
-    Returns numeric tokens (e.g. "950", "1,000", "3.5") that drive the math,
-    followed by any OPERATION_WORDS found in the text. Deduplicates while
-    preserving order. Mirrors the strategy the synthetic generator uses for
-    template-based items, extended to work on raw question text.
-    """
-
-    lower_text = question_text.lower()
-    numeric_tokens = _NUMERIC_TOKEN_PATTERN.findall(question_text)
-    operation_keywords = [
-        word for word in sorted(OPERATION_WORDS)
-        if f" {word}" in lower_text or lower_text.startswith(word)
-    ]
-
-    seen: set[str] = set()
-    result: list[str] = []
-    for term in numeric_tokens + operation_keywords:
-        if term not in seen:
-            seen.add(term)
-            result.append(term)
-    return result
 
 
 REASONING_INSTRUCTION = (
@@ -113,18 +104,13 @@ class ReasoningItem:
 
     @property
     def full_prompt(self) -> str:
-        return f"{self.instruction}\n\n{self.question_text}"
+        return build_full_prompt(self.instruction, self.question_text)
 
     @property
     def scope_spans(self) -> dict:
         """Character spans of the instruction and content regions within the
         full prompt, for scope-restricted perturbation (design/03 §3.2)."""
-        instruction_length = len(self.instruction)
-        content_start = instruction_length + len("\n\n")
-        return {
-            "instruction": (0, instruction_length),
-            "content": (content_start, content_start + len(self.question_text)),
-        }
+        return build_instruction_and_content_scope_spans(self.instruction, self.question_text)
 
     @property
     def supports_regime_c_operand_swap(self) -> bool:
@@ -223,7 +209,7 @@ def generate_synthetic_reasoning_items(
         template = SYNTHETIC_REASONING_TEMPLATES[template_index % len(SYNTHETIC_REASONING_TEMPLATES)]
 
         sampled_parameters = None
-        for _ in range(64):
+        for _ in range(_PARAMETER_SAMPLING_MAX_ATTEMPTS):
             candidate_parameters = {
                 operand: random_generator.randint(low, high)
                 for operand, (low, high) in template.operand_ranges.items()
@@ -269,6 +255,20 @@ def generate_synthetic_reasoning_items(
     return items
 
 
+def _retag_legacy_gsm_symbolic(raw_value: str) -> TaskFamily:
+    """Re-tag the legacy ``"gsm_symbolic"`` task-family string produced by early
+    versions of load_official_gsm_symbolic to the current canonical value
+    ``TaskFamily.GSM_SYMBOLIC_OFFICIAL``.
+
+    This shim allows existing pinned JSONL files that pre-date the rename to
+    load and score correctly without a re-fetch from HuggingFace.  All new
+    exports write ``"gsm_symbolic_official"``.
+    """
+    if raw_value == TaskFamily.GSM_SYMBOLIC:  # "gsm_symbolic" — the old tag
+        return TaskFamily.GSM_SYMBOLIC_OFFICIAL
+    return TaskFamily(raw_value)
+
+
 def load_reasoning_jsonl(
         path: Path,
         task_family: TaskFamily = TaskFamily.GSM_SYMBOLIC_OFFICIAL,
@@ -296,10 +296,20 @@ def load_reasoning_jsonl(
         if not line.strip():
             continue
         record = json.loads(line)
+
+        # Backward-compatibility shim: early versions of load_official_gsm_symbolic
+        # wrote task_family = "gsm_symbolic" (the historical TaskFamily.GSM_SYMBOLIC
+        # value) rather than the current "gsm_symbolic_official".  Re-tag on load so
+        # existing JSONL files score correctly without requiring a re-fetch.
+        resolved_task_family = _retag_legacy_gsm_symbolic(
+            record.get("task_family", str(task_family)))
+        resolved_source = _retag_legacy_gsm_symbolic(
+            record.get("source", str(task_family)))
+
         items.append(ReasoningItem(
             task_id=record.get("task_id", f"{task_family}_{line_index:05d}"),
-            task_family=TaskFamily(record.get("task_family", task_family)),
-            source=TaskFamily(record.get("source", task_family)),
+            task_family=resolved_task_family,
+            source=resolved_source,
             question_text=record["question_text"],
             instruction=record.get("instruction", REASONING_INSTRUCTION),
             gold_answer=record["gold_answer"],
@@ -320,13 +330,19 @@ def load_reasoning_jsonl(
 # ---------------------------------------------------------------------------
 
 def _parse_gsm_answer(answer_text: str) -> Optional[int]:
-    """Extract the integer after ``#### `` in a GSM-style answer string."""
-    import re as _re
-    match = _re.search(r"####\s*([\-\d,]+)", answer_text)
+    """Extract the integer after ``#### `` in a GSM-style answer string.
+
+    Uses the shared HASH_DELIMITED_ANSWER_PATTERN from tasks._shared so the
+    gold-side and generation-side parsers both recognise the same surface forms
+    (handles optional sign, optional dollar prefix, comma separators, and decimal
+    points — the broader pattern is a superset of what GSM gold records contain,
+    so matching behaviour is identical for valid gold strings).
+    """
+    match = HASH_DELIMITED_ANSWER_PATTERN.search(answer_text)
     if not match:
         return None
     try:
-        return int(match.group(1).replace(",", ""))
+        return int(float(match.group(1).replace(",", "").replace("$", "")))
     except ValueError:
         return None
 
@@ -352,20 +368,21 @@ def _fetch_gsm_from_hf(
     random.Random(seed).shuffle(records)
 
     items: list[ReasoningItem] = []
-    for i, record in enumerate(records):
+
+    for record_index, record in enumerate(records):
         if len(items) >= item_count:
             break
         gold = _parse_gsm_answer(record["answer"])
         if gold is None:
             continue
         items.append(ReasoningItem(
-            task_id=f"{task_family}_{i:05d}",
+            task_id=f"{task_family}_{record_index:05d}",
             task_family=task_family,
             source=task_family,
             question_text=record["question"],
             instruction=REASONING_INSTRUCTION,
             gold_answer=gold,
-            key_terms=extract_key_terms_from_reasoning_question(record["question"]),
+            key_terms=[],  # frozen by tools/build_annotated_dataset.py before a run
             template=None,
             parameters={},
         ))
