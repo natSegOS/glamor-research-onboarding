@@ -19,18 +19,36 @@ from enums import Precision
 from inference.roster import ModelSpecification
 
 
+# All current precisions (FP16, AWQ, GPTQ) use float16 as the compute dtype.
+# Passing this explicitly suppresses vLLM's deprecated torch_dtype auto-detection
+# path. AWQ and GPTQ weight-packing is controlled by the separate ``quantization``
+# constructor parameter; their unquantized layers (norms, embeddings) still run
+# in float16 regardless.
+_VLLM_COMPUTE_DTYPE = "float16"
+
+_GREEDY_TEMPERATURE = 0.0
+_GREEDY_TOP_P       = 1.0
+
+
 class VllmEngine:
     """Offline batched vLLM engine with continuous batching and prefix caching.
-    Callers pre-sort prompts so shared-prefix families are adjacent, maximizing
-    prefix-cache hits (design/07 §7.7)."""
 
-    def __init__(self, specification: ModelSpecification, seed: int = 1729,
-                 max_model_length: Optional[int] = None):
+    Callers pre-sort prompts so shared-prefix families are adjacent, maximising
+    prefix-cache hits (design/07 §7.7).
+    """
+
+    def __init__(
+            self,
+            specification: ModelSpecification,
+            seed: int = 1729,
+            max_model_length: Optional[int] = None,
+    ):
         from vllm import LLM, SamplingParams
 
         engine_arguments = dict(
             model=specification.huggingface_identifier,
             revision=specification.revision if specification.revision_is_pinned else None,
+            dtype=_VLLM_COMPUTE_DTYPE,
             gpu_memory_utilization=specification.gpu_memory_utilization,
             enable_prefix_caching=specification.enable_prefix_caching,
             seed=seed,
@@ -47,13 +65,19 @@ class VllmEngine:
         self.tokenizer = self._language_model.get_tokenizer()
 
     def _greedy_sampling_params(self, max_new_tokens: int):
-        return self._sampling_params_class(temperature=0.0, top_p=1.0, max_tokens=max_new_tokens)
+        return self._sampling_params_class(
+            temperature=_GREEDY_TEMPERATURE,
+            top_p=_GREEDY_TOP_P,
+            max_tokens=max_new_tokens,
+        )
 
     def apply_chat_template(self, user_message: str) -> str:
         """Wrap a user message in the model's own chat template (design/05 §5.7)."""
         return self.tokenizer.apply_chat_template(
             [{"role": "user", "content": user_message}],
-            tokenize=False, add_generation_prompt=True)
+            tokenize=False,
+            add_generation_prompt=True,
+        )
 
     def generate(self, prompts: Sequence[str], max_new_tokens: int) -> list[str]:
         """Generate greedily for a batch of ALREADY CHAT-TEMPLATED prompts."""
@@ -62,5 +86,8 @@ class VllmEngine:
         return [output.outputs[0].text for output in outputs]
 
 
-def build_inference_engine(specification: ModelSpecification, **keyword_arguments) -> VllmEngine:
+def build_inference_engine(
+        specification: ModelSpecification,
+        **keyword_arguments,
+) -> VllmEngine:
     return VllmEngine(specification, **keyword_arguments)
