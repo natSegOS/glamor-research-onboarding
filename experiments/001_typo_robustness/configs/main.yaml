@@ -136,3 +136,19 @@ conditions:
     scope: content
     edit_budgets: [0]
     source: asr
+
+  # Regime C: deterministic meaning-change perturbations with computationally
+  # verifiable gold answers (design/04 §4.7).
+  #   MCQ items:       option-label permutation — gold tracked by content,
+  #                    not by letter (Ko et al. 2020; Pezeshkpour & Hruschka 2023).
+  #   Reasoning items: operand swap on synthetic-template items only — new gold
+  #                    recomputed via the template answer function.
+  # The operation/scope/selection_policy fields are unused for Regime C; the
+  # dispatch is determined solely by item type inside experiment._construct_regime_c.
+  - name: regime_c_semantic_preserving
+    semantic_class: C
+    operation: substitute
+    selection_policy: keyboard_neighbor
+    scope: anywhere
+    edit_budgets: [0]
+    source: synthetic
