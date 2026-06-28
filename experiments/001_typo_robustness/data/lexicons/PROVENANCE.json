@@ -3,36 +3,35 @@
   "note": "Pre-registered decision logic lexicons for GLAMOR Lab Exp 001. Frozen at pre-registration; any extension requires a design-doc amendment. See design/04_tasks_and_scoring.md §4.5 and §4.7.",
   "lexicons": {
     "clarification_phrases.txt": {
-      "implements": "design/04 §4.5 — ParseStatus.CLARIFICATION detection",
+      "implements": "VALIDATION FIXTURE ONLY — moved to tests/fixtures/clarification_phrases.txt; no longer imported by any runtime or scoring module",
       "primary_reference": "Aliannejadi et al. (2019) 'Asking Clarifying Questions in Open-Domain Information-Seeking Conversations', SIGIR — canonical taxonomy of clarification-request patterns.",
       "secondary_reference": "Wang et al. (2023) 'Resilience of Large Language Models for Noisy Instructions' — empirical characterization of interactional failures under noisy input.",
-      "rationale": "Conservative lexical proxy for explicit clarification requests. Under-counts by design (ICR is a diagnostic, not a primary endpoint). False negatives are absorbed by ParseStatus.UNPARSEABLE, which still scores is_correct=0.",
-      "match_mode": "whole-word, case-insensitive regex alternation"
+      "rationale": "The phrase-lexicon clarification detector has been superseded by the formal linguistic rule in src/scoring.py:classify_parse_status_with_linguistic_pipeline (interrogative-sentence detection via spaCy dependency parsing, plan §1.3). The phrase list is retained as a frozen validation oracle: the linguistic rule's test suite (tests/test_parse_status_linguistic.py) cross-checks it against the positive examples that match the structural criterion. Phrases that do not end with '?' are intentionally under-detected by the new rule (conservative lower bound, acceptable for the diagnostic ICR metric M9).",
+      "match_mode": "whole-word, case-insensitive regex alternation",
+      "status": "deprecated as a runtime lexicon; retained as a validation cross-check reference in tests/fixtures/"
     },
     "refusal_phrases.txt": {
-      "implements": "design/04 §4.5 — ParseStatus.REFUSAL detection (no parseable answer required)",
+      "implements": "VALIDATION FIXTURE ONLY — moved to tests/fixtures/refusal_phrases.txt; no longer imported by any runtime or scoring module",
       "primary_reference": "Zou et al. (2023) 'Universal and Transferable Adversarial Attacks on Aligned Language Models', NeurIPS — Appendix A.2 establishes the standard refusal-detection methodology for adversarial robustness evaluation.",
-      "rationale": "Conservative lexical proxy for strong modal negations and the formulaic 'as an AI' opener, extended with math/QA-specific inability responses. Applied only when no parseable answer is present, so hedged-but-answered responses are scored normally.",
-      "match_mode": "whole-word, case-insensitive regex alternation"
-    },
-    "negatable_verbs.txt": {
-      "implements": "design/04 §4.7 — MCQ Regime-C negation target set",
-      "rationale": "English copula and high-frequency modal/aspectual auxiliaries most likely to carry the main finite verb in factual MCQ stems. Epistemic modals (would, should, must, might) are deliberately excluded to avoid unpredictable negation semantics. The negative lookahead (?! not) prevents double-negation.",
-      "match_mode": "whole-word regex alternation with negative lookahead (?! not)"
+      "rationale": "The phrase-lexicon refusal detector has been superseded by the formal linguistic rule in src/scoring.py:classify_parse_status_with_linguistic_pipeline (first-person subject + negation/inability predicate detection via spaCy dependency parsing, plan §1.3). The phrase list is retained as a frozen validation oracle cross-checked against the structural criterion in tests/test_parse_status_linguistic.py. The linguistic rule intentionally under-detects idiomatic openers like 'as an AI' (no first-person negation structure) — these fall to UNPARSEABLE (is_correct=0), which is correct for the conservative ICR computation.",
+      "match_mode": "whole-word, case-insensitive regex alternation",
+      "status": "deprecated as a runtime lexicon; retained as a validation cross-check reference in tests/fixtures/"
     },
     "operation_words.txt": {
-      "implements": "tasks/reasoning.py — extract_key_terms_from_reasoning_question",
+      "implements": "tasks/reasoning.py — OPERATION_WORDS constant used by generate_synthetic_reasoning_items only",
       "primary_reference": "Cobbe et al. (2021) 'Training Verifiers to Solve Math Word Problems', arXiv:2110.14168 — Appendix B defines the GSM8K template vocabulary.",
       "secondary_reference": "Mirzadeh et al. (2024) 'GSM-Symbolic: Understanding the Limitations of Mathematical Reasoning in Large Language Models', ICLR 2025, arXiv:2410.05229 — Figure 1 and template definitions.",
-      "rationale": "Words that signal arithmetic operations or change-of-quantity relations in GSM-style word problems. Included as key_terms so that informative_word and answer_critical policies target operationally meaningful spans.",
-      "match_mode": "whole-word, case-insensitive substring match against question_text"
+      "rationale": "Words that signal arithmetic operations or change-of-quantity relations in GSM-style word problems. Used by the offline synthetic item generator to record which operation words appear in a generated question text (where the template vocabulary is known by construction). NOT used in any runtime path or JSONL loader — key terms for JSONL items are frozen at data-preparation time by src/dataprep/annotate.py using the formal K_P(x) linguistic rule.",
+      "match_mode": "whole-word, case-insensitive substring match against question_text",
+      "status": "retained for the offline synthetic generator only; superseded by K_P(x) for all JSONL items"
     },
     "english_function_words.txt": {
-      "implements": "tasks/multiple_choice.py — extract_key_terms_from_mcq_question",
+      "implements": "VALIDATION FIXTURE ONLY — no longer imported by any runtime source module",
       "primary_reference": "Manning, Raghavan & Schütze (2008) 'Introduction to Information Retrieval', Cambridge University Press, Table 2.4 — the standard IR closed-class stopword list.",
       "secondary_reference": "Jurafsky & Martin (2023) 'Speech and Language Processing', 3rd ed., §2.4 — authoritative linguistic definition of closed-class words.",
-      "rationale": "Closed-class function words excluded from MCQ key_terms. Function words carry grammatical rather than semantic information and are poor targets for the informative_word policy. Content words absent from this list remain eligible as key_terms.",
-      "match_mode": "frozenset membership test (lowercase)"
+      "rationale": "Retained as an audit and validation artifact. The function-word exclusion heuristic it implemented has been replaced by the formal K_P(x) linguistic rule (src/dataprep/annotate.py), which derives function-word exclusion from closed-class part-of-speech tags (e.g. ADP, CONJ, CCONJ, SCONJ, AUX, DET without PronType=Tot) detected by the pinned spaCy pipeline rather than from this list. This file is kept for reproducibility and as a cross-check reference.",
+      "match_mode": "frozenset membership test (lowercase)",
+      "status": "deprecated as a runtime lexicon; retained as a validation cross-check reference"
     }
   }
 }
