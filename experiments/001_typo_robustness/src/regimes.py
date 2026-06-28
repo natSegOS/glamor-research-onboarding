@@ -21,9 +21,23 @@ robustness work — that the "typo" silently changed the question — by separat
     Regime C  meaning-changing control
               The edit changes the intended question, so the gold answer changes
               too. For reasoning items we swap a numeric operand and RECOMPUTE
-              the gold from the template; for MCQ we insert a negation that flips
-              the answer. This tests for over-invariance (clinging to the old
-              answer when the meaning changed). design/02 §2.4, design/04 §4.7.
+              the gold from the template; for MCQ we permute the option labels
+              deterministically so the correct answer maps to a different letter.
+              This tests for over-invariance (clinging to the old answer when the
+              meaning changed). design/02 §2.4, design/04 §4.7.
+
+Regime C scope limitation
+-------------------------
+Regime C is restricted to perturbations where the new gold answer is
+computationally deterministic:
+  - Reasoning: operand swap (synthetic-only, template-derived gold recomputation).
+  - MCQ: option permutation (all items, no annotation required; gold tracked by
+    content, not label).
+
+Arbitrary meaning-changing perturbations (e.g., swapping named entities in
+free-text questions) are excluded because the new gold cannot be verified
+without semantic understanding. This is a scope limitation, documented in
+design/04 §4.7.
 
 Determinism
 -----------
@@ -42,7 +56,6 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from enums import Operation, SelectionPolicy, Scope, SemanticClass, Unit
-from lexicons import compile_phrase_regex, load_phrase_lexicon
 from perturbation import (
     Edit,
     PerturbationError,
@@ -306,39 +319,88 @@ def make_regime_c_reasoning_operand_swap(
     return perturbed_text, [edit], metadata
 
 
-_NEGATABLE_VERB = re.compile(
-    r"\b(?:" + "|".join(re.escape(v) for v in load_phrase_lexicon("negatable_verbs.txt"))
-    + r")\b(?! not)"
-)
-
-
-def make_regime_c_mcq_negation(
-        question: str,
-        gold_letter: str,
-        gold_letter_if_negated: Optional[str],
+def make_regime_c_mcq_option_permutation(
+        mcq_item,
         seed: int,
 ) -> tuple[str, list[Edit], dict]:
-    """Insert a negation after the first copula/auxiliary verb in an MCQ
-    question. The item must carry a known ``gold_letter_if_negated`` (only
-    negation-flippable items are eligible; design/04 §4.7)."""
-    if not gold_letter_if_negated or gold_letter_if_negated == gold_letter:
-        raise PerturbationError("item is not negation-flippable")
+    """Permute the option labels of an MCQ item deterministically and return the
+    perturbed content_text plus the updated gold letter.
 
-    match = _NEGATABLE_VERB.search(question)
-    if match is None:
-        raise PerturbationError("no negatable verb found")
+    The gold answer is tracked by content, not label: the new gold letter is
+    whichever label the shuffled options assign to the original gold option text.
+    This requires no human annotation and works for every MCQ item regardless of
+    content (contrast: negation-based Regime C, which required per-item
+    annotation of ``gold_letter_if_negated`` and was semantically underdetermined
+    for general knowledge questions).
 
-    insertion_point = match.end()
-    perturbed_question = question[:insertion_point] + " not" + question[insertion_point:]
+    Positional-bias literature: Ko et al. (2020); Pezeshkpour & Hruschka (2023).
 
-    edit = Edit(Operation.INSERT, insertion_point,
-                before="", after=" not",
-                word_before=match.group(0), word_after=match.group(0) + " not")
+    Only permutations that move the gold content to a different label are
+    accepted, so the gold letter is guaranteed to change (design/04 §4.7).
+
+    ``mcq_item`` is a tasks.multiple_choice.MultipleChoiceItem. It must have
+    at least two options; single-option items raise PerturbationError.
+    """
+    letters = list(mcq_item.options.keys())
+    option_texts = list(mcq_item.options.values())
+
+    if len(letters) < 2:
+        raise PerturbationError(
+            f"MCQ item {mcq_item.task_id!r} has fewer than 2 options; "
+            "permutation impossible")
+
+    old_gold_letter = mcq_item.gold_letter
+    old_gold_content = mcq_item.options[old_gold_letter]
+
+    rng = random.Random(derived_seed(seed, SemanticClass.C, mcq_item.task_id))
+
+    new_options: Optional[dict] = None
+    new_gold_letter: Optional[str] = None
+
+    for _ in range(32):
+        shuffled_texts = option_texts.copy()
+        rng.shuffle(shuffled_texts)
+        candidate_options = dict(zip(letters, shuffled_texts))
+        candidate_gold_letter = next(
+            (letter for letter, text in candidate_options.items()
+             if text == old_gold_content),
+            None)
+        if (candidate_gold_letter is not None
+                and candidate_gold_letter != old_gold_letter):
+            new_options = candidate_options
+            new_gold_letter = candidate_gold_letter
+            break
+
+    if new_options is None or new_gold_letter is None:
+        raise PerturbationError(
+            f"could not find an option permutation that changes the gold label "
+            f"for item {mcq_item.task_id!r}")
+
+    old_content = mcq_item.content_text
+    old_rendered_options = "\n".join(
+        f"{letter}. {text}" for letter, text in mcq_item.options.items())
+    new_rendered_options = "\n".join(
+        f"{letter}. {text}" for letter, text in new_options.items())
+    new_content = f"{mcq_item.question}\n{new_rendered_options}"
+
+    # Represent the permutation as a single structural edit for provenance.
+    # word_before/after record the gold letter's positional change.
+    options_block_start = len(mcq_item.question) + 1   # +1 for the newline
+    edit = Edit(
+        Operation.WORD_SUBSTITUTE,
+        options_block_start,
+        before=old_rendered_options,
+        after=new_rendered_options,
+        word_before=old_gold_letter,
+        word_after=new_gold_letter,
+    )
 
     metadata = {
         "regime": SemanticClass.C,
-        "old_gold_answer": gold_letter,
-        "new_gold_answer": gold_letter_if_negated,
-        "damerau_levenshtein_distance": damerau_levenshtein_distance(question, perturbed_question),
+        "old_gold_letter": old_gold_letter,
+        "new_gold_letter": new_gold_letter,
+        "old_options": dict(mcq_item.options),
+        "new_options": new_options,
+        "damerau_levenshtein_distance": damerau_levenshtein_distance(old_content, new_content),
     }
-    return perturbed_question, [edit], metadata
+    return new_content, [edit], metadata
