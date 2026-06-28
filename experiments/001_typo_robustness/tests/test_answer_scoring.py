@@ -8,8 +8,6 @@ override, empty/whitespace input, case-folding, and overall scoring dispatch.
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 import scoring
@@ -141,74 +139,58 @@ def test_mcq_option_count_one_only_accepts_a():
 
 
 # ---------------------------------------------------------------------------
-# Parse-status taxonomy
+# Parse-status taxonomy — inline (structural) classifier
+#
+# The inline classifier used by the generation runner returns only VALID or
+# UNPARSEABLE.  The full four-way taxonomy (including CLARIFICATION and
+# REFUSAL) is assigned by the formal post-stage classifier; see
+# tests/test_parse_status_linguistic.py.
 # ---------------------------------------------------------------------------
 
-def test_clarification_detected():
-    result = scoring.score_reasoning("Could you clarify what you mean?", 19)
-    assert result.parse_status == ParseStatus.CLARIFICATION
+def test_unparseable_status_when_no_parseable_answer():
+    result = scoring.score_reasoning("I have no idea", 19)
+    assert result.parse_status == ParseStatus.UNPARSEABLE
     assert result.is_correct == 0
 
 
-def test_refusal_detected_only_without_answer():
-    refusal = scoring.score_reasoning("I cannot help with that.", 19)
-    assert refusal.parse_status == ParseStatus.REFUSAL
-
-    hedged_but_answered = scoring.score_reasoning("I can't be sure, but #### 19", 19)
-    assert hedged_but_answered.parse_status == ParseStatus.VALID
-    assert hedged_but_answered.is_correct == 1
+def test_valid_status_when_answer_found():
+    result = scoring.score_reasoning("#### 19", 19)
+    assert result.parse_status == ParseStatus.VALID
+    assert result.is_correct == 1
 
 
-def test_unparseable_status():
-    result = scoring.score_reasoning("I have no idea", 19)
+def test_inline_clarification_surface_form_is_unparseable():
+    """The inline path assigns UNPARSEABLE (not CLARIFICATION) to interrogative
+    outputs — CLARIFICATION is assigned only by the post-stage linguistic
+    classifier.  is_correct=0 in both cases, so accuracy is unchanged.
+    """
+    result = scoring.score_reasoning("Could you clarify what you mean?", 19)
     assert result.parse_status == ParseStatus.UNPARSEABLE
+    assert result.is_correct == 0
 
 
-def test_clarification_phrase_variants():
-    """All clarification phrases in the lexicon must trigger the status."""
-    triggers = [
-        "did you mean France?",
-        "do you mean the city?",
-        "could you clarify the question?",
-        "can you clarify what you want?",
-        "please clarify your intent",
-        "not sure what you mean by that",
-        "what do you mean exactly?",
-    ]
-    for phrase in triggers:
-        result = scoring.score_reasoning(phrase, 19)
-        assert result.parse_status == ParseStatus.CLARIFICATION, (
-            f"phrase {phrase!r} did not trigger CLARIFICATION")
-
-
-def test_refusal_phrase_variants():
-    """All refusal phrases (without a parseable answer) must trigger REFUSAL."""
-    triggers = [
-        "I cannot assist with math homework.",
-        "I can't help with this.",
-        "I won't answer this question.",
-        "I am unable to solve this.",
-        "I'm unable to provide an answer.",
-        "I refuse to respond.",
-        "As an AI, I don't have opinions.",
-    ]
-    for phrase in triggers:
-        result = scoring.score_reasoning(phrase, 19)
-        assert result.parse_status == ParseStatus.REFUSAL, (
-            f"phrase {phrase!r} did not trigger REFUSAL (got {result.parse_status})")
+def test_inline_refusal_surface_form_is_unparseable():
+    """The inline path assigns UNPARSEABLE (not REFUSAL) to first-person
+    refusal outputs — the distinction is made by the post-stage linguistic
+    classifier.  is_correct=0 in both cases.
+    """
+    result = scoring.score_reasoning("I cannot help with that.", 19)
+    assert result.parse_status == ParseStatus.UNPARSEABLE
+    assert result.is_correct == 0
 
 
 def test_refusal_with_answer_is_valid():
-    """A refusal phrase followed by a parseable answer should still score as VALID."""
+    """A refusal surface form followed by a parseable answer is still VALID."""
     result = scoring.score_reasoning("I won't, but if I had to: #### 19", 19)
     assert result.parse_status == ParseStatus.VALID
     assert result.is_correct == 1
 
 
-def test_clarification_with_answer_is_still_clarification():
-    """Clarification + parseable number: clarification wins."""
+def test_inline_classifier_ignores_generation_text_when_answer_present():
+    """The inline classifier is pure structural: only parsed_answer matters."""
     result = scoring.score_reasoning("Did you mean 19? The answer might be 19.", 19)
-    assert result.parse_status == ParseStatus.CLARIFICATION
+    assert result.parse_status == ParseStatus.VALID
+    assert result.is_correct == 1
 
 
 # ---------------------------------------------------------------------------
