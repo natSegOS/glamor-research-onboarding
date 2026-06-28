@@ -37,7 +37,6 @@ from enums import (
     REASONING_FAMILIES,
 )
 
-_UINT32_MAX = 0xFFFFFFFF
 import regimes
 from perturbation import PerturbationError
 from pipeline.runner import (
@@ -224,8 +223,9 @@ def build_requests(
         for condition in conditions:
             if condition.source == ConditionSource.ASR:
                 requests.extend(_build_asr_requests(
-                    task_item, condition, gold_answer, clean_prompt,
-                    asr_items_by_task.get(task_item.task_id, []), tokenizer, is_word))
+                    task_item, gold_answer, clean_prompt,
+                    asr_items_by_task.get(task_item.task_id, []), tokenizer,
+                    seed=seed))
             else:
                 requests.extend(_build_synthetic_requests(
                     task_item, condition, gold_answer, clean_prompt,
@@ -249,22 +249,31 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
             seed, condition.name, task_item.task_id, edit_budget)
 
         try:
-            perturbed_content, edits, _metadata = _construct_regime(
-                condition, content_text, edit_budget, item_seed, is_word,
-                key_terms, scope_spans)
+            if condition.semantic_class == SemanticClass.C:
+                perturbed_content, edits, regime_metadata = _construct_regime_c(
+                    task_item, item_seed)
+                effective_gold = (
+                    regime_metadata.get("new_gold_letter")
+                    or regime_metadata.get("new_gold_answer")
+                    or gold_answer)
+            else:
+                perturbed_content, edits, regime_metadata = _construct_regime(
+                    condition, content_text, edit_budget, item_seed, is_word,
+                    key_terms, scope_spans)
+                effective_gold = gold_answer
         except PerturbationError:
             continue                          # this item admits no such perturbation; skip
 
         perturbed_prompt = clean_prompt.replace(content_text, perturbed_content)
 
         token_metric_fields = _tokenization_fields(
-            tokenizer, content_text, perturbed_content, edits, is_word, item_seed, edit_budget)
+            tokenizer, content_text, perturbed_content, edits)
 
         requests.append(GenerationRequest(
             task_id=task_item.task_id,
             task_family=task_item.task_family,
             prompt=perturbed_prompt,
-            gold_answer=gold_answer,
+            gold_answer=effective_gold,
             is_clean=False,
             perturbation_state_vector={
                 "semantic_class": condition.semantic_class,
@@ -282,9 +291,22 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
     return requests
 
 
+def _construct_regime_c(task_item, item_seed):
+    """Dispatch to the appropriate Regime C builder.
+
+    Regime C scope is restricted to perturbations where the new gold is
+    computationally deterministic (design/04 §4.7):
+      - Reasoning items: operand swap with template-derived gold recomputation.
+      - MCQ items: option-label permutation with gold tracked by content.
+    """
+    if hasattr(task_item, "options"):
+        return regimes.make_regime_c_mcq_option_permutation(task_item, item_seed)
+    return regimes.make_regime_c_reasoning_operand_swap(task_item, item_seed)
+
+
 def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
                       key_terms, scope_spans):
-    """Dispatch to the right regime builder for a synthetic condition."""
+    """Dispatch to the right regime builder for a synthetic condition (A or B)."""
     if condition.semantic_class == SemanticClass.A:
         return regimes.make_regime_a_nonword_typo(
             content_text, condition.operation, edit_budget, item_seed, is_word,
@@ -304,20 +326,19 @@ def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
             edit_budget=edit_budget, **regime_b_kwargs)
 
     raise PerturbationError(
-        f"semantic class {condition.semantic_class!r} is not built by the engine "
-        "(Regime C reasoning uses make_regime_c_reasoning_operand_swap on the "
-        "ReasoningItem; MCQ negation uses make_regime_c_mcq_negation)")
+        f"_construct_regime only handles Regime A and B; "
+        f"semantic class {condition.semantic_class!r} must be dispatched via "
+        "_construct_regime_c before reaching this function")
 
 
-def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits,
-                         is_word, item_seed, edit_budget) -> dict:
+def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits) -> dict:
     """Compute the tokenization metrics for a perturbed item.
 
     Token-inflation is whole-text; subword-count change and fragmentation
     stratum are for the single most-edited word, which is the unit the mediation
     analysis contrasts.
     """
-    fields = {
+    fields: dict[str, object] = {
         "token_inflation_ratio":
             tokenization.token_inflation_ratio(tokenizer, clean_content, perturbed_content),
     }
@@ -337,14 +358,18 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits,
     return fields
 
 
-def _build_asr_requests(task_item, condition, gold_answer, clean_prompt,
-                        asr_items, tokenizer, is_word) -> list[GenerationRequest]:
+def _build_asr_requests(task_item, gold_answer, clean_prompt,
+                        asr_items, tokenizer, seed: int = 0) -> list[GenerationRequest]:
     """Build requests from pre-built AsrItems for one task.
 
     Each AsrItem already carries its transcription, measured edit distance,
     severity band, and clean/noisy tag. We substitute the transcription for the
     clean content and attach token metrics, exactly as for synthetic items, so
     the ASR arm and the keyboard arm share one analysis path.
+
+    ``seed`` is the root experiment seed, used to derive a per-item seed via
+    regimes.derived_seed so the seed is stable across processes and
+    PYTHONHASHSEED values (see the seed= field in the GenerationRequest below).
     """
     requests: list[GenerationRequest] = []
     content_text = _content_text_of(task_item)
@@ -373,7 +398,13 @@ def _build_asr_requests(task_item, condition, gold_answer, clean_prompt,
                 "scope": Scope.CONTENT,
                 "edit_budget": asr_item["damerau_levenshtein_distance"],
             },
-            seed=task_item.task_id.__hash__() & _UINT32_MAX,
+            # Use a SHA-256-derived seed rather than Python's __hash__ so the
+            # seed is identical across processes and PYTHONHASHSEED values
+            # (hash randomisation was added in Python 3.3 for security; it
+            # breaks cross-process reproducibility when used as a seed).
+            # The base experiment seed is threaded through build_requests so
+            # that all requests in a run derive from the same root seed.
+            seed=regimes.derived_seed(seed, task_item.task_id),
             clean_prompt=clean_prompt,
             extra_fields=token_metric_fields,
         ))
