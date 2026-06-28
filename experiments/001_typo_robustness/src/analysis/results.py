@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
-from enums import SelectionPolicy
+from enums import ParseStatus, SelectionPolicy
 from analysis import statistics
 
 
@@ -111,25 +111,79 @@ def group_pairs_into_cells(matched_pairs: Sequence[MatchedPair]) -> dict:
 
 def summarize_all_cells(matched_pairs: Sequence[MatchedPair],
                         seed: int = 1729,
-                        resamples: int = statistics.DEFAULT_BOOTSTRAP_RESAMPLES) -> list[dict]:
-    """Produce one summary row per cell, sorted for stable output. Each row
-    carries the cell's dimension values plus the full statistics block."""
+                        resamples: int = statistics.DEFAULT_BOOTSTRAP_RESAMPLES,
+                        audit_outcomes: Optional[dict] = None) -> list[dict]:
+    """Produce one summary row per cell, sorted for stable output.
+
+    Each row carries the cell's dimension values plus the full statistics block.
+
+    ``audit_outcomes`` — when provided, maps task_id to
+    ``analysis.audit.ItemAuditOutcome``. Pairs whose item is flagged
+    ``excluded_from_primary=True`` are removed from the cell before computing
+    any statistics; ``n_audit_excluded`` in the output counts them.  When None
+    the gate is open (no items excluded).
+
+    VALID-only sensitivity (Part 4): ``delta_valid_only`` and
+    ``mcnemar_p_valid_only`` are computed on the subset of pairs where the
+    perturbed response has ParseStatus.VALID, providing a sensitivity check
+    that coincides with the all-in statistics when ICR=0 (design/06 §6.10).
+    """
     cells = group_pairs_into_cells(matched_pairs)
 
     summaries: list[dict] = []
     for cell_key in sorted(cells, key=lambda key: tuple(str(part) for part in key)):
-        pairs = cells[cell_key]
+        all_pairs = cells[cell_key]
+
+        # Audit-exclusion gate (Part 7).
+        n_audit_excluded = 0
+        if audit_outcomes is not None:
+            excluded_ids = {
+                pair.task_id for pair in all_pairs
+                if audit_outcomes.get(pair.task_id) is not None
+                and audit_outcomes[pair.task_id].excluded_from_primary
+            }
+            n_audit_excluded = len(excluded_ids)
+            pairs = [pair for pair in all_pairs if pair.task_id not in excluded_ids]
+        else:
+            pairs = all_pairs
+
         clean_correctness = [pair.clean_is_correct for pair in pairs]
         perturbed_correctness = [pair.perturbed_is_correct for pair in pairs]
 
         summary = dict(zip(CELL_DIMENSION_KEYS, cell_key))
         summary.update(statistics.summarize_cell(
             clean_correctness, perturbed_correctness, seed=seed, resamples=resamples))
-        summary["answer_flip_rate"] = statistics.answer_flip_rate(
-            [pair.clean_answer for pair in pairs],
-            [pair.perturbed_answer for pair in pairs])
-        summary["invalid_or_clarification_rate"] = statistics.invalid_or_clarification_rate(
-            [pair.perturbed_parse_status for pair in pairs])
+        summary["answer_flip_rate"] = (
+            statistics.answer_flip_rate(
+                [pair.clean_answer for pair in pairs],
+                [pair.perturbed_answer for pair in pairs])
+            if pairs else float("nan"))
+        summary["invalid_or_clarification_rate"] = (
+            statistics.invalid_or_clarification_rate(
+                [pair.perturbed_parse_status for pair in pairs])
+            if pairs else float("nan"))
+        summary["n_audit_excluded"] = n_audit_excluded
+
+        # VALID-only sensitivity (Part 4).
+        valid_pairs = [pair for pair in pairs
+                       if pair.perturbed_parse_status == ParseStatus.VALID.value
+                       or pair.perturbed_parse_status == ParseStatus.VALID]
+        if len(valid_pairs) >= 2:
+            valid_clean = [pair.clean_is_correct for pair in valid_pairs]
+            valid_perturbed = [pair.perturbed_is_correct for pair in valid_pairs]
+            delta_valid_only: Optional[float] = statistics.paired_degradation(
+                valid_clean, valid_perturbed)
+            valid_table = statistics.build_paired_table(valid_clean, valid_perturbed)
+            valid_mcnemar = statistics.mcnemar_test(
+                valid_table.broke, valid_table.recovered)
+            mcnemar_p_valid_only: Optional[float] = valid_mcnemar.p_value
+        else:
+            delta_valid_only = None
+            mcnemar_p_valid_only = None
+
+        summary["delta_valid_only"] = delta_valid_only
+        summary["mcnemar_p_valid_only"] = mcnemar_p_valid_only
+
         summaries.append(summary)
 
     return summaries
