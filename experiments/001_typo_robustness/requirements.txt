@@ -48,3 +48,27 @@ tqdm>=4.66
 # already reads). Not needed for offline/smoke runs; only required when running
 # tools/build_dictionary.py with --source wordfreq (the default).
 wordfreq>=3.0
+
+# ---------------------------------------------------------------------------
+# Build-tool dependencies (Stage 0: data preparation)
+# ---------------------------------------------------------------------------
+# These are needed only when running tools/build_annotated_dataset.py to
+# annotate the item JSONL files with K_P(x) key terms.  They are NOT needed
+# during the experiment (generation) or analysis (scoring) stages.  The
+# annotation output is committed as a frozen JSONL artifact, so the GPU
+# cluster nodes that run generation need only the core requirements above.
+#
+# Install before running the annotation build tool:
+#   pip install spacy
+#   python -m spacy download en_core_web_sm     # minimum; see note below
+#
+# Model selection:
+#   en_core_web_sm   Efficient, CPU-only.  Suitable for a pilot annotation.
+#   en_core_web_md   Better accuracy; still CPU-only.  Recommended for pilot.
+#   en_core_web_trf  RoBERTa-based; highest accuracy; CPU-runnable but slower.
+#                    Recommended for the confirmatory frozen annotation.
+#                    Published benchmark: see spacy.io/models/en.
+#
+# The exact model name and its meta.json SHA-256 are recorded in
+# data/items/annotation_PROVENANCE.json after running the tool.
+spacy>=3.7
