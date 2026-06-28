@@ -18,48 +18,17 @@ MMLU (Hendrycks et al., ICLR 2021, arXiv:2009.03300): standard 4-option MCQ.
 from __future__ import annotations
 
 import json
-import re
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from enums import TaskFamily
-from lexicons import load_word_lexicon
-
-
-_NUMERIC_TOKEN_PATTERN = re.compile(r'\b\d[\d,]*(?:\.\d+)?\b')
-_WORD_PATTERN = re.compile(r'\b[a-zA-Z][a-zA-Z\-]*\b')
-
-ENGLISH_FUNCTION_WORDS: frozenset[str] = load_word_lexicon("english_function_words.txt")
-
-
-OPTION_LETTERS = "ABCDEFGHIJ"          # MMLU-Pro has up to ten options
-
-
-def extract_key_terms_from_mcq_question(question_text: str) -> list[str]:
-    """Extract semantically critical tokens from a multiple-choice question.
-
-    Returns numeric tokens followed by content words: words of 4+ characters
-    that are not common English function words. Deduplicates while preserving
-    order. Used by the informative_word and answer_critical perturbation
-    policies to target high-information spans.
-    """
-
-    numeric_tokens = _NUMERIC_TOKEN_PATTERN.findall(question_text)
-    content_words = [
-        word.lower()
-        for word in _WORD_PATTERN.findall(question_text)
-        if len(word) >= 4 and word.lower() not in ENGLISH_FUNCTION_WORDS
-    ]
-
-    seen: set[str] = set()
-    result: list[str] = []
-    for term in numeric_tokens + content_words:
-        if term not in seen:
-            seen.add(term)
-            result.append(term)
-    return result
+from tasks._shared import (
+    OPTION_LETTERS,
+    build_full_prompt,
+    build_instruction_and_content_scope_spans,
+)
 
 
 MULTIPLE_CHOICE_INSTRUCTION = (
@@ -70,39 +39,30 @@ MULTIPLE_CHOICE_INSTRUCTION = (
 
 @dataclass
 class MultipleChoiceItem:
-    """One multiple-choice item.
+    """One multiple-choice item."""
 
-    ``gold_letter_if_negated`` is optional and only set for items that have been
-    annotated as negation-flippable, which Regime C's MCQ negation requires. It
-    is absent for ordinary items, which therefore do not enter Regime C.
-    """
-    task_id: str
+    task_id:     str
     task_family: TaskFamily
-    question: str
-    options: dict                      # {"A": "...", "B": "...", ...}
+    question:    str
+    options:     dict          # {"A": "...", "B": "...", ...}
     gold_letter: str
-    category: str = ""
+    category:    str = ""
     instruction: str = MULTIPLE_CHOICE_INSTRUCTION
-    gold_letter_if_negated: Optional[str] = None
-    key_terms: list[str] = field(default_factory=list)
+    key_terms:   list[str] = field(default_factory=list)
 
     @property
     def content_text(self) -> str:
-        rendered_options = "\n".join(f"{letter}. {text}" for letter, text in self.options.items())
+        rendered_options = "\n".join(
+            f"{letter}. {text}" for letter, text in self.options.items())
         return f"{self.question}\n{rendered_options}"
 
     @property
     def full_prompt(self) -> str:
-        return f"{self.instruction}\n\n{self.content_text}"
+        return build_full_prompt(self.instruction, self.content_text)
 
     @property
     def scope_spans(self) -> dict:
-        instruction_length = len(self.instruction)
-        content_start = instruction_length + len("\n\n")
-        return {
-            "instruction": (0, instruction_length),
-            "content": (content_start, content_start + len(self.content_text)),
-        }
+        return build_instruction_and_content_scope_spans(self.instruction, self.content_text)
 
     @property
     def option_count(self) -> int:
@@ -110,20 +70,28 @@ class MultipleChoiceItem:
 
 
 def _options_sequence_to_letter_dict(options_sequence) -> dict:
-    """Convert MMLU-Pro's ordered option-text sequence into a letter->text
-    dict, e.g. ["Oxygen", "Nitrogen"] -> {"A": "Oxygen", "B": "Nitrogen"}."""
-    return {OPTION_LETTERS[index]: option_text
-            for index, option_text in enumerate(options_sequence)}
+    """Convert MMLU-Pro's ordered option-text sequence into a letter-keyed dict.
+    e.g. ["Oxygen", "Nitrogen"] -> {"A": "Oxygen", "B": "Nitrogen"}."""
+    return {
+        OPTION_LETTERS[index]: option_text
+        for index, option_text in enumerate(options_sequence)
+    }
 
 
-def load_multiple_choice_jsonl(path: Path, task_family: TaskFamily = TaskFamily.MMLU_PRO) -> list[MultipleChoiceItem]:
+def load_multiple_choice_jsonl(
+        path: Path,
+        task_family: TaskFamily = TaskFamily.MMLU_PRO,
+) -> list[MultipleChoiceItem]:
     """Load multiple-choice items from a JSONL file in the local schema:
-        {"question", "options": {"A": ...}, "answer", "gold_letter_if_negated"?,
-         "key_terms"?}
+        {"question", "options": {"A": ...}, "answer", "key_terms"?}
+
     This is the loader for a pre-exported subsample committed to the repo, so a
     run does not need network access to HuggingFace. Subject stratification and
-    license handling happen upstream when the subsample is exported."""
+    license handling happen upstream when the subsample is exported.
+    """
+
     items: list[MultipleChoiceItem] = []
+
     for line_index, line in enumerate(Path(path).read_text().splitlines()):
         if not line.strip():
             continue
@@ -135,32 +103,38 @@ def load_multiple_choice_jsonl(path: Path, task_family: TaskFamily = TaskFamily.
             options=record["options"],
             gold_letter=record["answer"],
             category=record.get("category", ""),
-            gold_letter_if_negated=record.get("gold_letter_if_negated"),
             key_terms=record.get("key_terms", []),
         ))
+
     return items
 
 
 def make_demonstration_multiple_choice_items() -> list[MultipleChoiceItem]:
     """A tiny built-in MCQ set for pipeline smoke tests ONLY. The study uses
     MMLU-Pro (design/04 §4.3). These five items require no network access."""
+
     raw_items = [
         ("Water is composed of hydrogen and which other element?",
-         {"A": "Oxygen", "B": "Nitrogen", "C": "Carbon", "D": "Helium"}, "A", None,
-         ["hydrogen", "element"]),
+         {"A": "Oxygen", "B": "Nitrogen", "C": "Carbon", "D": "Helium"},
+         "A", ["hydrogen", "element"]),
+
         ("The process by which plants make food using sunlight is called what?",
          {"A": "Respiration", "B": "Photosynthesis", "C": "Fermentation", "D": "Digestion"},
-         "B", None, ["plants", "sunlight"]),
+         "B", ["plants", "sunlight"]),
+
         ("A triangle with three equal sides is called what?",
-         {"A": "Scalene", "B": "Isosceles", "C": "Equilateral", "D": "Obtuse"}, "C", None,
-         ["triangle", "equal"]),
+         {"A": "Scalene", "B": "Isosceles", "C": "Equilateral", "D": "Obtuse"},
+         "C", ["triangle", "equal"]),
+
         ("Sound travels fastest through which medium?",
-         {"A": "Vacuum", "B": "Air", "C": "Water", "D": "Steel"}, "D", None,
-         ["sound", "fastest", "medium"]),
+         {"A": "Vacuum", "B": "Air", "C": "Water", "D": "Steel"},
+         "D", ["sound", "fastest", "medium"]),
+
         ("Water boils at one hundred degrees on which temperature scale?",
-         {"A": "Celsius", "B": "Fahrenheit", "C": "Kelvin", "D": "Rankine"}, "A", None,
-         ["boils", "degrees"]),
+         {"A": "Celsius", "B": "Fahrenheit", "C": "Kelvin", "D": "Rankine"},
+         "A", ["boils", "degrees"]),
     ]
+
     return [
         MultipleChoiceItem(
             task_id=f"mcq_demo_{index:05d}",
@@ -168,10 +142,9 @@ def make_demonstration_multiple_choice_items() -> list[MultipleChoiceItem]:
             question=question,
             options=options,
             gold_letter=gold_letter,
-            gold_letter_if_negated=gold_if_negated,
             key_terms=key_terms,
         )
-        for index, (question, options, gold_letter, gold_if_negated, key_terms)
+        for index, (question, options, gold_letter, key_terms)
         in enumerate(raw_items)
     ]
 
@@ -180,6 +153,16 @@ def make_demonstration_multiple_choice_items() -> list[MultipleChoiceItem]:
 # Official HF fetchers (network; called once by tools/build_task_items.py).
 # The ``datasets`` import is lazy so the offline test suite stays network-free.
 # ---------------------------------------------------------------------------
+
+def _require_datasets_package():
+    try:
+        from datasets import load_dataset as _load_dataset
+        return _load_dataset
+    except ImportError as error:
+        raise ImportError(
+            "fetching official datasets requires the 'datasets' package "
+            "(pip install -r requirements.txt)") from error
+
 
 def load_official_mmlu_pro(
         dataset_revision: Optional[str],
@@ -193,45 +176,42 @@ def load_official_mmlu_pro(
     ``categories`` optionally restricts to a list of MMLU-Pro subject strings;
     if None, all subjects are included. Items are shuffled deterministically.
     """
-    try:
-        from datasets import load_dataset as _load_dataset
-    except ImportError as error:
-        raise ImportError(
-            "fetching official datasets requires the 'datasets' package "
-            "(pip install -r requirements.txt)") from error
 
     import random as _random
 
-    dataset = _load_dataset(
-        "TIGER-Lab/MMLU-Pro", revision=dataset_revision, split="test")
+    load_dataset = _require_datasets_package()
+    dataset = load_dataset("TIGER-Lab/MMLU-Pro", revision=dataset_revision, split="test")
     records = list(dataset)
 
     if categories:
-        records = [r for r in records if r.get("category") in categories]
+        records = [record for record in records if record.get("category") in categories]
 
     _random.Random(seed).shuffle(records)
 
     items: list[MultipleChoiceItem] = []
-    for i, record in enumerate(records):
+
+    for record_index, record in enumerate(records):
         if len(items) >= item_count:
             break
+
         options = _options_sequence_to_letter_dict(record["options"])
-        # Prefer the letter "answer" field; fall back to the integer "answer_index".
+
         raw_answer = record.get("answer")
         if raw_answer and isinstance(raw_answer, str) and raw_answer in options:
             gold_letter = raw_answer
         else:
-            answer_index = record.get("answer_index", 0)
-            gold_letter = OPTION_LETTERS[answer_index]
+            gold_letter = OPTION_LETTERS[record.get("answer_index", 0)]
+
         items.append(MultipleChoiceItem(
-            task_id=f"mmlu_pro_{i:05d}",
+            task_id=f"mmlu_pro_{record_index:05d}",
             task_family=TaskFamily.MMLU_PRO,
             question=record["question"],
             options=options,
             gold_letter=gold_letter,
             category=record.get("category", ""),
-            key_terms=extract_key_terms_from_mcq_question(record["question"]),
+            key_terms=[],  # frozen by tools/build_annotated_dataset.py before a run
         ))
+
     return items
 
 
@@ -249,37 +229,38 @@ def load_official_mmlu(
     patterns hold across option-count and contamination exposure.
     ``categories`` optionally restricts to a list of MMLU subject strings.
     """
-    try:
-        from datasets import load_dataset as _load_dataset
-    except ImportError as error:
-        raise ImportError(
-            "fetching official datasets requires the 'datasets' package "
-            "(pip install -r requirements.txt)") from error
 
     import random as _random
 
-    dataset = _load_dataset("cais/mmlu", "all", revision=dataset_revision, split="test")
+    load_dataset = _require_datasets_package()
+    dataset = load_dataset("cais/mmlu", "all", revision=dataset_revision, split="test")
     records = list(dataset)
 
     if categories:
-        records = [r for r in records if r.get("subject") in categories]
+        records = [record for record in records if record.get("subject") in categories]
 
     _random.Random(seed).shuffle(records)
 
     items: list[MultipleChoiceItem] = []
-    for i, record in enumerate(records):
+
+    for record_index, record in enumerate(records):
         if len(items) >= item_count:
             break
-        # MMLU choices is a 4-item list; answer is an int 0-3.
-        options = {OPTION_LETTERS[j]: choice for j, choice in enumerate(record["choices"])}
+
+        options = {
+            OPTION_LETTERS[choice_index]: choice_text
+            for choice_index, choice_text in enumerate(record["choices"])
+        }
         gold_letter = OPTION_LETTERS[record["answer"]]
+
         items.append(MultipleChoiceItem(
-            task_id=f"mmlu_{i:05d}",
+            task_id=f"mmlu_{record_index:05d}",
             task_family=TaskFamily.MMLU,
             question=record["question"],
             options=options,
             gold_letter=gold_letter,
             category=record.get("subject", ""),
-            key_terms=extract_key_terms_from_mcq_question(record["question"]),
+            key_terms=[],  # frozen by tools/build_annotated_dataset.py before a run
         ))
+
     return items

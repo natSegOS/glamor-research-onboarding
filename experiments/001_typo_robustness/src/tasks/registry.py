@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from enums import DatasetRole, TaskFamily, TaskType, REASONING_FAMILIES, MCQ_FAMILIES
+from enums import DatasetRole, TaskFamily
 
 
 # ---------------------------------------------------------------------------
@@ -46,18 +46,18 @@ class DatasetSpec:
         The config-level string identifier.
     loader:
         Callable that returns a list of task items.
-    task_type:
-        ``TaskType.REASONING`` or ``TaskType.MULTIPLE_CHOICE``.
     task_family:
         The ``TaskFamily`` enum value; determines scorer routing and is passed
         to JSONL loaders as the default when items lack a ``task_family`` field.
-    scorer_families:
-        The frozenset from ``enums`` that the scorer looks up at runtime.
+        The scorer dispatches on each item's ``task_family`` at runtime via
+        ``enums.REASONING_FAMILIES`` and ``enums.MCQ_FAMILIES`` — those are the
+        single source of truth for the reasoning/MCQ split.
     default_n:
         Default item count when the config does not override it.
     role:
-        ``"primary"`` (confirmatory, N≈600), ``"descriptive"`` (generalization
-        probe, not held to N≈600), or ``"smoke_test"`` (offline tests only).
+        ``"primary"`` (confirmatory, N≈600), ``"contamination_contrast"``
+        (standard benchmark paired with the primary to probe contamination), or
+        ``"smoke_test"`` (offline tests only).
     hf_repo:
         HuggingFace dataset repo ID, for the pre-fetch script.
     hf_config:
@@ -69,9 +69,7 @@ class DatasetSpec:
     """
     key: str
     loader: Optional[Callable]
-    task_type: TaskType
     task_family: TaskFamily
-    scorer_families: frozenset
     default_n: int
     role: DatasetRole
     hf_repo: Optional[str] = None
@@ -108,9 +106,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "gsm_symbolic_jsonl": DatasetSpec(
         key="gsm_symbolic_jsonl",
         loader=load_reasoning_jsonl,
-        task_type=TaskType.REASONING,
         task_family=TaskFamily.GSM_SYMBOLIC_OFFICIAL,
-        scorer_families=REASONING_FAMILIES,
         default_n=600,
         role=DatasetRole.PRIMARY,
         hf_repo="apple/GSM-Symbolic",
@@ -120,9 +116,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "mmlu_pro_jsonl": DatasetSpec(
         key="mmlu_pro_jsonl",
         loader=load_multiple_choice_jsonl,
-        task_type=TaskType.MULTIPLE_CHOICE,
         task_family=TaskFamily.MMLU_PRO,
-        scorer_families=MCQ_FAMILIES,
         default_n=600,
         role=DatasetRole.PRIMARY,
         hf_repo="TIGER-Lab/MMLU-Pro",
@@ -138,9 +132,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "gsm8k_jsonl": DatasetSpec(
         key="gsm8k_jsonl",
         loader=load_reasoning_jsonl,
-        task_type=TaskType.REASONING,
         task_family=TaskFamily.GSM8K,
-        scorer_families=REASONING_FAMILIES,
         default_n=600,
         role=DatasetRole.CONTAMINATION_CONTRAST,
         hf_repo="openai/gsm8k",
@@ -150,9 +142,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "mmlu_jsonl": DatasetSpec(
         key="mmlu_jsonl",
         loader=load_multiple_choice_jsonl,
-        task_type=TaskType.MULTIPLE_CHOICE,
         task_family=TaskFamily.MMLU,
-        scorer_families=MCQ_FAMILIES,
         default_n=600,
         role=DatasetRole.CONTAMINATION_CONTRAST,
         hf_repo="cais/mmlu",
@@ -167,9 +157,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "gsm_symbolic_synthetic": DatasetSpec(
         key="gsm_symbolic_synthetic",
         loader=generate_synthetic_reasoning_items,
-        task_type=TaskType.REASONING,
         task_family=TaskFamily.GSM_SYMBOLIC_SYNTHETIC,
-        scorer_families=REASONING_FAMILIES,
         default_n=150,
         role=DatasetRole.SMOKE_TEST,
         hf_repo=None,
@@ -177,9 +165,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "mcq_demo": DatasetSpec(
         key="mcq_demo",
         loader=make_demonstration_multiple_choice_items,
-        task_type=TaskType.MULTIPLE_CHOICE,
         task_family=TaskFamily.MCQ_DEMO,
-        scorer_families=MCQ_FAMILIES,
         default_n=5,
         role=DatasetRole.SMOKE_TEST,
         hf_repo=None,
