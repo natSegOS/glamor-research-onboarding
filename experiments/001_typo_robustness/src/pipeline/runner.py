@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-from enums import Decoding, Precision
+from enums import Decoding, Precision, INTERACTIONAL_FAILURE_STATUSES
 import scoring
 
 
@@ -192,7 +192,7 @@ def run_shard(
         decoding: Decoding = Decoding.GREEDY,
         git_commit: str = "unpinned",
         progress_callback: Optional[Callable[[int], None]] = None,
-        score_inline: bool = True,
+        linguistic_pipeline: Optional[object] = None,
 ) -> int:
     """Run one shard idempotently and return the number of new rows written.
 
@@ -204,12 +204,15 @@ def run_shard(
     ``progress_callback``, when provided, is called with the number of rows
     just written after each batch completes.
 
-    ``score_inline`` controls whether ``parsed_answer``, ``is_correct``, and
-    ``parse_status`` are written into each row.  When True (the default) the
-    structural inline classifier is used — VALID or UNPARSEABLE only.  The
-    four-way taxonomy (including CLARIFICATION and REFUSAL) requires the formal
-    post-stage classifier in tools/score_generations.py.  Set to False to
-    produce raw rows for the post-stage tool alone.
+    ``linguistic_pipeline``, when provided, is a loaded spaCy model passed from
+    the run script (loaded once at startup).  When present, the full four-way
+    parse-status classifier is used inline (VALID/UNPARSEABLE/CLARIFICATION/
+    REFUSAL).  When absent, the structural two-way classifier is used as a
+    fallback.  Scoring is always inline; there is no separate post-generation
+    scoring step.
+
+    Dual-accounting rule: CLARIFICATION and REFUSAL always force is_correct=0,
+    even if the extractor finds a number elsewhere in the text (Workstream 5).
     """
 
     output_path = Path(output_path)
@@ -286,12 +289,31 @@ def run_shard(
                     **request.extra_fields,
                 }
 
-                if score_inline:
-                    score_result = scoring.score(
-                        generated_text, request.gold_answer, request.task_family)
-                    row["parsed_answer"] = score_result.parsed_answer
-                    row["is_correct"] = score_result.is_correct
-                    row["parse_status"] = score_result.parse_status
+                # Inline scoring — always on (Workstream 5). Uses the full
+                # four-way linguistic classifier when a spaCy pipeline is
+                # provided; falls back to structural two-way otherwise.
+                score_result = scoring.score(
+                    generated_text, request.gold_answer, request.task_family)
+                if (linguistic_pipeline is not None
+                        and score_result.parse_status.value == "unparseable"):
+                    # Upgrade UNPARSEABLE to CLARIFICATION/REFUSAL when the
+                    # linguistic classifier finds evidence.
+                    refined = scoring.classify_parse_status_with_linguistic_pipeline(
+                        generated_text, score_result.parsed_answer, linguistic_pipeline)
+                    score_result = scoring.ScoreResult(
+                        score_result.parsed_answer,
+                        score_result.is_correct,
+                        refined,
+                        score_result.extraction_tier,
+                    )
+                # Dual-accounting: interactional failures always score 0.
+                final_is_correct = (
+                    0 if score_result.parse_status in INTERACTIONAL_FAILURE_STATUSES
+                    else score_result.is_correct)
+                row["parsed_answer"] = score_result.parsed_answer
+                row["is_correct"] = final_is_correct
+                row["parse_status"] = score_result.parse_status
+                row["extraction_tier"] = score_result.extraction_tier
                 output_file.write(json.dumps(row) + "\n")
                 new_rows_written += 1
 
