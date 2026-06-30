@@ -41,7 +41,7 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Callable, Optional, Sequence
 
-from enums import Operation, SelectionPolicy, Scope, Unit, SemanticClass
+from enums import EnglishDiscourseParticle, Operation, SelectionPolicy, Scope, Unit, SemanticClass
 from perturbation.keyboard import keyboard_neighbors_of
 
 
@@ -58,8 +58,17 @@ SELECTION_POLICIES: tuple[SelectionPolicy, ...] = (
     SelectionPolicy.KEYBOARD_NEIGHBOR,  # QWERTY-adjacent letter (MulTypo replacement)
     SelectionPolicy.INFORMATIVE_WORD,   # keyboard_neighbor, but restricted to key terms
     SelectionPolicy.REAL_WORD,          # whole-word substitution to a valid-word neighbor
-    SelectionPolicy.WHITESPACE,         # split a word with a space, or merge two words
+    SelectionPolicy.WHITESPACE,         # dormant: split/merge (kept for old-JSONL replay)
+    SelectionPolicy.FILLER_WORD,        # discourse-particle insertion (Workstream 3)
     SelectionPolicy.ASR_TRANSCRIPTION,  # produced by asr.py, never by this engine
+)
+
+# Ordered tuple of discourse particle values for random selection.  The source
+# enumeration (EnglishDiscourseParticle) documents the literature citations;
+# this tuple is sorted by enum definition order to keep selection deterministic
+# across Python versions.
+_DISCOURSE_PARTICLE_VALUES: tuple[str, ...] = tuple(
+    particle.value for particle in EnglishDiscourseParticle
 )
 
 PERTURBATION_SCOPES: tuple[Scope, ...] = (
@@ -447,6 +456,9 @@ def perturb(
             edit = _apply_real_word_substitution(
                 character_cells, random_generator, is_eligible, is_word,
                 max_word_distance=max_word_distance)
+        elif selection_policy == SelectionPolicy.FILLER_WORD:
+            edit = _apply_filler_word_insertion(
+                character_cells, random_generator, is_eligible)
         elif selection_policy == SelectionPolicy.WHITESPACE:
             edit = _apply_whitespace_edit(character_cells, random_generator, is_eligible, operation)
         else:
@@ -615,6 +627,44 @@ def _apply_whitespace_edit(character_cells, random_generator, is_eligible, opera
 
     return Edit(Operation.DELETE, position, before=" ", after="",
                 word_index=word_index, word_before=word_before, word_after="")
+
+
+def _apply_filler_word_insertion(character_cells, random_generator, is_eligible) -> Edit:
+    """Insert one discourse-particle filler token at an eligible inter-word
+    space position.
+
+    The discourse particle set is defined by ``EnglishDiscourseParticle``
+    (see enums.py) with literature citations.  A particle is inserted as
+    ``<existing_space><particle> `` at a space boundary so it becomes a
+    standalone token between two existing words.  The edit budget counts the
+    number of particles inserted, not the number of characters, consistent with
+    the edit-budget semantics used throughout the engine.
+
+    Intent-preservation is definitional: discourse particles carry no
+    propositional content, so the perturbation cannot change the question's
+    meaning regardless of context (no rejection sampling needed).
+    """
+    candidate_positions = _eligible_space_positions(character_cells, is_eligible)
+    if not candidate_positions:
+        raise PerturbationError("no eligible space position for filler insertion")
+
+    position = random_generator.choice(candidate_positions)
+    filler_token = random_generator.choice(_DISCOURSE_PARTICLE_VALUES)
+
+    # Insert " <filler> " at the chosen space. We replace the single space with
+    # " <filler> " by inserting characters one at a time to the right of the
+    # existing space, building " <filler> " left-to-right.
+    # Representation: " " (existing) + filler_chars + " " (new trailing space).
+    insertion_string = filler_token + " "  # leading space is the existing one
+    for offset, ch in enumerate(insertion_string):
+        character_cells.insert(position + 1 + offset, [ch, None])
+
+    word_index, word_before = _word_containing_index(
+        character_cells, max(0, position - 1))
+
+    return Edit(Operation.INSERT, position + 1,
+                before="", after=filler_token,
+                word_index=word_index, word_before=word_before, word_after=filler_token)
 
 
 def _damerau_levenshtein_one_neighbors(word: str) -> set[str]:
