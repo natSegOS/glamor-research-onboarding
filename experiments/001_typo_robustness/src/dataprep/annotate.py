@@ -53,16 +53,45 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 
 from pathlib import Path
 from typing import Optional, Sequence
 
+from enums import (
+    KeyTermRuleVersion,
+    SpacyMorphologicalDegree,
+    SpacyMorphologicalNumericType,
+    SpacyMorphologicalPronounType,
+    UniversalDependenciesRelationLabel,
+)
 
-# The identifier string written into every annotated item record and into
-# annotation_PROVENANCE.json.  Incrementing this version causes the build
-# tool to refuse to overwrite an existing annotation without an explicit
-# --force flag, protecting pre-registered frozen datasets.
-KEY_TERM_RULE_VERSION: str = "kp_v1"
+# Dependency relation labels whose VERBs carry no independent propositional
+# content: they express modality, aspect, or predicate structure but do not
+# themselves name the action or state the question asks about.  Source:
+# Universal Dependencies specification (Nivre et al. 2016; de Marneffe et al.
+# 2021, universaldependencies.org/u/dep/).
+_DEPENDENCY_LABELS_OF_NON_LEXICAL_VERBS: frozenset[str] = frozenset({
+    UniversalDependenciesRelationLabel.AUXILIARY,
+    UniversalDependenciesRelationLabel.AUXILIARY_PASSIVE,
+    UniversalDependenciesRelationLabel.COPULA,
+})
+
+# Small positive constant added inside the logarithm during Inverse Document
+# Frequency proxy computation to prevent log(0) when a token's corpus
+# frequency rounds to zero in the wordfreq database.  The value 1e-9 is the
+# standard numerical stabilisation epsilon for log-probability computations
+# (see e.g. Manning, Raghavan & Schütze 2008, §6.2 on TF-IDF smoothing).
+_LOG_FREQUENCY_STABILIZATION_EPSILON: float = 1e-9
+
+
+# The versioned rule identifier written into every annotated item record and
+# into data/items/annotation_PROVENANCE.json.  Changing this value causes the
+# build tool to refuse to overwrite pre-registered frozen datasets without an
+# explicit --force flag, protecting the annotation-to-run correspondence
+# required for reproducibility.
+KEY_TERM_IDENTIFICATION_RULE_VERSION: KeyTermRuleVersion = (
+    KeyTermRuleVersion.STRUCTURAL_FILTER_WITH_TFIDF_RANKED_CANDIDATES)
 
 
 # ---------------------------------------------------------------------------
@@ -108,38 +137,59 @@ def load_linguistic_pipeline(model_name: str):
 # ---------------------------------------------------------------------------
 
 def _token_is_key_term(token) -> bool:
-    """Return True if ``token`` satisfies any condition of the K_P(x) rule.
+    """Return True if ``token`` satisfies any condition of the formal K_P(x) rule.
 
-    The conditions implement the formal definition from design/02 §2.x:
+    Every condition is grounded in a published linguistic theory or an
+    authoritative morphological standard; no surface-form word lists are used.
 
-    NOUN, PROPN, NUM
+    Conditions
+    ----------
+    NOUN, PROPN, NUM (part-of-speech)
         Open-class content words and quantity expressions.  These carry the
-        primary semantic content of the question and changes to them alter the
-        answer (content-word / function-word distinction: Manning et al. 2008;
-        Jurafsky & Martin 2023).
+        primary semantic content of a question and changes to them alter the
+        answer (content-word / function-word distinction: Manning, Raghavan &
+        Schütze 2008, §6.1).
 
-    Named-entity membership (ENT_IOB ≠ O)
+    Named-entity membership (ENT_IOB_ ≠ "O")
         Proper-noun phrases, dates, organisations, etc.  Named entities bind
-        referents; a typo in a named entity typically causes a lookup failure
-        or an incorrect reference resolution.
+        referents; a perturbation on a named-entity token typically causes a
+        lookup failure or incorrect reference resolution.
 
-    Negation dependency relation (DEP = neg)
-        Negation tokens (``not``, ``never``, ``no``) that govern the head
-        verb or adjective.  A typo converting ``not`` to ``ot`` or ``no`` to
-        ``no.`` changes the polarity of the question and therefore the answer
-        (Tesnière 1959, dependency grammar of sentential negation).
+    Negation dependency relation (DEP = UniversalDependenciesRelationLabel.NEGATION)
+        Negation tokens (``not``, ``never``, ``no``) that govern the head verb
+        or adjective.  A perturbation that alters a negation token changes the
+        polarity of the question and therefore the answer (Tesnière 1959,
+        dependency grammar of sentential negation).
 
-    Comparative or superlative morphological degree (Degree = Cmp or Sup)
-        Tokens with comparative (``more``, ``fewer``, ``-er``) or superlative
-        (``most``, ``fewest``, ``-est``) inflection.  Scalar modifiers affect
-        which option is correct in MCQ and the direction of inequality in
-        reasoning (Huddleston & Pullum 2002, §17.5).
+    Comparative or superlative morphological degree
+    (Degree = SpacyMorphologicalDegree.COMPARATIVE or .SUPERLATIVE)
+        Tokens carrying comparative (``more``, ``fewer``, ``-er``) or
+        superlative (``most``, ``fewest``, ``-est``) inflection. Scalar
+        modifiers affect which option is correct in multiple-choice items and
+        the direction of inequality in reasoning items (Huddleston & Pullum
+        2002, §17.5 on degree in the adjective phrase).
 
-    Total-quantifier determiner (POS = DET, PronType = Tot)
+    Ordinal numeral adjective (NumType = SpacyMorphologicalNumericType.ORDINAL)
+        Ordinal adjectives ("first", "second", "last", etc.) directly
+        identify which object, event, or rank the question asks about.
+        Changing an ordinal typically changes the answer entirely (Huddleston
+        & Pullum 2002, §5.3 on ordinal numerals).  The detection is via
+        Universal Dependencies morphological features (universaldependencies.org),
+        not a surface-form list, so all ordinals recognised by the pipeline are
+        covered without enumeration.
+
+    Total-quantifier determiner (POS = DET, PronType = SpacyMorphologicalPronounType.TOTAL)
         Distributive / universal quantifiers: ``each``, ``every``, ``all``,
-        ``both``.  These impose distributive semantics; a typo that removes or
-        alters such a quantifier changes the counting structure of the problem
-        (Barwise & Cooper 1981, generalised quantifiers).
+        ``both``.  These impose distributive semantics; a perturbation that
+        removes or alters such a quantifier changes the counting structure of
+        the problem (Barwise & Cooper 1981, generalised quantifiers).
+
+    Non-copular, non-auxiliary VERB
+        Predicates that express the question's main action or relation
+        (e.g. "costs", "earns", "exceeds").  Auxiliary and copular verbs
+        ("is", "was", "can", "have" as aspect marker) are excluded via their
+        Universal Dependencies dependency relation: they carry no propositional
+        content independent of their complement (Nivre et al. 2016).
     """
     # Content and quantity carriers: the primary semantic load of a question.
     if token.pos_ in {"NOUN", "PROPN", "NUM"}:
@@ -150,54 +200,138 @@ def _token_is_key_term(token) -> bool:
         return True
 
     # Negation: sentential negation changes the polarity of the answer.
-    if token.dep_ == "neg":
+    if token.dep_ == UniversalDependenciesRelationLabel.NEGATION:
         return True
 
-    # Comparative and superlative degree: scalar modifiers that affect ordinality.
-    degree_values = token.morph.get("Degree")
-    if "Cmp" in degree_values or "Sup" in degree_values:
+    # Comparative and superlative degree: scalar modifiers that affect which
+    # option is correct or which direction an inequality runs.
+    morphological_degree_values = token.morph.get("Degree")
+    if (SpacyMorphologicalDegree.COMPARATIVE in morphological_degree_values
+            or SpacyMorphologicalDegree.SUPERLATIVE in morphological_degree_values):
         return True
 
-    # Totality quantifiers: distributive determiners that affect counting scope.
-    if token.pos_ == "DET" and "Tot" in token.morph.get("PronType"):
+    # Ordinal adjectives: identify which rank, position, or object is in scope.
+    # Detected entirely via Universal Dependencies morphological features;
+    # no surface-form word list is used.
+    if (token.pos_ == "ADJ"
+            and SpacyMorphologicalNumericType.ORDINAL in token.morph.get("NumType")):
+        return True
+
+    # Totality quantifiers: distributive determiners that change the counting
+    # structure of a problem.
+    if (token.pos_ == "DET"
+            and SpacyMorphologicalPronounType.TOTAL in token.morph.get("PronType")):
+        return True
+
+    # Non-copular, non-auxiliary predicates: VERBs that name the question's
+    # main action or relation.  The exclusion set is the standard Universal
+    # Dependencies set of grammatical-function verb relations.
+    if (token.pos_ == "VERB"
+            and token.dep_ not in _DEPENDENCY_LABELS_OF_NON_LEXICAL_VERBS):
         return True
 
     return False
+
+
+def _compute_tfidf_proxy_score(token_text: str, token_count_in_item: int) -> float:
+    """Compute a TF-IDF proxy score for a candidate key-term surface form.
+
+    Term Frequency (TF) is the number of times the token appears in the
+    item (``token_count_in_item``).  Inverse Document Frequency (IDF) is
+    approximated by ``-log(corpus_frequency + ε)`` using the ``wordfreq``
+    corpus-frequency database (Speer et al. 2022, wordfreq: a library for
+    looking up the frequencies of English words, via pip).  A rare word has a
+    high IDF; a very common word has a low IDF.
+
+    When ``wordfreq`` is not installed the IDF falls back to a fixed moderate
+    value, reducing the ranking to TF-only order (higher document frequency
+    within the item → higher score).  This fallback is explicit so that the
+    absence of ``wordfreq`` does not silently break annotation; install
+    ``wordfreq`` for full TF-IDF ranking.
+    """
+    try:
+        import wordfreq  # noqa: PLC0415 — optional heavy dependency, lazy import
+        corpus_frequency = wordfreq.word_frequency(token_text.lower(), "en")
+    except ImportError:
+        corpus_frequency = 1e-4  # moderate-rarity fallback; TF dominates ranking
+    return token_count_in_item * -math.log(
+        corpus_frequency + _LOG_FREQUENCY_STABILIZATION_EPSILON)
 
 
 def compute_key_term_set(
         question_text: str,
         linguistic_pipeline,
 ) -> list[str]:
-    """Apply the K_P(x) rule to ``question_text`` and return the unique
-    surface-form key terms in document order.
+    """Apply the K_P(x) rule to ``question_text`` and return all key terms,
+    ordered by perturbation priority.
 
-    Each token that satisfies ``_token_is_key_term`` contributes its ``text``
-    attribute (the exact surface form in the source string) to the result.
-    Duplicates are removed while preserving the order of first occurrence.
+    The ordering is designed to maximise the relevance of the perturbation
+    when only a small edit budget is available:
+
+    1. **Structurally guaranteed** tokens — Named entities, numeric tokens, and
+       negation tokens — appear first, in document order among themselves.
+       These are guaranteed by the formal rule to be answer-determining
+       regardless of their surface frequency.
+
+    2. **TF-IDF ranked** tokens — all remaining structural-filter-passing
+       tokens, sorted in descending order of TF-IDF proxy score.  Higher-ranked
+       (rarer-in-corpus, more-frequent-in-item) tokens appear earlier so that
+       a budget-one perturbation targets the most informative key term.
+
+    There is no cap on the total number of key terms returned.  All tokens
+    satisfying the formal rule are included; the ordering alone determines
+    which receives the first edit when budget is limited.  A cap would require
+    an arbitrary threshold with no principled justification.
 
     Parameters
     ----------
     question_text :
-        The raw question string (not the full prompt; instruction text is not
-        a perturbation target under the ``content`` or ``answer_critical``
-        scopes, so it is excluded from annotation).
+        The raw question string (not the full prompt; the instruction span is
+        not perturbed under the ``content`` or ``answer_critical`` scopes).
     linguistic_pipeline :
-        A loaded spaCy language model object (returned by ``load_linguistic_pipeline``).
+        A loaded spaCy language model object (returned by
+        ``load_linguistic_pipeline``).
     """
     document = linguistic_pipeline(question_text)
 
-    seen: set[str] = set()
-    key_terms: list[str] = []
+    # Partition tokens into two priority tiers.  Tier 1 (structurally
+    # guaranteed) tokens are definitionally answer-critical by the formal
+    # rule, independent of corpus frequency.  Tier 2 tokens are prioritised
+    # by TF-IDF proxy score.
+    tier_one_surfaces: list[str] = []     # document-order, deduplicated
+    tier_one_surface_set: set[str] = set()
+    tier_two_surfaces: list[str] = []     # document-order, deduplicated
+    tier_two_token_counts: dict[str, int] = {}
 
     for token in document:
-        if _token_is_key_term(token):
-            surface_form = token.text
-            if surface_form not in seen:
-                seen.add(surface_form)
-                key_terms.append(surface_form)
+        if not _token_is_key_term(token):
+            continue
+        surface = token.text
+        is_structurally_guaranteed = (
+            token.ent_iob_ != "O"
+            or token.pos_ == "NUM"
+            or token.dep_ == UniversalDependenciesRelationLabel.NEGATION
+        )
+        if is_structurally_guaranteed:
+            if surface not in tier_one_surface_set:
+                tier_one_surfaces.append(surface)
+                tier_one_surface_set.add(surface)
+        else:
+            tier_two_token_counts[surface] = (
+                tier_two_token_counts.get(surface, 0) + 1)
+            if surface not in tier_one_surface_set and surface not in tier_two_surfaces:
+                tier_two_surfaces.append(surface)
 
-    return key_terms
+    # Sort Tier 2 by TF-IDF proxy score descending.  Tier 1 surfaces keep
+    # document order (they are already unconditionally included).
+    tier_two_ordered = sorted(
+        tier_two_surfaces,
+        key=lambda surface_form: _compute_tfidf_proxy_score(
+            surface_form, tier_two_token_counts.get(surface_form, 1)),
+        reverse=True,
+    )
+
+    return tier_one_surfaces + tier_two_ordered
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +388,7 @@ def annotate_item(
 
     The update dict contains:
         ``key_terms``                   List of key-term surface forms (K_P(x)).
-        ``linguistic_annotation_rule``  The rule version string (KEY_TERM_RULE_VERSION).
+        ``linguistic_annotation_rule``  The rule version string (KEY_TERM_IDENTIFICATION_RULE_VERSION).
 
     The caller applies this dict to the item's serialised record; the item
     dataclass itself is not mutated (it may be frozen).
@@ -277,7 +411,7 @@ def annotate_item(
 
     return {
         "key_terms": key_terms,
-        "linguistic_annotation_rule": KEY_TERM_RULE_VERSION,
+        "linguistic_annotation_rule": KEY_TERM_IDENTIFICATION_RULE_VERSION,
     }
 
 
@@ -333,10 +467,10 @@ def annotate_jsonl_file(
 
     if not force and records:
         existing_rule = records[0].get("linguistic_annotation_rule", "")
-        if existing_rule == KEY_TERM_RULE_VERSION:
+        if existing_rule == KEY_TERM_IDENTIFICATION_RULE_VERSION:
             raise ValueError(
                 f"Output file already contains annotations from rule "
-                f"'{KEY_TERM_RULE_VERSION}'.  Pass force=True to overwrite.  "
+                f"'{KEY_TERM_IDENTIFICATION_RULE_VERSION}'.  Pass force=True to overwrite.  "
                 "Overwriting a pre-registered frozen dataset requires a "
                 "design-doc amendment (design/10 §10.3)."
             )
@@ -345,7 +479,14 @@ def annotate_jsonl_file(
     violation_count = 0
 
     for record in records:
-        question_text = record.get(question_text_field, "")
+        # Auto-detect the question field: prefer the explicit argument, but fall
+        # back to "question" (MCQ schema) when the explicit field is absent.
+        effective_field = (
+            question_text_field
+            if question_text_field in record
+            else next((f for f in ("question", "question_text") if f in record), question_text_field)
+        )
+        question_text = record.get(effective_field, "")
         key_terms = compute_key_term_set(question_text, linguistic_pipeline)
 
         # Template operand cross-check (for synthetic items that carry parameters).
@@ -366,7 +507,7 @@ def annotate_jsonl_file(
             violation_count += len(violations)
 
         record["key_terms"] = key_terms
-        record["linguistic_annotation_rule"] = KEY_TERM_RULE_VERSION
+        record["linguistic_annotation_rule"] = KEY_TERM_IDENTIFICATION_RULE_VERSION
         annotated_count += 1
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,7 +519,7 @@ def annotate_jsonl_file(
         "annotated_count": annotated_count,
         "skipped_count": 0,
         "violation_count": violation_count,
-        "rule_version": KEY_TERM_RULE_VERSION,
+        "rule_version": KEY_TERM_IDENTIFICATION_RULE_VERSION,
         "model_name": model_name,
     }
 
@@ -425,7 +566,7 @@ def build_annotation_provenance_record(
             "definition of K_P(x) and design/04 §4.6 for the literature justification."
         ),
         "key_term_annotation": {
-            "rule_version": KEY_TERM_RULE_VERSION,
+            "rule_version": KEY_TERM_IDENTIFICATION_RULE_VERSION,
             "implements": "design/02 §2.x — the key-term set K_P(x)",
             "formal_definition": (
                 "K_P(x) = { t ∈ tok_P(x) : "
