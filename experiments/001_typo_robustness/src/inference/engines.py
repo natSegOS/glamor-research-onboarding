@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
+
 from enums import Precision
 from inference.roster import ModelSpecification
 
@@ -71,10 +72,26 @@ class VllmEngine:
             max_tokens=max_new_tokens,
         )
 
-    def apply_chat_template(self, user_message: str) -> str:
-        """Wrap a user message in the model's own chat template (design/05 §5.7)."""
+    def apply_chat_template(
+            self, user_message: str, system_message: Optional[str] = None) -> str:
+        """Wrap a user message (and optionally a system message) in the model's
+        own chat template (design/05 §5.7).
+
+        ``system_message`` is included only when the model's tokenizer chat
+        template declares a "system" role slot; otherwise it is prepended to the
+        user turn with a blank line so the instruction is never silently dropped.
+        """
+        messages = []
+        template_str = getattr(self.tokenizer, "chat_template", "") or ""
+        supports_system = "system" in template_str
+        if system_message:
+            if supports_system:
+                messages.append({"role": "system", "content": system_message})
+            else:
+                user_message = f"{system_message}\n\n{user_message}"
+        messages.append({"role": "user", "content": user_message})
         return self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": user_message}],
+            messages,
             tokenize=False,
             add_generation_prompt=True,
         )
