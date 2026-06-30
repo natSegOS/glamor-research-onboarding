@@ -39,16 +39,16 @@ datasets:
     path: data/items/mmlu.jsonl
     item_count: 600
 
-asr_items_path: data/perturbations/asr_items.jsonl
-
 is_confirmatory: true
 
 max_new_tokens_reasoning: 512
 max_new_tokens_multiple_choice: 256
 
-# The five keyboard perturbation families (design/11 §11.4) plus the ASR arm.
-# These mirror the literature's recurring operation set: keyboard-neighbor
-# substitution, deletion, insertion/double, transposition, and whitespace.
+# Perturbation conditions (design/11 §11.4): keyboard-neighbor operations
+# across all four Damerau-Levenshtein primitives (substitute, delete, insert,
+# transpose), scope variations (anywhere / content / answer_critical), discourse-
+# particle filler-word insertion (Regime A), real-word shift (Regime B), and
+# deterministic meaning-change (Regime C). ASR is out of scope for this study.
 conditions:
   - name: regime_a_substitute_keyboard
     semantic_class: A
@@ -82,11 +82,15 @@ conditions:
     edit_budgets: [1, 2, 4]
     source: synthetic
 
-  - name: regime_a_whitespace
+  # Discourse-particle insertion (filler words): insert tokens from the frozen
+  # set {"uh", "um", "like", "so"} at eligible inter-word positions. Intent is
+  # preserved definitionally (discourse particles carry no propositional content);
+  # no rejection sampling is needed. Novel relative to prior typo-robustness work.
+  - name: regime_a_filler
     semantic_class: A
     operation: insert
-    selection_policy: whitespace
-    scope: content
+    selection_policy: filler_word
+    scope: anywhere
     edit_budgets: [1, 2]
     source: synthetic
 
@@ -114,28 +118,8 @@ conditions:
     # edit_budgets controls the NUMBER of words substituted per item.
     # The within-word DL band is widened to 2 and phonetic homophones are
     # added automatically in make_regime_b_real_word_shift (design/02 §2.4).
-    # PILOT-DECISION (remove the unused lever after pilot): budget raised from
-    # [1, 2] to [2, 3, 4] to produce more divergent real-word shifts; the engine-
-    # knob lever (max_word_distance on PerturbationCondition) is implemented
-    # independently — keep whichever shows more meaningful effect in the pilot.
     edit_budgets: [2, 3, 4]
     source: synthetic
-
-  - name: regime_b_asr_clean
-    semantic_class: B
-    operation: asr
-    selection_policy: asr_clean
-    scope: content
-    edit_budgets: [0]
-    source: asr
-
-  - name: regime_b_asr_noisy
-    semantic_class: B
-    operation: asr
-    selection_policy: asr_noisy
-    scope: content
-    edit_budgets: [0]
-    source: asr
 
   # Regime C: deterministic meaning-change perturbations with computationally
   # verifiable gold answers (design/04 §4.7).
