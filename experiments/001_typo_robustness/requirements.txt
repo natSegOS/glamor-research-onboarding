@@ -42,33 +42,24 @@ pronouncing>=0.2
 # render a notebook widget in Colab and a terminal bar on the cluster.
 tqdm>=4.66
 
-# Real-study English lexicon for the is_word predicate (Regime A / B boundary).
-# tools/build_dictionary.py fetches the vocabulary, pins the installed version,
-# and writes data/wordlists/en_us_pinned.txt (the format regimes.load_wordlist
-# already reads). Not needed for offline/smoke runs; only required when running
-# tools/build_dictionary.py with --source wordfreq (the default).
+# TF-IDF proxy for key-term ranking in the K_P(x) annotation rule.
+# Used by tools/build_annotated_dataset.py; falls back to TF-only ranking
+# (count_in_item order) when not installed, so offline/smoke runs continue
+# without it.  Install for correct annotation ranking behaviour.
 wordfreq>=3.0
 
 # ---------------------------------------------------------------------------
 # Build-tool dependencies (Stage 0: data preparation)
 # ---------------------------------------------------------------------------
-# These are needed only when running tools/build_annotated_dataset.py to
-# annotate the item JSONL files with K_P(x) key terms.  They are NOT needed
-# during the experiment (generation) or analysis (scoring) stages.  The
-# annotation output is committed as a frozen JSONL artifact, so the GPU
-# cluster nodes that run generation need only the core requirements above.
+# Required for tools/build_annotated_dataset.py, which annotates item JSONL
+# files with frozen K_P(x) key terms.  Not needed during generation or
+# analysis; the annotation output is committed as a frozen JSONL artifact.
 #
-# Install before running the annotation build tool:
-#   pip install spacy
-#   python -m spacy download en_core_web_sm     # minimum; see note below
-#
-# Model selection:
-#   en_core_web_sm   Efficient, CPU-only.  Suitable for a pilot annotation.
-#   en_core_web_md   Better accuracy; still CPU-only.  Recommended for pilot.
-#   en_core_web_trf  RoBERTa-based; highest accuracy; CPU-runnable but slower.
-#                    Recommended for the confirmatory frozen annotation.
-#                    Published benchmark: see spacy.io/models/en.
-#
-# The exact model name and its meta.json SHA-256 are recorded in
-# data/items/annotation_PROVENANCE.json after running the tool.
+# spaCy model: both pilot and confirmatory runs use en_core_web_trf
+# (RoBERTa-based; highest morphological and NER accuracy; spacy.io/models/en).
+# Run after installing spacy and spacy-transformers:
+#   python -m spacy download en_core_web_trf
+# The exact model name and meta.json SHA-256 are recorded in
+# data/items/annotation_PROVENANCE.json.
 spacy>=3.7
+spacy-transformers>=1.2   # required for en_core_web_trf (GPU-accelerated on Colab)
