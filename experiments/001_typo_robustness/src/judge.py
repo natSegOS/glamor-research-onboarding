@@ -263,9 +263,12 @@ def judge_one(
     user_prompt = _build_judge_prompt(
         original_text, perturbed_text, edited_word_before, edited_word_after)
 
+    # Bug fix (Workstream 8): apply_chat_template accepted system_prompt kwarg
+    # which does not exist on VllmEngine; now uses system_message= which
+    # VllmEngine.apply_chat_template accepts and handles correctly.
     if hasattr(engine, "apply_chat_template"):
         full_prompt = engine.apply_chat_template(  # type: ignore[union-attr]
-            user_prompt, system_prompt=_JUDGE_SYSTEM_PROMPT)
+            user_prompt, system_message=_JUDGE_SYSTEM_PROMPT)
     else:
         full_prompt = f"{_JUDGE_SYSTEM_PROMPT}\n\n{user_prompt}"
 
@@ -291,17 +294,45 @@ def judge_one(
     return decision
 
 
+def _extract_content_text(prompt: str) -> str:
+    """Extract the content block from a full prompt string.
+
+    The full prompt has the structure:
+        <INSTRUCTION>\\n\\n<CONTENT>
+    The judge should see CONTENT only, not the instruction, so that instruction
+    text (which is identical for all items) does not pollute the judgment
+    (Workstream 8 bug fix).  Falls back to the full prompt if no separator
+    is found.
+    """
+    separator = "\n\n"
+    if separator in prompt:
+        return prompt.split(separator, 1)[1]
+    return prompt
+
+
 def run_judge_on_sample(
         engine: object,
         judge_revision: str,
         sample_rows: Sequence[dict],
         cache_path: Path,
         progress_callback: Optional[object] = None,
+        skip_regime_c_mcq: bool = True,
 ) -> list[JudgeDecision]:
     """Run the judge on a list of generation rows and return decisions.
 
-    Each row must have: ``perturbed_prompt``, ``clean_prompt`` (or ``prompt``),
-    ``r_semantic_class``, and at least one edit in ``edit_script``.
+    Each row must have: ``clean_prompt``, ``prompt`` (the perturbed prompt as
+    written by the runner), ``r_semantic_class``, and at least one edit in
+    ``edit_script``.
+
+    Bug fixes (Workstream 8):
+    - The perturbed text is read from ``row["prompt"]`` (how the runner writes
+      it), not from the non-existent ``row["perturbed_prompt"]`` field.
+    - Only the CONTENT block (question text) is shown to the judge, not the
+      full instruction + content prompt (which added noise to the judgment).
+    - Regime C MCQ items are skipped: their validity is guaranteed structurally
+      (the permutation is definitionally meaning-changing) and judging them
+      wastes inference.
+
     Already-cached rows are returned from cache without calling the engine.
     """
 
@@ -309,9 +340,20 @@ def run_judge_on_sample(
     decisions: list[JudgeDecision] = []
 
     for row in sample_rows:
-        original_text = row.get("clean_prompt") or row.get("prompt", "")
-        perturbed_text = row.get("perturbed_prompt", "")
         claimed_regime = row.get("r_semantic_class", "")
+
+        # Skip Regime C MCQ: structurally guaranteed, no judge needed.
+        if skip_regime_c_mcq and claimed_regime == "C" and row.get("task_family", "").startswith("mmlu"):
+            continue
+
+        # Bug fix: runner writes the perturbed prompt as "prompt", not as
+        # "perturbed_prompt" (which was never written by the runner).
+        full_original = row.get("clean_prompt", "")
+        full_perturbed = row.get("prompt", "")  # perturbed prompt in the runner schema
+
+        # Bug fix: show content-only text, not the instruction+content full prompt.
+        original_text = _extract_content_text(full_original)
+        perturbed_text = _extract_content_text(full_perturbed)
 
         edit_script = row.get("edit_script", [])
         if edit_script:
