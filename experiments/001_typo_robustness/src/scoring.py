@@ -22,13 +22,11 @@ Two parse-status detectors are provided:
       exercises.
 
   classify_parse_status_with_linguistic_pipeline
-      spaCy dependency-parse-based; the formal detector for the post-stage
-      scoring tool (tools/score_generations.py).  No phrase list is loaded at
-      runtime; structural dependency criteria detect interrogatives (clarification)
-      and first-person negated clauses (refusal).  The phrase lists in
-      data/lexicons/ survive as frozen validation oracles that the new rule
-      must agree with on a pinned example set — they are not the runtime
-      mechanism.  See the reconciliation note in the plan (Part 3).
+      spaCy dependency-parse-based; the formal four-way detector used inline
+      during generation (Workstream 5).  No phrase list is loaded at runtime;
+      structural dependency criteria detect interrogatives (clarification) and
+      first-person negated clauses (refusal).  The phrase lists in data/lexicons/
+      survive as frozen validation oracles — they are not the runtime mechanism.
 
 Both detectors are deliberately conservative: the invalid-or-clarification rate
 is a diagnostic metric (M9), not a primary endpoint.  Under-counting is the
@@ -53,7 +51,9 @@ from tasks._shared import OPTION_LETTERS, HASH_DELIMITED_ANSWER_PATTERN
 import re
 
 
-_ANY_NUMBER = re.compile(r"-?\$?\d[\d,]*\.?\d*")
+# Extended to include scientific notation (e.g. 1.5e10, 2E-3) so GSM answers
+# expressed as powers of ten are not silently dropped (Workstream 4).
+_ANY_NUMBER = re.compile(r"-?\$?\d[\d,]*\.?\d*(?:[eE][+-]?\d+)?")
 
 # Re-use the shared hash-delimited answer pattern so the response-side scorer
 # and the gold-side loader parse the same surface forms.
@@ -101,6 +101,14 @@ class ScoreResult:
     parsed_answer: Optional[str]
     is_correct: int                    # 1 or 0
     parse_status: ParseStatus
+    # Which extraction tier fired (Workstream 4). One of:
+    #   "hash_delimited"        — #### <number> pattern (reasoning)
+    #   "last_number_fallback"  — any number in text (reasoning fallback)
+    #   "mcq_explicit_marker"   — "answer is X" / "Answer: X"
+    #   "mcq_line_leading"      — letter at start of line
+    #   "mcq_standalone_sentence" — letter in last sentence
+    #   "unparseable"           — nothing found
+    extraction_tier: str = "unparseable"
 
 
 def normalize_number(raw: str) -> Optional[float]:
@@ -115,29 +123,42 @@ def normalize_number(raw: str) -> Optional[float]:
         return None
 
 
-def extract_reasoning_answer(generation: str) -> Optional[float]:
+def extract_reasoning_answer(generation: str) -> tuple[Optional[float], str]:
     """Extract the final numeric answer from a reasoning generation.
 
     Priority (design/04 §4.2, matching the GSM-Symbolic / GSM8K answer format):
     the number after the LAST '####' delimiter, else the LAST number anywhere in
     the text.
+
+    Returns (parsed_answer, extraction_tier) where extraction_tier is one of
+    "hash_delimited", "last_number_fallback", or "unparseable".
     """
     hash_delimited_matches = _HASH_DELIMITED_ANSWER.findall(generation)
     if hash_delimited_matches:
-        return normalize_number(hash_delimited_matches[-1])
+        value = normalize_number(hash_delimited_matches[-1])
+        return value, ("hash_delimited" if value is not None else "unparseable")
 
     any_number_matches = _ANY_NUMBER.findall(generation)
     if any_number_matches:
-        return normalize_number(any_number_matches[-1])
+        value = normalize_number(any_number_matches[-1])
+        return value, ("last_number_fallback" if value is not None else "unparseable")
 
-    return None
+    return None, "unparseable"
 
 
-def extract_multiple_choice_answer(generation: str, option_count: int = 10) -> Optional[str]:
+def extract_multiple_choice_answer(
+        generation: str, option_count: int = 10) -> tuple[Optional[str], str]:
     """Extract the chosen option letter from an MCQ generation.
 
-    Priority: an explicit 'answer is X' marker (last occurrence), else a
-    line-leading standalone letter, else the last standalone valid letter.
+    Priority:
+      1. explicit 'answer is X' / 'Answer: X' marker (last occurrence)
+      2. line-leading standalone letter
+      3. standalone valid letter in the **last sentence only** (restricted from
+         the full generation to avoid picking up A–J letters in reasoning chains)
+
+    Returns (letter, extraction_tier) where extraction_tier is one of
+    "mcq_explicit_marker", "mcq_line_leading", "mcq_standalone_sentence", or
+    "unparseable".
     """
     valid_letters = OPTION_LETTERS[:option_count]
 
@@ -146,20 +167,23 @@ def extract_multiple_choice_answer(generation: str, option_count: int = 10) -> O
         if letter.upper() in valid_letters
     ]
     if explicit_marker_hits:
-        return explicit_marker_hits[-1]
+        return explicit_marker_hits[-1], "mcq_explicit_marker"
 
     line_leading_hits = [
         letter.upper() for letter in _MCQ_LINE_LEADING_LETTER.findall(generation)
         if letter.upper() in valid_letters
     ]
     if line_leading_hits:
-        return line_leading_hits[-1]
+        return line_leading_hits[-1], "mcq_line_leading"
 
-    standalone_hits = re.findall(rf"\b([{valid_letters}])\b", generation)
+    # Restrict standalone scan to last sentence to avoid spurious letter
+    # matches earlier in reasoning chains (Workstream 4, MMLU-Pro 10-option).
+    last_sentence = generation.rsplit(".", 1)[-1]
+    standalone_hits = re.findall(rf"\b([{valid_letters}])\b", last_sentence)
     if standalone_hits:
-        return standalone_hits[-1].upper()
+        return standalone_hits[-1].upper(), "mcq_standalone_sentence"
 
-    return None
+    return None, "unparseable"
 
 
 def classify_parse_status(parsed_answer) -> ParseStatus:
@@ -283,17 +307,17 @@ def classify_parse_status_with_linguistic_pipeline(
 
 def score_reasoning(generation: str, gold_answer: float, tolerance: float = 1e-6) -> ScoreResult:
     """Score a reasoning generation against a numeric gold answer."""
-    parsed_answer = extract_reasoning_answer(generation)
+    parsed_answer, tier = extract_reasoning_answer(generation)
     parse_status = classify_parse_status(parsed_answer)
 
     if parse_status in INTERACTIONAL_FAILURE_STATUSES:
         # Conservative: an interactional non-answer counts against accuracy even
         # if a number happens to appear elsewhere in the text.
         recorded_answer = None if parsed_answer is None else str(parsed_answer)
-        return ScoreResult(recorded_answer, 0, parse_status)
+        return ScoreResult(recorded_answer, 0, parse_status, "unparseable")
 
     if parsed_answer is None:
-        return ScoreResult(None, 0, parse_status)
+        return ScoreResult(None, 0, parse_status, tier)
 
     gold_as_float = float(gold_answer)
     if gold_as_float.is_integer():
@@ -301,21 +325,21 @@ def score_reasoning(generation: str, gold_answer: float, tolerance: float = 1e-6
     else:
         is_correct = int(abs(parsed_answer - gold_as_float) < tolerance)
 
-    return ScoreResult(str(parsed_answer), is_correct, parse_status)
+    return ScoreResult(str(parsed_answer), is_correct, parse_status, tier)
 
 
 def score_multiple_choice(generation: str, gold_letter: str, option_count: int = 10) -> ScoreResult:
     """Score a multiple-choice generation against the gold option letter."""
-    parsed_answer = extract_multiple_choice_answer(generation, option_count)
+    parsed_answer, tier = extract_multiple_choice_answer(generation, option_count)
     parse_status = classify_parse_status(parsed_answer)
 
     if parse_status in INTERACTIONAL_FAILURE_STATUSES:
-        return ScoreResult(parsed_answer, 0, parse_status)
+        return ScoreResult(parsed_answer, 0, parse_status, "unparseable")
 
     if parsed_answer is None:
-        return ScoreResult(None, 0, parse_status)
+        return ScoreResult(None, 0, parse_status, tier)
 
-    return ScoreResult(parsed_answer, int(parsed_answer == gold_letter.upper()), parse_status)
+    return ScoreResult(parsed_answer, int(parsed_answer == gold_letter.upper()), parse_status, tier)
 
 
 def score(generation: str, gold_answer, task_family: str) -> ScoreResult:
