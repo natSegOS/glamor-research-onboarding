@@ -41,7 +41,11 @@ class SelectionPolicy(_StrEnum):
     KEYBOARD_NEIGHBOR = "keyboard_neighbor"
     INFORMATIVE_WORD = "informative_word"
     REAL_WORD = "real_word"
-    WHITESPACE = "whitespace"
+    WHITESPACE = "whitespace"           # dormant; kept for old JSONL compatibility
+    # Discourse-particle insertion: the frozen set {"uh", "um", "like", "so"}.
+    # Intent is preserved definitionally (particles carry no propositional content);
+    # no rejection sampling needed (Workstream 3). Novel versus prior work.
+    FILLER_WORD = "filler_word"
     ASR_TRANSCRIPTION = "asr_transcription"   # recognised by engine but rejected
     ASR_CLEAN = "asr_clean"                   # produced by asr.py (quiet condition)
     ASR_NOISY = "asr_noisy"                   # produced by asr.py (noisy condition)
@@ -198,3 +202,101 @@ class DatasetRole(_StrEnum):
     PRIMARY = "primary"
     CONTAMINATION_CONTRAST = "contamination_contrast"
     SMOKE_TEST = "smoke_test"
+
+
+# ---------------------------------------------------------------------------
+# Annotation vocabulary
+# ---------------------------------------------------------------------------
+
+class KeyTermRuleVersion(_StrEnum):
+    """Versioned identifier for the key-term identification rule K_P(x).
+
+    Written into every annotated item record and into
+    data/items/annotation_PROVENANCE.json. Incrementing this version causes the
+    build tool to refuse to overwrite a pre-registered frozen dataset without an
+    explicit --force flag.
+
+    STRUCTURAL_FILTER_WITH_TFIDF_RANKED_CANDIDATES (current)
+        spaCy structural filter (POS, morphological features, dependency
+        relations) with candidates ranked by TF-IDF proxy score for
+        prioritisation. No arbitrary cap on the number of key terms.
+        Formally grounded in Manning, Raghavan & Schütze (2008),
+        Universal Dependencies (Nivre et al. 2016), and
+        Huddleston & Pullum (2002).
+    """
+    STRUCTURAL_FILTER_WITH_TFIDF_RANKED_CANDIDATES = (
+        "structural_filter_with_tfidf_ranked_candidates")
+
+
+class UniversalDependenciesRelationLabel(_StrEnum):
+    """Subset of Universal Dependencies syntactic relation labels used in this
+    study's token-classification logic.
+
+    Values match spaCy's ``token.dep_`` attribute strings exactly.
+    The Universal Dependencies standard is published at universaldependencies.org
+    (Nivre et al. 2016; de Marneffe et al. 2021).
+    """
+    AUXILIARY = "aux"
+    AUXILIARY_PASSIVE = "auxpass"
+    COPULA = "cop"
+    NEGATION = "neg"
+
+
+class SpacyMorphologicalDegree(_StrEnum):
+    """Values of the Universal Dependencies morphological 'Degree' feature as
+    returned by spaCy's ``token.morph.get("Degree")``.
+
+    Source: universaldependencies.org/u/feat/Degree.html
+    (Universal Dependencies specification, Nivre et al. 2016).
+    """
+    COMPARATIVE = "Cmp"
+    SUPERLATIVE = "Sup"
+
+
+class SpacyMorphologicalNumericType(_StrEnum):
+    """Values of the Universal Dependencies morphological 'NumType' feature as
+    returned by spaCy's ``token.morph.get("NumType")``.
+
+    Ordinal numerals ("first", "second", "last") directly identify which
+    object or rank is in scope, making them answer-critical in both reasoning
+    and multiple-choice questions (Huddleston & Pullum 2002, §5.3).
+
+    Source: universaldependencies.org/u/feat/NumType.html
+    """
+    ORDINAL = "Ord"
+
+
+class SpacyMorphologicalPronounType(_StrEnum):
+    """Values of the Universal Dependencies morphological 'PronType' feature as
+    returned by spaCy's ``token.morph.get("PronType")``.
+
+    Total-quantifier determiners ("each", "every", "all", "both") impose
+    distributive semantics; a perturbation that changes or removes such a
+    quantifier directly changes the counting structure of a problem
+    (Barwise & Cooper 1981, generalised quantifiers).
+
+    Source: universaldependencies.org/u/feat/PronType.html
+    """
+    TOTAL = "Tot"
+
+
+class EnglishDiscourseParticle(_StrEnum):
+    """Canonical English filled-pause discourse particles used in Regime A
+    filler-word insertion perturbations.
+
+    Filled pauses (``uh``, ``um``) are the most-studied class of English
+    disfluency markers (Clark & Fox Tree 2002, "Using uh and um in spontaneous
+    speaking", Cognition 84(1):73–111; Shriberg 1994, "Preliminaries to a
+    Theory of Speech Disfluencies", UC Berkeley dissertation).  The pragmatic
+    discourse markers (``like``, ``so``) are the two most frequent English
+    discourse markers used as fillers in informal speech (Jurafsky & Martin
+    2024, Speech and Language Processing, §26.4 on discourse coherence and
+    disfluency).  Together these four tokens are the set studied across the
+    core English disfluency literature and are the canonical minimal set for
+    intent-preserving filler insertion: each carries no propositional content
+    in inter-word positions, so their insertion is intent-preserving by definition.
+    """
+    FILLED_PAUSE_UH = "uh"
+    FILLED_PAUSE_UM = "um"
+    DISCOURSE_MARKER_LIKE = "like"
+    DISCOURSE_MARKER_SO = "so"
