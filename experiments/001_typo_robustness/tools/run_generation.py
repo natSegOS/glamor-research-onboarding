@@ -25,6 +25,7 @@ For the main study, also:
 from __future__ import annotations
 
 import argparse
+import sys
 
 from pathlib import Path
 
@@ -32,6 +33,13 @@ from pipeline import ExperimentConfiguration, run_experiment
 from inference import build_inference_engine
 from inference import assert_revisions_pinned, get_model_specification
 from regimes import make_is_word
+
+# Default dictionary — built from SCOWL size-60 by tools/build_dictionary.py.
+# Never falls back to the 488-word demo list in real runs.
+_DEFAULT_DICTIONARY = Path(__file__).resolve().parent.parent / "data" / "wordlists" / "en_us_pinned.txt"
+
+# spaCy model used for inline four-way parse-status classification (Workstream 5).
+_SPACY_MODEL_NAME = "en_core_web_trf"
 
 
 def parse_arguments():
@@ -41,9 +49,35 @@ def parse_arguments():
     parser.add_argument("--output-directory", required=True, type=Path)
     parser.add_argument("--git-commit", default="unpinned",
                         help="the code commit SHA, recorded in every row")
-    parser.add_argument("--dictionary", type=Path, default=None,
-                        help="a pinned English word list; defaults to the demo list")
+    parser.add_argument(
+        "--dictionary", type=Path, default=None,
+        help=f"a pinned English word list (default: {_DEFAULT_DICTIONARY})")
+    parser.add_argument(
+        "--no-spacy", action="store_true",
+        help="disable inline spaCy scoring (falls back to structural two-way classifier)")
     return parser.parse_args()
+
+
+def _load_linguistic_pipeline(disabled: bool):
+    """Load the spaCy transformer pipeline once at startup.
+
+    Returns None when disabled or when spaCy / the model is not installed
+    (a warning is printed; the run continues with the structural fallback).
+    """
+    if disabled:
+        return None
+    try:
+        import spacy  # noqa: PLC0415
+        return spacy.load(_SPACY_MODEL_NAME)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[run_generation] WARNING: could not load spaCy model "
+            f"{_SPACY_MODEL_NAME!r}: {exc}\n"
+            f"  Falling back to structural two-way parse-status classifier.\n"
+            f"  Install: python -m spacy download {_SPACY_MODEL_NAME}",
+            file=sys.stderr,
+        )
+        return None
 
 
 def main():
@@ -58,7 +92,14 @@ def main():
         assert_revisions_pinned([specification])
 
     engine = build_inference_engine(specification)
-    is_word = make_is_word(_load_dictionary(arguments.dictionary))
+
+    dictionary_path = arguments.dictionary or _DEFAULT_DICTIONARY
+    is_word = make_is_word(_load_dictionary(dictionary_path))
+
+    print(f"[run_generation] loading spaCy pipeline ({_SPACY_MODEL_NAME}) ...")
+    linguistic_pipeline = _load_linguistic_pipeline(arguments.no_spacy)
+    if linguistic_pipeline is not None:
+        print(f"[run_generation] spaCy loaded ({_SPACY_MODEL_NAME})")
 
     summary = run_experiment(
         configuration=configuration,
@@ -70,6 +111,7 @@ def main():
         model_revision=specification.revision,
         quantization_method=specification.precision,
         git_commit=arguments.git_commit,
+        linguistic_pipeline=linguistic_pipeline,
     )
 
     print("run complete:")

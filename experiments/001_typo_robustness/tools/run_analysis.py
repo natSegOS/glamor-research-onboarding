@@ -59,11 +59,19 @@ def _build_model_dataframe(rows):
             "is_perturbed": 0 if is_clean else 1,
             "task_id": task_id,
             "model_revision": model_revision,
+            # Primary mediator: token-inflation ratio (no r_ prefix — written as
+            # extra_field by the runner, not as a perturbation state vector entry).
             "token_inflation_ratio": 0.0 if is_clean else float(
-                row.get("r_token_inflation_ratio", 0.0) or 0.0),
+                row.get("token_inflation_ratio", 0.0) or 0.0),
+            # Supplementary mediator (Workstream 9).
+            "subword_count_change": 0.0 if is_clean else float(
+                row.get("subword_count_change", 0.0) or 0.0),
+            # Covariate for word-length confound control (Workstream 3).
+            "word_length_before": int(row.get("word_length_before", 0) or 0),
             "r_semantic_class": row.get("r_semantic_class", "clean"),
             "r_edit_budget": row.get("r_edit_budget", 0),
             "task_family": row.get("task_family", ""),
+            "extraction_tier": row.get("extraction_tier", ""),
         })
     return pd.DataFrame(records)
 
