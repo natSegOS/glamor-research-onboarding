@@ -167,6 +167,48 @@ def make_regime_a_nonword_typo(
 
 
 # ---------------------------------------------------------------------------
+# Regime A variant — discourse-particle filler-word insertion.
+# ---------------------------------------------------------------------------
+
+def make_regime_a_filler_insertion(
+        text: str,
+        edit_budget: int,
+        seed: int,
+        scope: Scope = Scope.ANYWHERE,
+        scope_spans: Optional[dict] = None,
+        protected_spans=None,
+) -> tuple[str, list[Edit], dict]:
+    """Insert ``edit_budget`` discourse-particle tokens (the frozen set
+    {"uh", "um", "like", "so"}) at eligible inter-word positions.
+
+    Intent-preservation is definitional (particles carry no propositional
+    content), so no rejection sampling or is_word check is needed.  The
+    nonword test is explicitly bypassed: filler tokens ARE valid English words
+    but are treated as Regime A because they cannot change the question's meaning
+    by construction.
+
+    Returns (perturbed_text, edits, metadata).
+    """
+    attempt_seed = derived_seed(seed, SemanticClass.A, "filler", 0)
+    perturbed_text, edits = perturb(
+        text, Operation.INSERT, Unit.CHAR, scope, edit_budget,
+        SelectionPolicy.FILLER_WORD, SemanticClass.A, attempt_seed,
+        protected_spans=protected_spans,
+        scope_spans=scope_spans,
+        exclude_numeric_tokens=True,
+    )
+    inserted_fillers = [edit.word_after for edit in edits if edit.word_after]
+    metadata = {
+        "regime": SemanticClass.A,
+        "attempt": 0,
+        "seed_used": attempt_seed,
+        "inserted_fillers": inserted_fillers,
+        "damerau_levenshtein_distance": damerau_levenshtein_distance(text, perturbed_text),
+    }
+    return perturbed_text, edits, metadata
+
+
+# ---------------------------------------------------------------------------
 # Regime B — context-recoverable real-word shift (synthetic cross-validation
 # arm; the primary Regime B population comes from asr.py).
 # ---------------------------------------------------------------------------
