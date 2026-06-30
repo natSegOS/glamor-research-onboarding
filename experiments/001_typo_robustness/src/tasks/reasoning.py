@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import json
 import random
+import re
 
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -64,6 +66,134 @@ REASONING_INSTRUCTION = (
     "Solve the following problem. Show your reasoning, then give the final "
     "numeric answer on a new line in the form '#### <number>'."
 )
+
+# ---------------------------------------------------------------------------
+# GSM-Symbolic template parser (Workstream 7)
+# ---------------------------------------------------------------------------
+
+# Canonical English fraction words that appear in GSM-Symbolic {param,value}
+# annotations.  Mapped to exact Fraction values so the answer_function can
+# evaluate arithmetic expressions that include them.
+FRACTION_WORDS: dict[str, Fraction] = {
+    "half":           Fraction(1, 2),
+    "third":          Fraction(1, 3),
+    "quarter":        Fraction(1, 4),
+    "fifth":          Fraction(1, 5),
+    "sixth":          Fraction(1, 6),
+    "seventh":        Fraction(1, 7),
+    "eighth":         Fraction(1, 8),
+    "ninth":          Fraction(1, 9),
+    "tenth":          Fraction(1, 10),
+    "two-thirds":     Fraction(2, 3),
+    "three-quarters": Fraction(3, 4),
+    "two-fifths":     Fraction(2, 5),
+    "three-fifths":   Fraction(3, 5),
+    "four-fifths":    Fraction(4, 5),
+    "one-third":      Fraction(1, 3),
+    "one-quarter":    Fraction(1, 4),
+    "one-half":       Fraction(1, 2),
+}
+
+# Regex to locate {param,value} annotations in question_annotated.
+_PARAM_VALUE_RE = re.compile(r"\{(\w+),([^}]+)\}")
+# Regex to extract the #answer: expression (handles \n-split sections).
+_ANSWER_SECTION_RE = re.compile(r"#answer:\s*(.+?)(?:\n#|\Z)", re.IGNORECASE | re.DOTALL)
+
+# Safe builtins for eval of #answer: expressions.  Only math operators and
+# Fraction/int/float arithmetic are needed; no import or function calls.
+_SAFE_BUILTINS: dict = {"__builtins__": {}, "Fraction": Fraction, "int": int, "float": float}
+
+
+def parse_gsm_symbolic_template(record: dict) -> Optional["ReasoningTemplate"]:
+    """Parse the ``question_annotated`` field of a GSM-Symbolic record into a
+    ``ReasoningTemplate``, or return None if parsing fails.
+
+    The ``question_annotated`` format (Mirzadeh et al., ICLR 2025):
+
+        …fog bank takes {t,10} minutes… every {d,3} miles… city is {y,42} miles
+        …cover {frac,half} of the city?
+
+        #init:
+        - $t = range(25, 120)
+        …
+
+        #answer: (y*frac)//d*t
+
+    This function:
+    1. Extracts ``{param,value}`` pairs → ``parameters`` dict.
+       Values are typed as: int (digit string), Fraction (FRACTION_WORDS
+       lookup), or str (names / other words).
+    2. Extracts the ``#answer:`` expression and builds a sandboxed
+       ``answer_function(**kw)``.
+    3. Validates: calling ``answer_function(**parameters)`` must equal the
+       ``gold_answer`` in the record (within int tolerance).  Mismatches are
+       logged and the item is skipped (no Regime C row, exclusion sidecar).
+
+    Only records with a non-empty ``question_annotated`` field are processed;
+    all others return None and fall back to no Regime C reasoning.
+    """
+    question_annotated = record.get("question_annotated") or ""
+    if not question_annotated.strip():
+        return None
+
+    # Step 1: extract {param, value} pairs.
+    parameters: dict = {}
+    for match in _PARAM_VALUE_RE.finditer(question_annotated):
+        param_name = match.group(1).strip()
+        param_value_str = match.group(2).strip()
+        # Type classification: integer > fraction word > raw string.
+        if param_value_str.lstrip("-").isdigit():
+            parameters[param_name] = int(param_value_str)
+        elif param_value_str in FRACTION_WORDS:
+            parameters[param_name] = FRACTION_WORDS[param_value_str]
+        else:
+            parameters[param_name] = param_value_str  # name or unknown string
+
+    if not parameters:
+        return None
+
+    # Step 2: extract #answer: expression.
+    answer_match = _ANSWER_SECTION_RE.search(question_annotated)
+    if not answer_match:
+        return None
+    answer_expr = answer_match.group(1).strip()
+    if not answer_expr:
+        return None
+
+    # Build sandboxed answer function.  The expression may use only the
+    # parameter names and arithmetic operators; Fraction is available so
+    # expressions like (y*frac)//d*t work when frac is a Fraction instance.
+    def _make_answer_function(expr: str) -> Callable:
+        def answer_function(**kw):
+            return eval(expr, dict(_SAFE_BUILTINS), kw)  # noqa: S307
+        return answer_function
+
+    answer_function = _make_answer_function(answer_expr)
+
+    # Step 3: validate — computed gold must match stored gold.
+    gold_answer = record.get("gold_answer")
+    if gold_answer is not None:
+        try:
+            computed = answer_function(**parameters)
+            # Accept integer-equivalent results (e.g. Fraction(140,1) == 140).
+            if int(float(computed)) != int(float(gold_answer)):
+                return None  # annotation mismatch; skip safely
+        except Exception:  # noqa: BLE001
+            return None  # expression not evaluable with these parameters
+
+    # Build question_format: replace {param,value} with {param}.
+    question_format = _PARAM_VALUE_RE.sub(
+        lambda m: "{" + m.group(1) + "}", question_annotated.split("\n\n#")[0])
+
+    template_id = f"gsm_symbolic_{record.get('id_orig', record.get('task_id', 'unknown'))}"
+
+    return ReasoningTemplate(
+        template_id=template_id,
+        question_format=question_format,
+        answer_function=answer_function,
+        operand_ranges={},       # not needed for Regime C swap
+        operand_constraint=None,
+    )
 
 
 @dataclass(frozen=True)
@@ -306,6 +436,30 @@ def load_reasoning_jsonl(
         resolved_source = _retag_legacy_gsm_symbolic(
             record.get("source", str(task_family)))
 
+        # Attempt to parse a GSM-Symbolic symbolic template when the record
+        # carries a question_annotated field (Workstream 7).  Parsed templates
+        # enable Regime C operand-swap for all official GSM-Symbolic items, not
+        # just the hand-coded synthetic set.  Items without a valid template fall
+        # back to template=None (Regime C skipped, logged to exclusion sidecar).
+        template: Optional[ReasoningTemplate] = None
+        parameters: dict = record.get("parameters", {})
+        if record.get("question_annotated"):
+            parsed_template = parse_gsm_symbolic_template(record)
+            if parsed_template is not None:
+                template = parsed_template
+                # Use parameters from the annotation (typed ints/Fractions/strs).
+                import re as _re  # noqa: PLC0415 — lazy to avoid circular imports
+                param_value_pairs = _re.findall(r"\{(\w+),([^}]+)\}", record["question_annotated"])
+                parameters = {}
+                for param_name, param_value_str in param_value_pairs:
+                    param_value_str = param_value_str.strip()
+                    if param_value_str.lstrip("-").isdigit():
+                        parameters[param_name] = int(param_value_str)
+                    elif param_value_str in FRACTION_WORDS:
+                        parameters[param_name] = FRACTION_WORDS[param_value_str]
+                    else:
+                        parameters[param_name] = param_value_str
+
         items.append(ReasoningItem(
             task_id=record.get("task_id", f"{task_family}_{line_index:05d}"),
             task_family=resolved_task_family,
@@ -314,8 +468,8 @@ def load_reasoning_jsonl(
             instruction=record.get("instruction", REASONING_INSTRUCTION),
             gold_answer=record["gold_answer"],
             key_terms=record.get("key_terms", []),
-            template=None,
-            parameters=record.get("parameters", {}),
+            template=template,
+            parameters=parameters,
         ))
 
     if item_count is not None:
@@ -354,8 +508,14 @@ def _fetch_gsm_from_hf(
         item_count: int,
         seed: int,
         task_family: TaskFamily,
+        include_annotated: bool = False,
 ) -> list[ReasoningItem]:
-    """Shared HF-fetch helper for GSM-style datasets (one question + #### answer)."""
+    """Shared HF-fetch helper for GSM-style datasets (one question + #### answer).
+
+    ``include_annotated``: when True, pass through ``question_annotated`` and
+    ``answer_annotated`` fields present in GSM-Symbolic p1/p2 splits.  These
+    enable the GSM-Symbolic template parser (Workstream 7) at load time.
+    """
     try:
         from datasets import load_dataset as _load_dataset
     except ImportError as error:
@@ -375,6 +535,33 @@ def _fetch_gsm_from_hf(
         gold = _parse_gsm_answer(record["answer"])
         if gold is None:
             continue
+
+        # For GSM-Symbolic splits that carry symbolic annotations, attempt to
+        # parse the template immediately so Regime C is available at run time.
+        template: Optional[ReasoningTemplate] = None
+        parameters: dict = {}
+        if include_annotated and record.get("question_annotated"):
+            augmented_record = {
+                "question_annotated": record["question_annotated"],
+                "answer_annotated": record.get("answer_annotated"),
+                "gold_answer": gold,
+                "task_id": f"{task_family}_{record_index:05d}",
+                "id_orig": record.get("id_orig", record_index),
+            }
+            parsed = parse_gsm_symbolic_template(augmented_record)
+            if parsed is not None:
+                template = parsed
+                # Re-extract typed parameters from the annotation.
+                _param_pairs = _PARAM_VALUE_RE.findall(record["question_annotated"])
+                for p_name, p_val in _param_pairs:
+                    p_val = p_val.strip()
+                    if p_val.lstrip("-").isdigit():
+                        parameters[p_name] = int(p_val)
+                    elif p_val in FRACTION_WORDS:
+                        parameters[p_name] = FRACTION_WORDS[p_val]
+                    else:
+                        parameters[p_name] = p_val
+
         items.append(ReasoningItem(
             task_id=f"{task_family}_{record_index:05d}",
             task_family=task_family,
@@ -383,8 +570,8 @@ def _fetch_gsm_from_hf(
             instruction=REASONING_INSTRUCTION,
             gold_answer=gold,
             key_terms=[],  # frozen by tools/build_annotated_dataset.py before a run
-            template=None,
-            parameters={},
+            template=template,
+            parameters=parameters,
         ))
     return items
 
@@ -402,9 +589,13 @@ def load_official_gsm_symbolic(
     or ``"p2"``). Items are shuffled deterministically with ``seed`` before
     subsampling so the exported JSONL is reproducible.
     """
+    # include_annotated=True: p1 and p2 splits carry question_annotated fields
+    # that enable Regime C operand-swap (Workstream 7).  The "main" split may
+    # not have them; include_annotated is harmless when the field is absent.
     return _fetch_gsm_from_hf(
         "apple/GSM-Symbolic", configuration_name, dataset_revision,
-        item_count, seed, TaskFamily.GSM_SYMBOLIC_OFFICIAL)
+        item_count, seed, TaskFamily.GSM_SYMBOLIC_OFFICIAL,
+        include_annotated=True)
 
 
 def load_official_gsm8k(
