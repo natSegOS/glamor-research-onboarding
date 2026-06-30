@@ -51,15 +51,23 @@ class MixedEffectsLogisticResult:
 
 @dataclass
 class MediationResult:
-    """Summary of a mediation decomposition (Method B, product-of-coefficients)."""
+    """Summary of a mediation decomposition (Method B, product-of-coefficients).
+
+    Primary mediator: ``token_inflation_ratio`` (subword fragmentation ratio).
+    Supplementary mediator: ``subword_count_change`` (absolute subword count
+    difference); reported alongside the primary for robustness.
+    """
     total_effect: float
     direct_effect: float
-    indirect_effect: float          # through token_inflation_ratio
+    indirect_effect: float                      # through token_inflation_ratio
     proportion_mediated: Optional[float]
     treatment_on_mediator_coef: float           # α: effect of is_perturbed on mediator
     mediator_on_outcome_coef: float             # β: effect of mediator on is_correct
     n_observations: int
     bootstrap_ci_proportion: Optional[tuple]    # (low, high) at 95%, or None if n < 50
+    # Supplementary mediator (subword_count_change) — None when column absent.
+    supplementary_indirect_effect: Optional[float] = None
+    supplementary_proportion_mediated: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +113,15 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
     n_models = data["model_revision"].nunique()
 
     # Build formula — add optional covariates when present.
+    # word_length_before: controls for the confound that longer words are both
+    # more likely to be perturbed and more likely to be task-critical; declared
+    # as a preregistered covariate (design/06 §6.6, Workstream 3/9).
+    # subword_count_change: supplementary tokenization mediator (Workstream 9).
     fixed_terms = ["is_perturbed", "token_inflation_ratio"]
+    if "word_length_before" in data.columns:
+        fixed_terms.append("word_length_before")
+    if "subword_count_change" in data.columns:
+        fixed_terms.append("subword_count_change")
     if "edit_budget_k" in data.columns:
         fixed_terms.append("edit_budget_k")
     if "precision" in data.columns:
@@ -276,6 +292,32 @@ def compute_mediation_proportion(data) -> MediationResult:
     total = gamma + indirect
     proportion = (indirect / total) if abs(total) > 1e-12 else None
 
+    # Supplementary mediator: subword_count_change (Workstream 9).
+    # Reported alongside the primary; shares the same outcome model but uses a
+    # different mediator column, so we re-run Step 1 on the supplementary column.
+    supp_indirect: Optional[float] = None
+    supp_proportion: Optional[float] = None
+    if "subword_count_change" in data.columns:
+        try:
+            supp_med_model = smf.mixedlm(
+                "subword_count_change ~ is_perturbed",
+                data=data, groups=data["task_id"])
+            supp_med_result = supp_med_model.fit(reml=False, method="laplace", maxiter=200)
+            alpha_s = float(supp_med_result.params.get("is_perturbed", float("nan")))
+
+            supp_out_model = smf.mixedlm(
+                "is_correct ~ is_perturbed + subword_count_change",
+                data=data, groups=data["task_id"])
+            supp_out_result = supp_out_model.fit(reml=False, method="laplace", maxiter=200)
+            beta_s = float(supp_out_result.params.get("subword_count_change", float("nan")))
+            gamma_s = float(supp_out_result.params.get("is_perturbed", float("nan")))
+
+            supp_indirect = alpha_s * beta_s
+            supp_total = gamma_s + supp_indirect
+            supp_proportion = (supp_indirect / supp_total) if abs(supp_total) > 1e-12 else None
+        except Exception:
+            pass  # supplementary is advisory; primary mediation must succeed
+
     # Bootstrap CI on proportion mediated (n >= 50 only).
     bootstrap_ci: Optional[tuple] = None
     if n_obs >= 50 and proportion is not None:
@@ -290,6 +332,8 @@ def compute_mediation_proportion(data) -> MediationResult:
         mediator_on_outcome_coef=beta,
         n_observations=n_obs,
         bootstrap_ci_proportion=bootstrap_ci,
+        supplementary_indirect_effect=supp_indirect,
+        supplementary_proportion_mediated=supp_proportion,
     )
 
 
