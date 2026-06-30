@@ -27,8 +27,7 @@ accelerate>=0.33
 # are unavailable on a given machine (design/05 §5.4, HFEngine).
 bitsandbytes>=0.43
 
-# ASR arm (pre-processing step only; runs once, CPU or small GPU is fine).
-# openai-whisper latest release is dated 20250625 (verified June 2026).
-openai-whisper>=20240930
-edge-tts>=6.1             # neural TTS, single fixed voice en-US-AriaNeural
-soundfile>=0.12           # WAV read/write for the SNR noise-mixing step
+# ASR arm (dormant — owned by PI; do not add here). The asr.py and
+# build_asr_items.py modules remain in the repo for the PI's workstream.
+# openai-whisper, edge-tts, soundfile are NOT required for the written-text
+# perturbation pipeline and are intentionally omitted to keep the GPU image lean.
