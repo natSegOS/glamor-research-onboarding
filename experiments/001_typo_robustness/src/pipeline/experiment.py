@@ -24,8 +24,9 @@ Key guarantees
 from __future__ import annotations
 
 import json
+import time
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
@@ -38,7 +39,7 @@ from enums import (
 )
 
 import regimes
-from perturbation import PerturbationError
+from perturbation import PerturbationError, damerau_levenshtein_distance
 from pipeline.runner import (
     GenerationRequest,
     ShardManifest,
@@ -143,6 +144,56 @@ class ExperimentConfiguration:
 
 
 # ---------------------------------------------------------------------------
+# Exclusion sidecar (Workstream 3).
+# ---------------------------------------------------------------------------
+
+class ExclusionSidecar:
+    """Append-only log of items excluded from the generation queue.
+
+    Each record carries enough context to reconstruct why an item was dropped,
+    with the same level of provenance as a generated row (design/08 §8.4).
+    Records are written immediately on append so a killed job does not lose them.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._count = 0
+
+    def log(
+            self,
+            *,
+            task_id: str,
+            condition_name: str,
+            edit_budget: int,
+            failure_stage: str,
+            failure_reason: str,
+            item_length: int = 0,
+            word_before: str = "",
+            attempt: int = 0,
+    ) -> None:
+        """Append one exclusion record."""
+        record = {
+            "timestamp": time.time(),
+            "task_id": task_id,
+            "condition_name": condition_name,
+            "edit_budget": edit_budget,
+            "failure_stage": failure_stage,
+            "failure_reason": failure_reason,
+            "item_length": item_length,
+            "word_before": word_before,
+            "attempt": attempt,
+        }
+        with self.path.open("a") as fh:
+            fh.write(json.dumps(record) + "\n")
+        self._count += 1
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+
+# ---------------------------------------------------------------------------
 # Task loading.
 # ---------------------------------------------------------------------------
 
@@ -186,12 +237,17 @@ def build_requests(
         tokenizer: object,
         seed: int,
         asr_items_by_task: Optional[dict] = None,
+        exclusion_sidecar: Optional[ExclusionSidecar] = None,
 ) -> list[GenerationRequest]:
     """Build the full list of clean and perturbed generation requests.
 
     For each task item we emit exactly one clean request, then for each
     condition and each edit budget we emit perturbed requests with tokenization
     metrics attached.
+
+    ``exclusion_sidecar``, when provided, receives a logged record for every
+    item that could not be perturbed (PerturbationError), replacing the prior
+    silent ``continue`` (Workstream 3).
     """
     asr_items_by_task = asr_items_by_task or {}
     requests: list[GenerationRequest] = []
@@ -229,13 +285,15 @@ def build_requests(
             else:
                 requests.extend(_build_synthetic_requests(
                     task_item, condition, gold_answer, clean_prompt,
-                    is_word, tokenizer, seed))
+                    is_word, tokenizer, seed, exclusion_sidecar=exclusion_sidecar))
 
     return requests
 
 
 def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
-                              is_word, tokenizer, seed) -> list[GenerationRequest]:
+                              is_word, tokenizer, seed,
+                              exclusion_sidecar: Optional[ExclusionSidecar] = None,
+                              ) -> list[GenerationRequest]:
     """Build engine-perturbed requests for one item under one condition, across
     its edit budgets."""
     requests: list[GenerationRequest] = []
@@ -261,8 +319,19 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
                     condition, content_text, edit_budget, item_seed, is_word,
                     key_terms, scope_spans)
                 effective_gold = gold_answer
-        except PerturbationError:
-            continue                          # this item admits no such perturbation; skip
+        except PerturbationError as exc:
+            # Explicit exclusion logging replaces the prior silent continue
+            # (Workstream 3).  Every dropped item is traceable via the sidecar.
+            if exclusion_sidecar is not None:
+                exclusion_sidecar.log(
+                    task_id=task_item.task_id,
+                    condition_name=condition.name,
+                    edit_budget=edit_budget,
+                    failure_stage="perturbation",
+                    failure_reason=str(exc),
+                    item_length=len(content_text),
+                )
+            continue
 
         perturbed_prompt = clean_prompt.replace(content_text, perturbed_content)
 
@@ -296,11 +365,22 @@ def _construct_regime_c(task_item, item_seed):
 
     Regime C scope is restricted to perturbations where the new gold is
     computationally deterministic (design/04 §4.7):
+      - MCQ items:       option-label permutation with gold tracked by content.
       - Reasoning items: operand swap with template-derived gold recomputation.
-      - MCQ items: option-label permutation with gold tracked by content.
+        Requires a populated ReasoningTemplate (``item.supports_regime_c_operand_swap``).
+        Items without a template raise PerturbationError → logged to the exclusion
+        sidecar → excluded from primary analysis (never a silent no-op).
     """
     if hasattr(task_item, "options"):
         return regimes.make_regime_c_mcq_option_permutation(task_item, item_seed)
+    # Reasoning item: require an annotated template.
+    if not getattr(task_item, "supports_regime_c_operand_swap", False):
+        raise PerturbationError(
+            f"Regime C operand swap requires a template with answer_function; "
+            f"item {task_item.task_id!r} has no template "
+            f"(task_family={task_item.task_family!r}). "
+            f"Tip: fetch GSM-Symbolic with question_annotated field and call "
+            f"parse_gsm_symbolic_template() in load_reasoning_jsonl.")
     return regimes.make_regime_c_reasoning_operand_swap(task_item, item_seed)
 
 
@@ -308,6 +388,12 @@ def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
                       key_terms, scope_spans):
     """Dispatch to the right regime builder for a synthetic condition (A or B)."""
     if condition.semantic_class == SemanticClass.A:
+        # Filler-word insertion bypasses the nonword check (intent-preserving
+        # by definition; no rejection sampling required).
+        if condition.selection_policy == SelectionPolicy.FILLER_WORD:
+            return regimes.make_regime_a_filler_insertion(
+                content_text, edit_budget, item_seed,
+                scope=condition.scope, scope_spans=scope_spans)
         return regimes.make_regime_a_nonword_typo(
             content_text, condition.operation, edit_budget, item_seed, is_word,
             selection_policy=condition.selection_policy, scope=condition.scope,
@@ -337,10 +423,19 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits) -> 
     Token-inflation is whole-text; subword-count change and fragmentation
     stratum are for the single most-edited word, which is the unit the mediation
     analysis contrasts.
+
+    Adds (Workstream 3):
+      ``measured_dl``       — actual DL distance between clean and perturbed
+                              content strings (verification stat; edit_budget in the
+                              PSV is the operational lever).
+      ``word_length_before`` — character count of the first edited word before the
+                               edit; controls for length confound in the mixed-effects
+                               model (Workstream 9).
     """
     fields: dict[str, object] = {
         "token_inflation_ratio":
             tokenization.token_inflation_ratio(tokenizer, clean_content, perturbed_content),
+        "measured_dl": damerau_levenshtein_distance(clean_content, perturbed_content),
     }
 
     edited_words = [
@@ -350,6 +445,7 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits) -> 
     ]
     if edited_words:
         word_before, word_after = edited_words[0]
+        fields["word_length_before"] = len(word_before)
         subword_change = tokenization.subword_count_change(tokenizer, word_before, word_after)
         fields["subword_count_change"] = subword_change
         fields["fragmentation_stratum"] = tokenization.fragmentation_stratum(subword_change)
@@ -441,6 +537,7 @@ def run_experiment(
         model_revision: str = "dummy-engine-0",
         quantization_method: Precision = Precision.FP16,
         git_commit: str = "unpinned",
+        linguistic_pipeline: Optional[object] = None,
 ) -> dict:
     """Run one experiment configuration against one engine and return a small
     summary. Writes generation rows to ``output_directory`` as JSONL and uses a
@@ -457,9 +554,13 @@ def run_experiment(
     task_items = load_task_items(configuration)
     asr_items_by_task = load_asr_items_by_task(configuration.asr_items_path)
 
+    exclusion_sidecar = ExclusionSidecar(
+        output_directory / f"{configuration.run_id}_exclusions.jsonl")
+
     requests = build_requests(
         task_items, configuration.conditions, is_word, tokenizer,
-        configuration.seed, asr_items_by_task)
+        configuration.seed, asr_items_by_task,
+        exclusion_sidecar=exclusion_sidecar)
 
     reasoning_requests = [r for r in requests if r.task_family in REASONING_FAMILIES]
     other_requests = [r for r in requests if r.task_family not in REASONING_FAMILIES]
@@ -498,6 +599,7 @@ def run_experiment(
                 max_new_tokens=max_new_tokens,
                 git_commit=git_commit,
                 progress_callback=progress.advance,
+                linguistic_pipeline=linguistic_pipeline,
             )
 
     return {
@@ -505,5 +607,7 @@ def run_experiment(
         "task_item_count": len(task_items),
         "request_count": len(requests),
         "new_rows_written": total_new_rows,
+        "excluded_count": exclusion_sidecar.count,
+        "exclusions_path": str(exclusion_sidecar.path),
         "output_path": str(output_path),
     }
