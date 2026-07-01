@@ -94,6 +94,27 @@ FRACTION_WORDS: dict[str, Fraction] = {
     "one-half":       Fraction(1, 2),
 }
 
+# Standard English verbal multipliers appearing in GSM-Symbolic templates.
+# Some templates store an integer multiplier as a word in the question text
+# (e.g. {mult,twice}) while the answer expression uses it numerically.
+# These mappings convert the textual form back to an integer so that
+# extract_instance_parameters can validate extracted values against gold_answer.
+# Source: Huddleston & Pullum (2002) 'The Cambridge Grammar of the English
+# Language', §14 (multiplicative expressions); "thrice" is the standard
+# literary form of "three times" (OED, s.v. "thrice").
+VERBAL_MULTIPLIER_WORDS: dict[str, int] = {
+    "once":        1,
+    "twice":       2,
+    "thrice":      3,
+    "four times":  4,
+    "five times":  5,
+    "six times":   6,
+    "seven times": 7,
+    "eight times": 8,
+    "nine times":  9,
+    "ten times":   10,
+}
+
 # Regex to locate {param,value} annotations in question_annotated.
 _PARAM_VALUE_RE = re.compile(r"\{(\w+),([^}]+)\}")
 # Regex to extract the #answer: expression (handles \n-split sections).
@@ -102,6 +123,127 @@ _ANSWER_SECTION_RE = re.compile(r"#answer:\s*(.+?)(?:\n#|\Z)", re.IGNORECASE | r
 # Safe builtins for eval of #answer: expressions.  Only math operators and
 # Fraction/int/float arithmetic are needed; no import or function calls.
 _SAFE_BUILTINS: dict = {"__builtins__": {}, "Fraction": Fraction, "int": int, "float": float}
+
+
+def _build_param_type_map(question_annotated: str) -> dict[str, str]:
+    """Return {param_name: 'int' | 'str'} from the {param,default} pairs in
+    question_annotated.
+
+    'int' means the default is a digit string; 'str' covers everything else
+    (names, fraction words, verbal multipliers).  The type map drives the
+    regex capture-group pattern in extract_instance_parameters: integer params
+    use \\d+ patterns; string params use greedy word/phrase patterns that are
+    converted through FRACTION_WORDS and VERBAL_MULTIPLIER_WORDS at call time.
+    """
+    type_map: dict[str, str] = {}
+    for m in _PARAM_VALUE_RE.finditer(question_annotated):
+        name = m.group(1).strip()
+        default = m.group(2).strip()
+        type_map[name] = "int" if default.lstrip("-").isdigit() else "str"
+    return type_map
+
+
+def extract_instance_parameters(
+        question_annotated: str,
+        question_text: str,
+        gold_answer: int,
+) -> Optional[dict]:
+    """Extract the parameter values for a specific GSM-Symbolic question instance.
+
+    The template's question_annotated encodes the STRUCTURE (param names, types,
+    answer formula) with DEFAULT parameter values from the template's base
+    question.  This function uses the template's format string as a regex pattern
+    matched against the actual HF question_text to recover the INSTANCE's true
+    parameter values, then validates answer_function(**extracted) == gold_answer.
+
+    Returns a typed parameter dict on success, None on extraction or validation
+    failure.  Callers should store a successful result in item.parameters and
+    leave it as {} otherwise; empty parameters cause Regime C to fail gracefully.
+
+    Integer params are returned as int; fraction words (FRACTION_WORDS) and
+    verbal multipliers (VERBAL_MULTIPLIER_WORDS, e.g. 'twice' → 2) are converted
+    to their numeric equivalents; everything else is kept as str.
+
+    The regex uses greedy string matching with backtracking: the literal text
+    between consecutive {param} placeholders in the format string acts as an
+    anchor boundary, so multi-word params like 'three times' are captured
+    correctly without requiring explicit lookahead patterns.
+    """
+    # Build the template without validating its defaults against gold_answer —
+    # the defaults belong to the base question, not this HF instance.
+    parsed = parse_gsm_symbolic_template({"question_annotated": question_annotated})
+    if parsed is None:
+        return None
+
+    param_type_map = _build_param_type_map(question_annotated)
+    if not param_type_map:
+        return None
+
+    # Split the question_format on {param} tokens.
+    # re.split with a capturing group yields alternating (literal, name) pairs:
+    # [literal_0, name_0, literal_1, name_1, ..., literal_n]
+    parts = re.split(r"\{(\w+)\}", parsed.question_format)
+    seen: dict[str, int] = {}     # param_name → 1-based capture group index
+    capture_order: list[str] = []
+    group_index = 1
+    regex_parts: list[str] = []
+
+    for i, part in enumerate(parts):
+        if i % 2 == 0:   # literal text between placeholders
+            regex_parts.append(re.escape(part))
+        else:             # parameter name
+            name = part
+            if name in seen:
+                # Same param appears again — backreference ensures same value.
+                regex_parts.append(f"\\{seen[name]}")
+            else:
+                seen[name] = group_index
+                capture_order.append(name)
+                group_index += 1
+                if param_type_map.get(name) == "int":
+                    regex_parts.append(r"(-?\d[\d,]*)")
+                else:
+                    # Greedy match; backtracking against the next literal gives
+                    # the correct boundary even for multi-word values.
+                    # À-ɏ covers Latin Extended-A/B for accented names.
+                    regex_parts.append(
+                        r"([A-Za-zÀ-ɏ][A-Za-zÀ-ɏ ,'\-]*)"
+                    )
+
+    pattern = "".join(regex_parts)
+    try:
+        m = re.match(pattern, question_text, re.DOTALL)
+    except re.error:
+        return None
+    if m is None:
+        return None
+
+    extracted: dict = {}
+    for idx, name in enumerate(capture_order):
+        raw = m.group(idx + 1).strip(" ,.")
+        if param_type_map.get(name) == "int":
+            try:
+                extracted[name] = int(raw.replace(",", ""))
+            except ValueError:
+                return None
+        else:
+            lower = raw.lower()
+            if lower in FRACTION_WORDS:
+                extracted[name] = FRACTION_WORDS[lower]
+            elif lower in VERBAL_MULTIPLIER_WORDS:
+                extracted[name] = VERBAL_MULTIPLIER_WORDS[lower]
+            else:
+                extracted[name] = raw
+
+    # Validate: the extracted values must reproduce the HF gold answer.
+    try:
+        computed = parsed.answer_function(**extracted)
+        if int(float(computed)) != int(float(gold_answer)):
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+
+    return extracted
 
 
 def parse_gsm_symbolic_template(record: dict) -> Optional["ReasoningTemplate"]:
@@ -231,6 +373,7 @@ class ReasoningItem:
 
     template: Optional[ReasoningTemplate] = None
     parameters: dict = field(default_factory=dict)
+    question_annotated: Optional[str] = None  # raw GSM-Symbolic annotation string; serialized to JSONL
 
     @property
     def full_prompt(self) -> str:
@@ -438,27 +581,42 @@ def load_reasoning_jsonl(
 
         # Attempt to parse a GSM-Symbolic symbolic template when the record
         # carries a question_annotated field (Workstream 7).  Parsed templates
-        # enable Regime C operand-swap for all official GSM-Symbolic items, not
-        # just the hand-coded synthetic set.  Items without a valid template fall
-        # back to template=None (Regime C skipped, logged to exclusion sidecar).
+        # enable Regime C operand-swap for official GSM-Symbolic items.  Items
+        # without a valid template fall back to template=None (Regime C skipped,
+        # logged to exclusion sidecar).
         template: Optional[ReasoningTemplate] = None
-        parameters: dict = record.get("parameters", {})
+        jsonl_parameters: dict = record.get("parameters") or {}
+        parameters: dict = {}
         if record.get("question_annotated"):
-            parsed_template = parse_gsm_symbolic_template(record)
+            # Parse template structure without validating template defaults against
+            # gold_answer.  The JSONL's parameters field holds instance values
+            # (validated at build time by extract_instance_parameters), which may
+            # differ from the template defaults embedded in question_annotated.
+            parse_record = {**record, "gold_answer": None}
+            parsed_template = parse_gsm_symbolic_template(parse_record)
             if parsed_template is not None:
                 template = parsed_template
-                # Use parameters from the annotation (typed ints/Fractions/strs).
-                import re as _re  # noqa: PLC0415 — lazy to avoid circular imports
-                param_value_pairs = _re.findall(r"\{(\w+),([^}]+)\}", record["question_annotated"])
-                parameters = {}
-                for param_name, param_value_str in param_value_pairs:
-                    param_value_str = param_value_str.strip()
-                    if param_value_str.lstrip("-").isdigit():
-                        parameters[param_name] = int(param_value_str)
-                    elif param_value_str in FRACTION_WORDS:
-                        parameters[param_name] = FRACTION_WORDS[param_value_str]
-                    else:
-                        parameters[param_name] = param_value_str
+                if jsonl_parameters:
+                    # Instance values extracted and validated at build time — use
+                    # them directly; they correspond to this specific HF question.
+                    parameters = jsonl_parameters
+                else:
+                    # Fallback: derive parameters from template defaults.  These
+                    # are the base-question values and may not match this instance;
+                    # Regime C will validate at operand-swap time and exclude items
+                    # where the defaults do not reproduce gold_answer.
+                    for match in _PARAM_VALUE_RE.finditer(record["question_annotated"]):
+                        p_name = match.group(1).strip()
+                        p_val = match.group(2).strip()
+                        lower = p_val.lower()
+                        if p_val.lstrip("-").isdigit():
+                            parameters[p_name] = int(p_val)
+                        elif p_val in FRACTION_WORDS:
+                            parameters[p_name] = FRACTION_WORDS[p_val]
+                        elif lower in VERBAL_MULTIPLIER_WORDS:
+                            parameters[p_name] = VERBAL_MULTIPLIER_WORDS[lower]
+                        else:
+                            parameters[p_name] = p_val
 
         items.append(ReasoningItem(
             task_id=record.get("task_id", f"{task_family}_{line_index:05d}"),
@@ -572,6 +730,7 @@ def _fetch_gsm_from_hf(
             key_terms=[],  # frozen by tools/build_annotated_dataset.py before a run
             template=template,
             parameters=parameters,
+            question_annotated=(record.get("question_annotated") if include_annotated else None),
         ))
     return items
 
