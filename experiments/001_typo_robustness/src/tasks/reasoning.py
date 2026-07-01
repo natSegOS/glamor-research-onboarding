@@ -75,23 +75,40 @@ REASONING_INSTRUCTION = (
 # annotations.  Mapped to exact Fraction values so the answer_function can
 # evaluate arithmetic expressions that include them.
 FRACTION_WORDS: dict[str, Fraction] = {
-    "half":           Fraction(1, 2),
-    "third":          Fraction(1, 3),
-    "quarter":        Fraction(1, 4),
-    "fifth":          Fraction(1, 5),
-    "sixth":          Fraction(1, 6),
-    "seventh":        Fraction(1, 7),
-    "eighth":         Fraction(1, 8),
-    "ninth":          Fraction(1, 9),
-    "tenth":          Fraction(1, 10),
-    "two-thirds":     Fraction(2, 3),
-    "three-quarters": Fraction(3, 4),
-    "two-fifths":     Fraction(2, 5),
-    "three-fifths":   Fraction(3, 5),
-    "four-fifths":    Fraction(4, 5),
-    "one-third":      Fraction(1, 3),
-    "one-quarter":    Fraction(1, 4),
-    "one-half":       Fraction(1, 2),
+    # Single-word bareform denominators (e.g. template default "half").
+    "half":             Fraction(1, 2),
+    "third":            Fraction(1, 3),
+    "quarter":          Fraction(1, 4),
+    "fifth":            Fraction(1, 5),
+    "sixth":            Fraction(1, 6),
+    "seventh":          Fraction(1, 7),
+    "eighth":           Fraction(1, 8),
+    "ninth":            Fraction(1, 9),
+    "tenth":            Fraction(1, 10),
+    # Hyphenated compound forms (template defaults and question text).
+    "one-half":         Fraction(1, 2),
+    "one-third":        Fraction(1, 3),
+    "one-quarter":      Fraction(1, 4),
+    "one-fifth":        Fraction(1, 5),
+    "one-sixth":        Fraction(1, 6),
+    "one-seventh":      Fraction(1, 7),
+    "one-eighth":       Fraction(1, 8),
+    "one-ninth":        Fraction(1, 9),
+    "one-tenth":        Fraction(1, 10),
+    "two-thirds":       Fraction(2, 3),
+    "three-quarters":   Fraction(3, 4),
+    "two-fifths":       Fraction(2, 5),
+    "three-fifths":     Fraction(3, 5),
+    "four-fifths":      Fraction(4, 5),
+    # Space-separated phrase forms (as they sometimes appear in question text).
+    "a half":           Fraction(1, 2),
+    "a third":          Fraction(1, 3),
+    "a quarter":        Fraction(1, 4),
+    "two thirds":       Fraction(2, 3),
+    "three quarters":   Fraction(3, 4),
+    "two fifths":       Fraction(2, 5),
+    "three fifths":     Fraction(3, 5),
+    "four fifths":      Fraction(4, 5),
 }
 
 # Standard English verbal multipliers appearing in GSM-Symbolic templates.
@@ -103,9 +120,20 @@ FRACTION_WORDS: dict[str, Fraction] = {
 # Language', §14 (multiplicative expressions); "thrice" is the standard
 # literary form of "three times" (OED, s.v. "thrice").
 VERBAL_MULTIPLIER_WORDS: dict[str, int] = {
+    # Classical single-word forms.
     "once":        1,
     "twice":       2,
+    "double":      2,
     "thrice":      3,
+    "triple":      3,
+    "quadruple":   4,
+    "quintuple":   5,
+    "sextuple":    6,
+    "septuple":    7,
+    "octuple":     8,
+    # "<N> times" forms.
+    "two times":   2,
+    "three times": 3,
     "four times":  4,
     "five times":  5,
     "six times":   6,
@@ -113,12 +141,36 @@ VERBAL_MULTIPLIER_WORDS: dict[str, int] = {
     "eight times": 8,
     "nine times":  9,
     "ten times":   10,
+    # Cardinal number words used numerically in arithmetic expressions.
+    # These appear as GSM-Symbolic template str params (e.g. {n,seven}) whose
+    # answer formula uses them as integers.
+    "one":         1,
+    "two":         2,
+    "three":       3,
+    "four":        4,
+    "five":        5,
+    "six":         6,
+    "seven":       7,
+    "eight":       8,
+    "nine":        9,
+    "ten":         10,
+    "eleven":      11,
+    "twelve":      12,
+    "thirteen":    13,
+    "fourteen":    14,
+    "fifteen":     15,
+    "sixteen":     16,
+    "seventeen":   17,
+    "eighteen":    18,
+    "nineteen":    19,
+    "twenty":      20,
 }
 
 # Regex to locate {param,value} annotations in question_annotated.
 _PARAM_VALUE_RE = re.compile(r"\{(\w+),([^}]+)\}")
-# Regex to extract the #answer: expression (handles \n-split sections).
-_ANSWER_SECTION_RE = re.compile(r"#answer:\s*(.+?)(?:\n#|\Z)", re.IGNORECASE | re.DOTALL)
+# Regex to extract the #answer expression.  The Apple repo uses both
+# "#answer: expr" and "#answer = expr" (with colon or equals sign).
+_ANSWER_SECTION_RE = re.compile(r"#answer\s*[=:]\s*(.+?)(?:\n#|\Z)", re.IGNORECASE | re.DOTALL)
 
 # Safe builtins for eval of #answer: expressions.  Only math operators and
 # Fraction/int/float arithmetic are needed; no import or function calls.
@@ -203,10 +255,12 @@ def extract_instance_parameters(
     verbal multipliers (VERBAL_MULTIPLIER_WORDS, e.g. 'twice' → 2) are converted
     to their numeric equivalents; everything else is kept as str.
 
-    The regex uses greedy string matching with backtracking: the literal text
-    between consecutive {param} placeholders in the format string acts as an
-    anchor boundary, so multi-word params like 'three times' are captured
-    correctly without requiring explicit lookahead patterns.
+    The regex uses Python named capture groups (``(?P<name>...)``) so that
+    repeated params become named backreferences (``(?P=name)``) without hitting
+    the numbered-group limit.  String params use a non-greedy ``[^\\n.!?]+?``
+    pattern: the next literal segment in the pattern acts as an anchor, so
+    multi-word values like "three times" or currency-prefixed numbers like
+    "$200" are captured correctly without an explicit lookahead.
     """
     # Build the template without validating its defaults against gold_answer —
     # the defaults belong to the base question, not this HF instance.
@@ -222,9 +276,9 @@ def extract_instance_parameters(
     # re.split with a capturing group yields alternating (literal, name) pairs:
     # [literal_0, name_0, literal_1, name_1, ..., literal_n]
     parts = re.split(r"\{(\w+)\}", parsed.question_format)
-    seen: dict[str, int] = {}     # param_name → 1-based capture group index
+    seen_int: set[str] = set()    # int params with a named group already emitted
+    str_counts: dict[str, int] = {}  # str params → occurrence count
     capture_order: list[str] = []
-    group_index = 1
     regex_parts: list[str] = []
 
     for i, part in enumerate(parts):
@@ -232,22 +286,27 @@ def extract_instance_parameters(
             regex_parts.append(re.escape(part))
         else:             # parameter name
             name = part
-            if name in seen:
-                # Same param appears again — backreference ensures same value.
-                regex_parts.append(f"\\{seen[name]}")
-            else:
-                seen[name] = group_index
-                capture_order.append(name)
-                group_index += 1
-                if param_type_map.get(name) == "int":
-                    regex_parts.append(r"(-?\d[\d,]*)")
+            if param_type_map.get(name) == "int":
+                if name in seen_int:
+                    # Integer params: strict backreference ensures consistent value.
+                    regex_parts.append(f"(?P={name})")
                 else:
-                    # Greedy match; backtracking against the next literal gives
-                    # the correct boundary even for multi-word values.
-                    # À-ɏ covers Latin Extended-A/B for accented names.
-                    regex_parts.append(
-                        r"([A-Za-zÀ-ɏ][A-Za-zÀ-ɏ ,'\-]*)"
-                    )
+                    seen_int.add(name)
+                    capture_order.append(name)
+                    regex_parts.append(f"(?P<{name}>-?\\d[\\d,]*)")
+            else:
+                # String params: each occurrence gets an independent capture group
+                # so that article differences ("an accountant" vs "the accountant")
+                # don't cause spurious backreference failures.  Only the first
+                # occurrence is used in the extracted dict.
+                count = str_counts.get(name, 0)
+                str_counts[name] = count + 1
+                if count == 0:
+                    capture_order.append(name)
+                    regex_parts.append(f"(?P<{name}>[^\\n.!?]+?)")
+                else:
+                    # Unique group name avoids duplicate-name error in re module.
+                    regex_parts.append(f"(?P<{name}_{count}>[^\\n.!?]+?)")
 
     pattern = "".join(regex_parts)
     try:
@@ -258,8 +317,8 @@ def extract_instance_parameters(
         return None
 
     extracted: dict = {}
-    for idx, name in enumerate(capture_order):
-        raw = m.group(idx + 1).strip(" ,.")
+    for name in capture_order:
+        raw = m.group(name).strip(" ,.")
         if param_type_map.get(name) == "int":
             try:
                 extracted[name] = int(raw.replace(",", ""))
