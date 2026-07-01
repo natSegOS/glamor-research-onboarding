@@ -413,6 +413,7 @@ class ReasoningItem:
     template: Optional[ReasoningTemplate] = None
     parameters: dict = field(default_factory=dict)
     question_annotated: Optional[str] = None  # raw GSM-Symbolic annotation string; serialized to JSONL
+    id_orig: Optional[int] = None             # original_id from apple/GSM-Symbolic; build-time only
 
     @property
     def full_prompt(self) -> str:
@@ -698,6 +699,16 @@ def _parse_gsm_answer(answer_text: str) -> Optional[int]:
         return None
 
 
+def _to_int(value) -> Optional[int]:
+    """Cast a value to int, returning None if it is None or unconvertible."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def _fetch_gsm_from_hf(
         hf_repo: str,
         hf_config: str,
@@ -770,6 +781,11 @@ def _fetch_gsm_from_hf(
             template=template,
             parameters=parameters,
             question_annotated=(record.get("question_annotated") if include_annotated else None),
+            # original_id links this instance back to its Apple template file.
+            # The HF apple/GSM-Symbolic dataset exposes this field as a string
+            # (e.g. '473'); template files store id_orig as int.  Cast here so
+            # _enrich_gsm_items_with_apple_templates can do an exact dict lookup.
+            id_orig=_to_int(record.get("original_id") or record.get("id_orig")),
         ))
     return items
 

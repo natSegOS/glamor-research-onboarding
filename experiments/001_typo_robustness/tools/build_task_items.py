@@ -128,41 +128,35 @@ def _enrich_gsm_items_with_apple_templates(
     """Enrich each item with question_annotated and validated instance parameters.
 
     The HF dataset exposes the instantiated question text but not the symbolic
-    template.  The Apple GitHub repo provides the template; this function:
+    template.  The Apple GitHub repo provides the template.  This function joins
+    each HF item against the template repo in two stages:
 
-    1. Joins each HF item against the template repo via:
-           generated_data/GSM_{config}.jsonl  question text → original_id
-           templates/{config}/{id_orig}.json  original_id   → question_annotated
+    PRIMARY path (preferred, no dependency on generated_data/):
+        item.id_orig  →  templates/{config}/{id_orig_key}.json
+        Uses the ``original_id`` field that the HF apple/GSM-Symbolic dataset
+        exposes directly in each record.  This path is robust to a missing or
+        partially-downloaded generated_data/ file.
 
-    2. Uses the template's format string as a regex pattern matched against the
-       HF question text to extract the INSTANCE's actual parameter values
-       (not the template's defaults), then validates
-       answer_function(**extracted) == item.gold_answer.
+    FALLBACK path (when item.id_orig is not set):
+        generated_data/GSM_{config}.jsonl  question text → original_id
+        templates/{config}/{id_orig_key}.json  original_id → question_annotated
+        Used when the HF record did not include original_id.
 
-    Sets item.question_annotated on all joined items.
-    Sets item.parameters to the validated instance values when extraction
-    succeeds, leaving it as {} when it fails (Regime C fails gracefully).
+    After finding the template, uses extract_instance_parameters to match the
+    template's format string against the HF question text (structure from the
+    template, values from the HF question) and validates the result against
+    gold_answer.  Items that pass have parameters set to validated instance
+    values; items that fail keep parameters={} and will be excluded gracefully
+    at Regime C perturbation time.
 
-    Returns (joined_count, extracted_count) — items where the template was
-    found versus items where instance parameters were also validated.
+    Returns (joined_count, extracted_count).
     """
-    gen_data_path = templates_dir / "generated_data" / f"GSM_{gsm_config}.jsonl"
-    if not gen_data_path.exists():
-        print(f"  [templates] generated_data not found at {gen_data_path}; skipping enrichment")
-        return 0, 0
-
-    question_to_original_id: dict[str, int] = {}
-    for line in gen_data_path.read_text().splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        question_to_original_id[row["question"]] = row["original_id"]
-
     templates_subdir = templates_dir / "templates" / gsm_config
     if not templates_subdir.exists():
         print(f"  [templates] templates/{gsm_config}/ not found in {templates_dir}; skipping enrichment")
         return 0, 0
 
+    # Build id_orig → question_annotated from all template files.
     id_orig_to_question_annotated: dict[int, str] = {}
     for template_file in templates_subdir.glob("*.json"):
         template_data = json.loads(template_file.read_text())
@@ -171,12 +165,38 @@ def _enrich_gsm_items_with_apple_templates(
         if id_orig is not None and question_annotated.strip():
             id_orig_to_question_annotated[id_orig] = question_annotated
 
+    print(f"  [templates] loaded {len(id_orig_to_question_annotated)} templates from {templates_subdir}")
+
+    # Determine how many items have id_orig from the HF record.
+    items_with_id_orig = sum(1 for item in items if item.id_orig is not None)
+    print(f"  [templates] items with HF original_id: {items_with_id_orig}/{len(items)}")
+
+    # Build question-text fallback only when some items lack id_orig.
+    question_to_original_id: dict[str, int] = {}
+    if items_with_id_orig < len(items):
+        gen_data_path = templates_dir / "generated_data" / f"GSM_{gsm_config}.jsonl"
+        if gen_data_path.exists():
+            for line in gen_data_path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                question_to_original_id[row["question"]] = row["original_id"]
+            print(f"  [templates] fallback question-text lookup: {len(question_to_original_id)} entries")
+        else:
+            print(f"  [templates] generated_data not found at {gen_data_path}; "
+                  f"fallback unavailable ({len(items) - items_with_id_orig} items will not be joined)")
+
     joined = 0
     extracted = 0
     for item in items:
-        original_id = question_to_original_id.get(item.question_text)
+        # Primary: use id_orig from the HF record.
+        original_id = item.id_orig
+        # Fallback: look up via question text in generated_data/.
+        if original_id is None:
+            original_id = question_to_original_id.get(item.question_text)
         if original_id is None:
             continue
+
         question_annotated = id_orig_to_question_annotated.get(original_id)
         if not question_annotated:
             continue
