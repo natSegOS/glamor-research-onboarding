@@ -122,6 +122,45 @@ _ANSWER_SECTION_RE = re.compile(r"#answer:\s*(.+?)(?:\n#|\Z)", re.IGNORECASE | r
 
 # Safe builtins for eval of #answer: expressions.  Only math operators and
 # Fraction/int/float arithmetic are needed; no import or function calls.
+
+# ---------------------------------------------------------------------------
+# Parameter serialisation / deserialisation
+# ---------------------------------------------------------------------------
+# Fraction values (e.g. Fraction(1, 3) for "third") are not JSON-serializable.
+# We use a tagged dict {"__fraction__": [numerator, denominator]} so that
+# round-tripping through JSONL is lossless — no float approximation.
+# Both halves of the codec live here so the wire format is defined in one place.
+
+_FRACTION_TAG = "__fraction__"
+
+
+def serialize_parameters(params: dict) -> dict:
+    """Encode a parameter dict for JSONL storage.
+
+    ``Fraction`` values are encoded as ``{"__fraction__": [n, d]}``; all other
+    value types (int, str) pass through unchanged.  The encoded form is fully
+    JSON-serializable.
+    """
+    return {
+        k: {"__fraction__": [v.numerator, v.denominator]} if isinstance(v, Fraction) else v
+        for k, v in params.items()
+    }
+
+
+def deserialize_parameters(params: dict) -> dict:
+    """Decode a parameter dict loaded from JSONL back to Python types.
+
+    Tagged dicts ``{"__fraction__": [n, d]}`` are restored to exact
+    ``Fraction(n, d)`` instances; all other values pass through unchanged.
+    """
+    out: dict = {}
+    for k, v in params.items():
+        if isinstance(v, dict) and _FRACTION_TAG in v:
+            n, d = v[_FRACTION_TAG]
+            out[k] = Fraction(n, d)
+        else:
+            out[k] = v
+    return out
 _SAFE_BUILTINS: dict = {"__builtins__": {}, "Fraction": Fraction, "int": int, "float": float}
 
 
@@ -585,7 +624,7 @@ def load_reasoning_jsonl(
         # without a valid template fall back to template=None (Regime C skipped,
         # logged to exclusion sidecar).
         template: Optional[ReasoningTemplate] = None
-        jsonl_parameters: dict = record.get("parameters") or {}
+        jsonl_parameters: dict = deserialize_parameters(record.get("parameters") or {})
         parameters: dict = {}
         if record.get("question_annotated"):
             # Parse template structure without validating template defaults against

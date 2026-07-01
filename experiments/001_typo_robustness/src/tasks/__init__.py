@@ -21,6 +21,8 @@ from tasks.reasoning import (
     ReasoningItem,
     generate_synthetic_reasoning_items,
     extract_instance_parameters,
+    serialize_parameters,
+    deserialize_parameters,
     load_reasoning_jsonl,
     load_official_gsm_symbolic,
     load_official_gsm8k,

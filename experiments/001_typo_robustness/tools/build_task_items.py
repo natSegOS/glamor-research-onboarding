@@ -75,6 +75,7 @@ from tasks import (
     ReasoningItem,
     MultipleChoiceItem,
     extract_instance_parameters,
+    serialize_parameters,
     load_official_gsm_symbolic,
     load_official_gsm8k,
     load_official_mmlu_pro,
@@ -216,7 +217,7 @@ def _reasoning_item_to_record(item: ReasoningItem) -> dict:
         "instruction":   item.instruction,
         "gold_answer":   item.gold_answer,
         "key_terms":     item.key_terms,
-        "parameters":    item.parameters,
+        "parameters":    serialize_parameters(item.parameters),
     }
     if item.question_annotated is not None:
         record["question_annotated"] = item.question_annotated
