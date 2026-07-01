@@ -280,6 +280,31 @@ class SpacyMorphologicalPronounType(_StrEnum):
     TOTAL = "Tot"
 
 
+class UniversalDependenciesClosedClassPartOfSpeechTag(_StrEnum):
+    """Closed-class (function-word) POS tags in the Universal Dependencies tagset.
+
+    These tags identify tokens that are grammatically required function material
+    and do not carry independent referential meaning.  They are excluded from
+    the NER condition of the K_P(x) key-term rule: a preposition or article
+    inside a named-entity span (e.g., "the" in "the United States" or "of" in
+    "State of California") is not a meaningful perturbation target — altering it
+    produces ungrammatical output rather than a semantically distinct question.
+
+    Source: Nivre et al. (2016) 'Universal Dependencies v1', LREC;
+    de Marneffe et al. (2021) 'Universal Dependencies', Computational Linguistics.
+    """
+    ADPOSITION = "ADP"
+    AUXILIARY = "AUX"
+    COORDINATING_CONJUNCTION = "CCONJ"
+    DETERMINER = "DET"
+    PARTICLE = "PART"
+    PRONOUN = "PRON"
+    PUNCTUATION = "PUNCT"
+    SUBORDINATING_CONJUNCTION = "SCONJ"
+    WHITESPACE = "SPACE"
+    OTHER = "X"
+
+
 class EnglishDiscourseParticle(_StrEnum):
     """Canonical English filled-pause discourse particles used in Regime A
     filler-word insertion perturbations.
