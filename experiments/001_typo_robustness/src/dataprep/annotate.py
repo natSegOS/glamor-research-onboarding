@@ -63,6 +63,7 @@ from enums import (
     SpacyMorphologicalDegree,
     SpacyMorphologicalNumericType,
     SpacyMorphologicalPronounType,
+    UniversalDependenciesClosedClassPartOfSpeechTag,
     UniversalDependenciesRelationLabel,
 )
 
@@ -76,6 +77,16 @@ _DEPENDENCY_LABELS_OF_NON_LEXICAL_VERBS: frozenset[str] = frozenset({
     UniversalDependenciesRelationLabel.AUXILIARY_PASSIVE,
     UniversalDependenciesRelationLabel.COPULA,
 })
+
+# Closed-class POS tags that should be excluded from the NER condition of the
+# K_P(x) rule.  A preposition or article inside a named-entity span is
+# grammatically required function material, not a meaningful perturbation
+# target: altering it produces ungrammatical output rather than a semantically
+# distinct question.  Content-bearing tokens inside NER spans (NOUN, PROPN,
+# NUM, ADJ, VERB, ADV) are not in this set and continue to qualify via NER.
+_FUNCTION_WORD_POS_TAGS_EXCLUDED_FROM_NER_CONDITION: frozenset[str] = frozenset(
+    tag.value for tag in UniversalDependenciesClosedClassPartOfSpeechTag
+)
 
 # Small positive constant added inside the logarithm during Inverse Document
 # Frequency proxy computation to prevent log(0) when a token's corpus
@@ -196,7 +207,11 @@ def _token_is_key_term(token) -> bool:
         return True
 
     # Named-entity members: referent binders whose surface form is load-bearing.
-    if token.ent_iob_ != "O":
+    # Function words (DET, ADP, CCONJ, etc.) inside entity spans are excluded:
+    # they are grammatically required connective tissue, not perturbation targets.
+    # Only content-bearing tokens within the entity span qualify here.
+    if (token.ent_iob_ != "O"
+            and token.pos_ not in _FUNCTION_WORD_POS_TAGS_EXCLUDED_FROM_NER_CONDITION):
         return True
 
     # Negation: sentential negation changes the polarity of the answer.
