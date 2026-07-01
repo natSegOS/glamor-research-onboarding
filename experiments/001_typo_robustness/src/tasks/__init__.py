@@ -20,6 +20,7 @@ from tasks.reasoning import (
     ReasoningTemplate,
     ReasoningItem,
     generate_synthetic_reasoning_items,
+    extract_instance_parameters,
     load_reasoning_jsonl,
     load_official_gsm_symbolic,
     load_official_gsm8k,
