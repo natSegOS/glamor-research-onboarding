@@ -9,6 +9,33 @@ the pipeline reads during generation via the config's ``datasets:`` list.
 Re-running this script fetches fresh revisions and overwrites the JSONL files
 cleanly — it is safe to re-run when you want updated dataset hashes.
 
+GSM-Symbolic template enrichment (--gsm-templates-dir)
+-------------------------------------------------------
+The ``question_annotated`` field that enables Regime C reasoning operand-swap
+is not exposed in the Apple/GSM-Symbolic HuggingFace dataset.  It is available
+in the companion GitHub repository (github.com/apple/ml-gsm-symbolic) under
+``templates/p1/*.json``.
+
+When ``--gsm-templates-dir`` points to a local clone of that repository, this
+tool joins each fetched HF item against the template via:
+
+    generated_data/GSM_p1.jsonl   HF question text  →  original_id
+    templates/p1/{id_orig}.json   original_id        →  question_annotated
+
+The template provides the STRUCTURE (parameter names, types, answer formula).
+The HF question text provides the INSTANCE'S actual parameter values.
+``extract_instance_parameters`` matches the template's format string against the
+HF question text to recover the real values, then validates
+``answer_function(**extracted) == gold_answer``.  Items that pass validation
+get ``parameters`` set to the extracted instance values (fully Regime C capable).
+Items that fail validation get ``parameters = {}`` and will be excluded
+gracefully at perturbation time.
+
+The stored ``question_annotated`` string uses the template's default values in
+its ``{param,value}`` syntax (as written in the Apple repo), but the separate
+``parameters`` field in the JSONL holds the validated instance values that
+``load_reasoning_jsonl`` will use at run time.
+
 Usage:
 
     python tools/build_task_items.py
@@ -17,11 +44,11 @@ Or with explicit options:
 
     python tools/build_task_items.py \\
         --reasoning-items 600 \\
-        --gsm-config main \\
+        --gsm-config p1 \\
         --mcq-items 600 \\
-        --categories math physics \\
         --seed 1729 \\
-        --output-directory data/items
+        --output-directory data/items \\
+        --gsm-templates-dir /tmp/ml-gsm-symbolic
 
 Outputs (in --output-directory):
     gsm_symbolic.jsonl   GSM-Symbolic reasoning items (primary)
@@ -47,6 +74,7 @@ from progress import ProgressBar
 from tasks import (
     ReasoningItem,
     MultipleChoiceItem,
+    extract_instance_parameters,
     load_official_gsm_symbolic,
     load_official_gsm8k,
     load_official_mmlu_pro,
@@ -88,23 +116,99 @@ def resolve_dataset_revision(dataset_repo_identifier: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# GSM-Symbolic template enrichment
+# ---------------------------------------------------------------------------
+
+def _enrich_gsm_items_with_apple_templates(
+        items: list[ReasoningItem],
+        templates_dir: Path,
+        gsm_config: str,
+) -> tuple[int, int]:
+    """Enrich each item with question_annotated and validated instance parameters.
+
+    The HF dataset exposes the instantiated question text but not the symbolic
+    template.  The Apple GitHub repo provides the template; this function:
+
+    1. Joins each HF item against the template repo via:
+           generated_data/GSM_{config}.jsonl  question text → original_id
+           templates/{config}/{id_orig}.json  original_id   → question_annotated
+
+    2. Uses the template's format string as a regex pattern matched against the
+       HF question text to extract the INSTANCE's actual parameter values
+       (not the template's defaults), then validates
+       answer_function(**extracted) == item.gold_answer.
+
+    Sets item.question_annotated on all joined items.
+    Sets item.parameters to the validated instance values when extraction
+    succeeds, leaving it as {} when it fails (Regime C fails gracefully).
+
+    Returns (joined_count, extracted_count) — items where the template was
+    found versus items where instance parameters were also validated.
+    """
+    gen_data_path = templates_dir / "generated_data" / f"GSM_{gsm_config}.jsonl"
+    if not gen_data_path.exists():
+        print(f"  [templates] generated_data not found at {gen_data_path}; skipping enrichment")
+        return 0, 0
+
+    question_to_original_id: dict[str, int] = {}
+    for line in gen_data_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        question_to_original_id[row["question"]] = row["original_id"]
+
+    templates_subdir = templates_dir / "templates" / gsm_config
+    if not templates_subdir.exists():
+        print(f"  [templates] templates/{gsm_config}/ not found in {templates_dir}; skipping enrichment")
+        return 0, 0
+
+    id_orig_to_question_annotated: dict[int, str] = {}
+    for template_file in templates_subdir.glob("*.json"):
+        template_data = json.loads(template_file.read_text())
+        id_orig = template_data.get("id_orig")
+        question_annotated = template_data.get("question_annotated") or ""
+        if id_orig is not None and question_annotated.strip():
+            id_orig_to_question_annotated[id_orig] = question_annotated
+
+    joined = 0
+    extracted = 0
+    for item in items:
+        original_id = question_to_original_id.get(item.question_text)
+        if original_id is None:
+            continue
+        question_annotated = id_orig_to_question_annotated.get(original_id)
+        if not question_annotated:
+            continue
+
+        item.question_annotated = question_annotated
+        joined += 1
+
+        instance_params = extract_instance_parameters(
+            question_annotated=question_annotated,
+            question_text=item.question_text,
+            gold_answer=item.gold_answer,
+        )
+        if instance_params is not None:
+            item.parameters = instance_params
+            extracted += 1
+
+    return joined, extracted
+
+
+# ---------------------------------------------------------------------------
 # JSONL serialisation
 #
 # ReasoningItem and MultipleChoiceItem are dataclasses, but ReasoningItem
 # carries a Callable (answer_function) and a ReasoningTemplate that cannot be
-# serialised to JSON. We export only the fields the pipeline needs at run time:
-# the item's identity, prompt text, gold answer, and key terms.
+# serialised to JSON. We export only the fields the pipeline needs at run time.
 #
-# Note on parameters (reasoning):
-#   Stored for traceability. For official items fetched from HuggingFace the
-#   parameters dict is always empty because no template is available. Regime C
-#   operand-swap, which requires a Python answer function, is only possible for
-#   synthetic items generated by reasoning.generate_synthetic_reasoning_items.
+# question_annotated: the raw GSM-Symbolic annotation string (present for p1/p2
+# splits). Stored so that load_reasoning_jsonl can re-parse the template at run
+# time from the JSONL without a live HF connection. None for other datasets.
 # ---------------------------------------------------------------------------
 
 def _reasoning_item_to_record(item: ReasoningItem) -> dict:
-
-    return {
+    record = {
         "task_id":       item.task_id,
         "task_family":   item.task_family,
         "source":        item.source,
@@ -114,6 +218,9 @@ def _reasoning_item_to_record(item: ReasoningItem) -> dict:
         "key_terms":     item.key_terms,
         "parameters":    item.parameters,
     }
+    if item.question_annotated is not None:
+        record["question_annotated"] = item.question_annotated
+    return record
 
 
 def _multiple_choice_item_to_record(item: MultipleChoiceItem) -> dict:
@@ -177,6 +284,17 @@ def parse_arguments() -> argparse.Namespace:
         default=_DEFAULT_SAMPLING_SEED,
         help=f"random seed for subsampling (default: {_DEFAULT_SAMPLING_SEED})",
     )
+    parser.add_argument(
+        "--gsm-templates-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="path to a local clone of github.com/apple/ml-gsm-symbolic. "
+             "When supplied, each GSM-Symbolic item is enriched with its "
+             "question_annotated field from the template repo, enabling Regime C "
+             "reasoning operand-swap. Without this flag, question_annotated is "
+             "absent and Regime C reasoning produces no items.",
+    )
     return parser.parse_args()
 
 
@@ -229,6 +347,18 @@ def main() -> None:
         item_count=arguments.reasoning_items,
         seed=arguments.seed,
     )
+    joined_count = extracted_count = 0
+    if arguments.gsm_templates_dir is not None:
+        print(f"enriching GSM-Symbolic items with Apple templates from {arguments.gsm_templates_dir} ...")
+        joined_count, extracted_count = _enrich_gsm_items_with_apple_templates(
+            gsm_symbolic_items, arguments.gsm_templates_dir, arguments.gsm_config)
+        print(f"  template joined:              {joined_count}/{len(gsm_symbolic_items)} items")
+        print(f"  instance params validated:    {extracted_count}/{joined_count} joined items "
+              f"(Regime C capable)")
+    else:
+        print("  (--gsm-templates-dir not supplied; question_annotated will be absent; "
+              "Regime C reasoning will produce no items)")
+
     gsm_symbolic_output_path = output_directory / "gsm_symbolic.jsonl"
     _write_jsonl(
         gsm_symbolic_items,
@@ -237,11 +367,14 @@ def main() -> None:
         description="writing gsm_symbolic.jsonl",
     )
     provenance["gsm_symbolic"] = {
-        "repo_id":              _GSM_SYMBOLIC_REPO_ID,
-        "configuration_name":  arguments.gsm_config,
-        "resolved_revision_sha": gsm_symbolic_revision,
-        "item_count":          len(gsm_symbolic_items),
-        "output_file":         str(gsm_symbolic_output_path),
+        "repo_id":                    _GSM_SYMBOLIC_REPO_ID,
+        "configuration_name":         arguments.gsm_config,
+        "resolved_revision_sha":      gsm_symbolic_revision,
+        "item_count":                 len(gsm_symbolic_items),
+        "apple_templates_dir":        str(arguments.gsm_templates_dir) if arguments.gsm_templates_dir else None,
+        "apple_templates_joined":     joined_count if arguments.gsm_templates_dir else None,
+        "apple_templates_params_validated": extracted_count if arguments.gsm_templates_dir else None,
+        "output_file":                str(gsm_symbolic_output_path),
     }
     print(f"  wrote {len(gsm_symbolic_items)} items to {gsm_symbolic_output_path}")
 
