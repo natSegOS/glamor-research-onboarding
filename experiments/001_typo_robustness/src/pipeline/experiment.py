@@ -35,7 +35,7 @@ import yaml
 from enums import (
     SemanticClass, Operation, SelectionPolicy, Scope,
     ConditionSource, Precision, ShardType,
-    REASONING_FAMILIES,
+    REASONING_FAMILIES, TaskFamily,
 )
 
 import regimes
@@ -43,6 +43,7 @@ from perturbation import PerturbationError, damerau_levenshtein_distance
 from pipeline.runner import (
     GenerationRequest,
     ShardManifest,
+    deterministic_row_id,
     run_shard,
 )
 from tasks import get_spec
@@ -373,6 +374,19 @@ def _construct_regime_c(task_item, item_seed):
     """
     if hasattr(task_item, "options"):
         return regimes.make_regime_c_mcq_option_permutation(task_item, item_seed)
+
+    # GSM8K is a real (non-templated) dataset: it has no answer_function, so
+    # every GSM8K item is out of scope for Regime C's operand-swap by
+    # construction, not by accident. Checked explicitly, ahead of the generic
+    # template-capability check below, so this expected, 100%-of-GSM8K
+    # exclusion is distinguishable in the sidecar from a GSM-Symbolic item
+    # that unexpectedly failed template parsing (design/04 §4.7).
+    if task_item.task_family == TaskFamily.GSM8K:
+        raise PerturbationError(
+            f"GSM8K is out of scope for Regime C operand-swap by design "
+            f"(no answer_function template exists for real, non-symbolic "
+            f"items); item {task_item.task_id!r} skipped.")
+
     # Reasoning item: require an annotated template.
     if not getattr(task_item, "supports_regime_c_operand_swap", False):
         raise PerturbationError(
@@ -538,6 +552,7 @@ def run_experiment(
         quantization_method: Precision = Precision.FP16,
         git_commit: str = "unpinned",
         linguistic_pipeline: Optional[object] = None,
+        shard_partition: Optional[tuple[int, int]] = None,
 ) -> dict:
     """Run one experiment configuration against one engine and return a small
     summary. Writes generation rows to ``output_directory`` as JSONL and uses a
@@ -547,6 +562,23 @@ def run_experiment(
     revision is pinned; this function records the revision into every row but the
     pin-assertion itself belongs to the run script that builds the engine
     (inference.assert_revisions_pinned), since only it holds the specifications.
+
+    ``shard_partition``, when given, is ``(worker_index, worker_count)``: this
+    call handles only the subset of requests whose deterministic row_id hashes
+    into ``worker_index`` of ``worker_count`` buckets (design/07 §7.7 — "two
+    GPUs can take different shards ... with no coordination beyond the shared
+    output store"). Every worker still runs ``build_requests`` over the full
+    item set — partitioning happens only after, since perturbation
+    construction is what determines each request's row_id in the first place
+    — so this trades some redundant CPU-only construction work (cheap and
+    parallelizable on its own) for zero cross-process coordination: each
+    worker writes to its own ``..._w{worker_index}of{worker_count}_*`` files,
+    so no two workers ever touch the same manifest or output path, and
+    concurrent runs need nothing beyond starting them. Only worker 0 writes
+    the exclusion sidecar, since every worker discovers the identical
+    (partition-independent) set of excluded items. Merge worker outputs for
+    analysis with ``load_generation_rows`` (it already accepts a list of
+    paths) or a glob over ``{run_id}_w*_generations.jsonl``.
     """
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -554,19 +586,34 @@ def run_experiment(
     task_items = load_task_items(configuration)
     asr_items_by_task = load_asr_items_by_task(configuration.asr_items_path)
 
-    exclusion_sidecar = ExclusionSidecar(
-        output_directory / f"{configuration.run_id}_exclusions.jsonl")
+    worker_index, worker_count = shard_partition if shard_partition else (0, 1)
+    worker_suffix = f"_w{worker_index}of{worker_count}" if shard_partition else ""
+
+    exclusion_sidecar = None
+    if worker_index == 0:
+        exclusion_sidecar = ExclusionSidecar(
+            output_directory / f"{configuration.run_id}_exclusions.jsonl")
 
     requests = build_requests(
         task_items, configuration.conditions, is_word, tokenizer,
         configuration.seed, asr_items_by_task,
         exclusion_sidecar=exclusion_sidecar)
 
+    if shard_partition:
+        requests = [
+            request for request in requests
+            if int(deterministic_row_id(
+                model_revision, request.task_id,
+                request.perturbation_state_vector, request.seed,
+                request.is_clean), 16) % worker_count == worker_index
+        ]
+
     reasoning_requests = [r for r in requests if r.task_family in REASONING_FAMILIES]
     other_requests = [r for r in requests if r.task_family not in REASONING_FAMILIES]
 
-    manifest = ShardManifest(output_directory / f"{configuration.run_id}_manifest.json")
-    output_path = output_directory / f"{configuration.run_id}_generations.jsonl"
+    manifest = ShardManifest(
+        output_directory / f"{configuration.run_id}{worker_suffix}_manifest.json")
+    output_path = output_directory / f"{configuration.run_id}{worker_suffix}_generations.jsonl"
 
     from progress import ProgressBar
 
@@ -582,13 +629,13 @@ def run_experiment(
 
     with ProgressBar(
             total=total_pending,
-            description=f"generating [{model_id}]",
+            description=f"generating [{model_id}]{worker_suffix}",
     ) as progress:
         for shard_type, shard_requests, max_new_tokens in shard_schedule:
             if not shard_requests:
                 continue
             total_new_rows += run_shard(
-                shard_id=f"{configuration.run_id}_{shard_type}",
+                shard_id=f"{configuration.run_id}{worker_suffix}_{shard_type}",
                 requests=shard_requests,
                 engine=engine,
                 output_path=output_path,
@@ -604,10 +651,11 @@ def run_experiment(
 
     return {
         "run_id": configuration.run_id,
+        "shard_partition": list(shard_partition) if shard_partition else None,
         "task_item_count": len(task_items),
         "request_count": len(requests),
         "new_rows_written": total_new_rows,
-        "excluded_count": exclusion_sidecar.count,
-        "exclusions_path": str(exclusion_sidecar.path),
+        "excluded_count": exclusion_sidecar.count if exclusion_sidecar else None,
+        "exclusions_path": str(exclusion_sidecar.path) if exclusion_sidecar else None,
         "output_path": str(output_path),
     }
