@@ -1,0 +1,59 @@
+{
+  "schema_version": "1",
+  "note": "Formal linguistic annotation for GLAMOR Lab Exp 001.  Frozen at pre-registration; any rule change requires a design-doc amendment (design/10 §10.3).  See design/02 §2.x for the formal definition of K_P(x) and design/04 §4.6 for the literature justification.",
+  "key_term_annotation": {
+    "rule_version": "structural_filter_with_tfidf_ranked_candidates",
+    "implements": "design/02 §2.x — the key-term set K_P(x)",
+    "formal_definition": "K_P(x) = { t ∈ tok_P(x) : POS_P(t) ∈ {NOUN, PROPN, NUM}  # content/quantity carriers\n∨ ENT_P(t) ≠ ∅                  # named entities\n∨ DEP_P(t) = neg                # negation\n∨ MORPH_P(t).Degree ∈ {Cmp,Sup} # comparatives/superlatives\n∨ (POS_P(t)=DET ∧ MORPH_P(t).PronType=Tot) # totality quantifiers\n}",
+    "linguistic_grounding": [
+      "Content-word / function-word distinction: Manning, Raghavan & Schütze (2008) 'Introduction to Information Retrieval', Cambridge UP, §2.2.",
+      "Named-entity recognition as a referent-binding signal: Nadeau & Sekine (2007) 'A survey of named entity recognition and classification', Lingvisticae Investigationes 30(1).",
+      "Dependency grammar of negation (DEP=neg): Tesnière (1959) 'Éléments de syntaxe structurale'; de Marneffe et al. (2014) 'Universal Stanford Dependencies', LREC.",
+      "Comparative/superlative morphology: Huddleston & Pullum (2002) 'The Cambridge Grammar of the English Language', §17.5.",
+      "Total quantifiers / distributive determiners: Barwise & Cooper (1981) 'Generalized quantifiers and natural language', Linguistics and Philosophy 4.",
+      "Universal Dependencies morphological feature scheme (PronType=Tot, Degree=Cmp/Sup): Nivre et al. (2016) 'Universal Dependencies v1', LREC."
+    ]
+  },
+  "linguistic_pipeline": {
+    "library": "spaCy",
+    "library_reference": "Honnibal, M., Montani, I., Van Landeghem, S., & Boyd, A. (2020). spaCy: Industrial-strength Natural Language Processing in Python. Zenodo. https://doi.org/10.5281/zenodo.1212303",
+    "library_rationale": "spaCy is named explicitly in the study design (design/04 §4.6).  It provides CPU-friendly part-of-speech, dependency, named-entity, and morphological annotations with published accuracy on OntoNotes 5.0 and Universal Dependencies benchmarks, making it auditable by reviewers.  The non-transformer pipeline requires no GPU, consistent with the project's CPU/GPU dependency split (build tools and post-processing run on CPU; only generation requires GPU).",
+    "model_name": "en_core_web_trf",
+    "model_sha256_of_meta_json": "5d56cc5fed14108751797b5f7fdab7f9a0a078a51d2502009205dfe3996d5540",
+    "model_accuracy_reference": "Published accuracy figures are available in the spaCy model documentation at https://spacy.io/models/en — see the model card for the specific version installed, including F1 scores for part-of-speech tagging, dependency parsing, and named-entity recognition on OntoNotes 5.0."
+  },
+  "annotation_results": [
+    {
+      "input_path": "data/items/gsm8k.jsonl",
+      "annotated_count": 100,
+      "skipped_count": 0,
+      "violation_count": 0,
+      "rule_version": "structural_filter_with_tfidf_ranked_candidates",
+      "model_name": "en_core_web_trf"
+    },
+    {
+      "input_path": "data/items/gsm_symbolic.jsonl",
+      "annotated_count": 100,
+      "skipped_count": 0,
+      "violation_count": 54,
+      "rule_version": "structural_filter_with_tfidf_ranked_candidates",
+      "model_name": "en_core_web_trf"
+    },
+    {
+      "input_path": "data/items/mmlu.jsonl",
+      "annotated_count": 100,
+      "skipped_count": 0,
+      "violation_count": 0,
+      "rule_version": "structural_filter_with_tfidf_ranked_candidates",
+      "model_name": "en_core_web_trf"
+    },
+    {
+      "input_path": "data/items/mmlu_pro.jsonl",
+      "annotated_count": 100,
+      "skipped_count": 0,
+      "violation_count": 0,
+      "rule_version": "structural_filter_with_tfidf_ranked_candidates",
+      "model_name": "en_core_web_trf"
+    }
+  ]
+}
