@@ -1,0 +1,36 @@
+{
+  "fetched_at": "2026-07-03T04:31:01.518890+00:00",
+  "seed": 1729,
+  "gsm_symbolic": {
+    "repo_id": "apple/GSM-Symbolic",
+    "configuration_name": "p1",
+    "resolved_revision_sha": "93b5b3758d9d9841ffe81d6cd2ae2b030685b078",
+    "item_count": 100,
+    "apple_templates_dir": "/tmp/ml-gsm-symbolic",
+    "apple_templates_joined": 100,
+    "apple_templates_params_validated": 61,
+    "output_file": "data/items/gsm_symbolic.jsonl"
+  },
+  "mmlu_pro": {
+    "repo_id": "TIGER-Lab/MMLU-Pro",
+    "resolved_revision_sha": "b189ec765aa7ed75c8acfea42df31fdae71f97be",
+    "item_count": 100,
+    "categories": null,
+    "output_file": "data/items/mmlu_pro.jsonl"
+  },
+  "gsm8k": {
+    "repo_id": "openai/gsm8k",
+    "configuration_name": "main",
+    "resolved_revision_sha": "740312add88f781978c0658806c59bc2815b9866",
+    "item_count": 100,
+    "output_file": "data/items/gsm8k.jsonl"
+  },
+  "mmlu": {
+    "repo_id": "cais/mmlu",
+    "configuration_name": "all",
+    "resolved_revision_sha": "c30699e8356da336a370243923dbaf21066bb9fe",
+    "item_count": 100,
+    "categories": null,
+    "output_file": "data/items/mmlu.jsonl"
+  }
+}
