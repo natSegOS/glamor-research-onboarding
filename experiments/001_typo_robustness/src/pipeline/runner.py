@@ -22,7 +22,7 @@ import time
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Iterator, Optional, Sequence
 
 from enums import Decoding, Precision, INTERACTIONAL_FAILURE_STATUSES
 import scoring
@@ -109,6 +109,20 @@ class DeterministicDummyEngine:
 
         return [self.answer_function(prompt) for prompt in prompts]
 
+    def generate_streaming(
+            self,
+            prompts: Sequence[str],
+            max_new_tokens: int,
+    ) -> Iterator[tuple[int, str]]:
+        """Mirrors ``VllmEngine.generate_streaming``'s ``(index, text)`` yield
+        contract so ``run_shard`` can drive either engine identically. Nothing
+        here is actually concurrent (there is no GPU to schedule), so this
+        just yields every result in order — sufficient for exercising
+        ``run_shard``'s incremental-write and resume behaviour in tests.
+        """
+        for index, prompt in enumerate(prompts):
+            yield index, self.answer_function(prompt)
+
 
 class ShardManifest:
     """A per-run record of which shards have completed.
@@ -188,7 +202,6 @@ def run_shard(
         model_revision: str,
         quantization_method: Precision = Precision.FP16,
         max_new_tokens: int = 512,
-        generation_batch_size: int = 500,
         decoding: Decoding = Decoding.GREEDY,
         git_commit: str = "unpinned",
         progress_callback: Optional[Callable[[int], None]] = None,
@@ -201,8 +214,21 @@ def run_shard(
     maximally effective (design/07 §7.8). The chat template is applied here,
     once, to every prompt.
 
-    ``progress_callback``, when provided, is called with the number of rows
-    just written after each batch completes.
+    Every request already on disk (by ``row_id``) is skipped before
+    generation even starts, so re-running this function — after a crash, or
+    as one of several parallel workers each handed a partition of the same
+    request list (design/07 §7.7) — never regenerates or duplicates a row.
+
+    Rows are written and flushed to ``output_path`` as soon as each individual
+    request finishes decoding (``engine.generate_streaming``), not after a
+    fixed-size batch completes. A killed process therefore loses at most the
+    handful of requests actually in flight at that moment, never an entire
+    batch — and, since vLLM's own continuous-batching scheduler (not a
+    batch-size parameter here) decides how many requests run concurrently,
+    this is also never slower than batching would have been.
+
+    ``progress_callback``, when provided, is called with ``1`` after every
+    row is written.
 
     ``linguistic_pipeline``, when provided, is a loaded spaCy model passed from
     the run script (loaded once at startup).  When present, the full four-way
@@ -236,91 +262,91 @@ def run_shard(
         if row_id not in already_written_row_ids:
             pending_requests.append((row_id, request))
 
+    if not pending_requests:
+        manifest.mark_shard_complete(shard_id)
+        return 0
+
+    chat_templated_prompts = [
+        _apply_chat_template_if_available(engine, request.prompt)
+        for _row_id, request in pending_requests
+    ]
+
     new_rows_written = 0
+    batch_start_time = time.perf_counter()
 
     with output_path.open("a") as output_file:
-        for batch_offset in range(0, len(pending_requests), generation_batch_size):
-            batch = pending_requests[batch_offset : batch_offset + generation_batch_size]
+        for index, generated_text in engine.generate_streaming(  # type: ignore[union-attr]
+                chat_templated_prompts, max_new_tokens):
+            row_id, request = pending_requests[index]
+            generation_elapsed_seconds = time.perf_counter() - batch_start_time
 
-            chat_templated_prompts = [
-                _apply_chat_template_if_available(engine, request.prompt)
-                for _row_id, request in batch
-            ]
+            row = {
+                "schema": SCHEMA_VERSION,
+                "row_id": row_id,
+                "shard_id": shard_id,
+                "git_commit": git_commit,
+                "timestamp": time.time(),
+                "model_id": model_id,
+                "model_revision": model_revision,
+                "quantization_method": quantization_method,
+                "task_family": request.task_family,
+                "task_id": request.task_id,
+                "is_clean": request.is_clean,
+                "clean_prompt": (
+                    request.clean_prompt
+                    or (request.prompt if request.is_clean else "")
+                ),
+                "perturbed_prompt": "" if request.is_clean else request.prompt,
+                "expected_answer": request.gold_answer,
+                "seed": request.seed,
+                "edit_script": [
+                    edit.to_dict() if hasattr(edit, "to_dict") else edit
+                    for edit in request.edit_script
+                ],
+                "decoding": decoding,
+                "max_new_tokens": max_new_tokens,
+                "model_output": generated_text,
+                "generation_elapsed_seconds": round(
+                    generation_elapsed_seconds, 3),
+                **{
+                    f"r_{key}": value
+                    for key, value in
+                    request.perturbation_state_vector.items()
+                },
+                **request.extra_fields,
+            }
 
-            generation_start_time = time.perf_counter()
-            generated_texts = engine.generate(  # type: ignore[union-attr]
-                chat_templated_prompts, max_new_tokens)
-            generation_elapsed_seconds = time.perf_counter() - generation_start_time
-
-            for (row_id, request), generated_text in zip(batch, generated_texts):
-                row = {
-                    "schema": SCHEMA_VERSION,
-                    "row_id": row_id,
-                    "shard_id": shard_id,
-                    "git_commit": git_commit,
-                    "timestamp": time.time(),
-                    "model_id": model_id,
-                    "model_revision": model_revision,
-                    "quantization_method": quantization_method,
-                    "task_family": request.task_family,
-                    "task_id": request.task_id,
-                    "is_clean": request.is_clean,
-                    "clean_prompt": (
-                        request.clean_prompt
-                        or (request.prompt if request.is_clean else "")
-                    ),
-                    "perturbed_prompt": "" if request.is_clean else request.prompt,
-                    "expected_answer": request.gold_answer,
-                    "seed": request.seed,
-                    "edit_script": [
-                        edit.to_dict() if hasattr(edit, "to_dict") else edit
-                        for edit in request.edit_script
-                    ],
-                    "decoding": decoding,
-                    "max_new_tokens": max_new_tokens,
-                    "model_output": generated_text,
-                    "generation_elapsed_seconds": round(
-                        generation_elapsed_seconds, 3),
-                    **{
-                        f"r_{key}": value
-                        for key, value in
-                        request.perturbation_state_vector.items()
-                    },
-                    **request.extra_fields,
-                }
-
-                # Inline scoring — always on (Workstream 5). Uses the full
-                # four-way linguistic classifier when a spaCy pipeline is
-                # provided; falls back to structural two-way otherwise.
-                score_result = scoring.score(
-                    generated_text, request.gold_answer, request.task_family)
-                if (linguistic_pipeline is not None
-                        and score_result.parse_status.value == "unparseable"):
-                    # Upgrade UNPARSEABLE to CLARIFICATION/REFUSAL when the
-                    # linguistic classifier finds evidence.
-                    refined = scoring.classify_parse_status_with_linguistic_pipeline(
-                        generated_text, score_result.parsed_answer, linguistic_pipeline)
-                    score_result = scoring.ScoreResult(
-                        score_result.parsed_answer,
-                        score_result.is_correct,
-                        refined,
-                        score_result.extraction_tier,
-                    )
-                # Dual-accounting: interactional failures always score 0.
-                final_is_correct = (
-                    0 if score_result.parse_status in INTERACTIONAL_FAILURE_STATUSES
-                    else score_result.is_correct)
-                row["parsed_answer"] = score_result.parsed_answer
-                row["is_correct"] = final_is_correct
-                row["parse_status"] = score_result.parse_status
-                row["extraction_tier"] = score_result.extraction_tier
-                output_file.write(json.dumps(row) + "\n")
-                new_rows_written += 1
-
+            # Inline scoring — always on (Workstream 5). Uses the full
+            # four-way linguistic classifier when a spaCy pipeline is
+            # provided; falls back to structural two-way otherwise.
+            score_result = scoring.score(
+                generated_text, request.gold_answer, request.task_family)
+            if (linguistic_pipeline is not None
+                    and score_result.parse_status.value == "unparseable"):
+                # Upgrade UNPARSEABLE to CLARIFICATION/REFUSAL when the
+                # linguistic classifier finds evidence.
+                refined = scoring.classify_parse_status_with_linguistic_pipeline(
+                    generated_text, score_result.parsed_answer, linguistic_pipeline)
+                score_result = scoring.ScoreResult(
+                    score_result.parsed_answer,
+                    score_result.is_correct,
+                    refined,
+                    score_result.extraction_tier,
+                )
+            # Dual-accounting: interactional failures always score 0.
+            final_is_correct = (
+                0 if score_result.parse_status in INTERACTIONAL_FAILURE_STATUSES
+                else score_result.is_correct)
+            row["parsed_answer"] = score_result.parsed_answer
+            row["is_correct"] = final_is_correct
+            row["parse_status"] = score_result.parse_status
+            row["extraction_tier"] = score_result.extraction_tier
+            output_file.write(json.dumps(row) + "\n")
             output_file.flush()
+            new_rows_written += 1
 
             if progress_callback is not None:
-                progress_callback(len(batch))
+                progress_callback(1)
 
     manifest.mark_shard_complete(shard_id)
     return new_rows_written
