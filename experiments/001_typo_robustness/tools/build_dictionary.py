@@ -4,8 +4,8 @@ This is a one-time pre-processing step (design/04 §4.7, design/10 §10).
 It builds the vocabulary that ``regimes.make_is_word`` uses to decide whether a
 candidate perturbation lands on a real English word — which determines whether a
 Regime A (nonword) typo accidentally becomes a Regime B (real-word shift) item.
-The script records the SCOWL version, size band, and file SHA-256 in a provenance
-sidecar so the is_word boundary is reproducible and auditable.
+The script records the SCOWL version, dialect, size band, and file SHA-256 in a
+provenance sidecar so the is_word boundary is reproducible and auditable.
 
 Lexicon source: SCOWL (Spell-Checker Oriented Word Lists)
 ----------------------------------------------------------
@@ -23,19 +23,57 @@ the full standard English vocabulary without rare, archaic, or technical
 vocabulary that falls outside native-speaker competence.  Atkinson (SCOWL
 documentation) describes size 60 as "standard dictionary coverage".
 
+Dialect scoping (single dialect only)
+--------------------------------------
+SCOWL's own documentation (``scowl/README.in``) is explicit that files should
+be combined as the ``english`` spelling category plus **one** dialect category
+("american", "british", "british_z", "canadian", or "australian") — never
+several dialects at once.  Its own list-building tool, ``mk-list``, encodes
+this: invoking it with a single dialect automatically pulls in that dialect's
+``abbreviations``/``contractions``/``proper-names``/``upper``/``words``
+sub-categories, the ``english`` category (same sub-categories), and the
+``special`` category (``hacker``, ``roman-numerals``) — this is the standard,
+citable "SCOWL American English word list" bundle that this script reproduces.
+
+Merging multiple dialects together (e.g. american + british + canadian +
+australian, as an earlier version of this script did by filtering on the
+numeric size suffix alone, ignoring the file-name prefix) is *not* SCOWL's
+documented usage: it silently pulls in every dialect's spelling variants
+(color/colour, realize/realise, ...) into a single is_word boundary and is
+not something a reader familiar with SCOWL would recognize as "the size-60
+SCOWL list" — undermining exactly the citability/reproducibility argument for
+using SCOWL in the first place.  ``--scowl-dialect`` (default: ``american``)
+selects the one dialect category to pair with ``english`` and ``special``.
+
 Download
 --------
-Download a SCOWL release from http://wordlist.aspell.net/dicts/ and extract it
-to a local directory.  Then pass the directory (or a single word-list file such
+Download the prebuilt SCOWL release from SourceForge (the same word-list
+build to which http://wordlist.aspell.net/ points) and extract it to a local
+directory:
+
+    wget -O /tmp/scowl.tar.gz \\
+      "https://sourceforge.net/projects/wordlist/files/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz/download"
+    tar -xzf /tmp/scowl.tar.gz -C /tmp/
+
+Then pass the extracted ``final/`` directory (or a single word-list file such
 as ``english-words.60``) via ``--scowl-path``.
+
+Note: as of this writing, 2020.12.07 is the newest version for which SCOWL
+publishes a prebuilt word-list archive in this format.  The upstream project's
+newer releases (tracked at github.com/en-wl/wordlist) ship built Hunspell/
+Aspell dictionaries only, not the flat SCOWL ``final/`` word lists this script
+consumes — so pinning to 2020.12.07 is not staleness, it is the latest
+available prebuilt SCOWL release.  Re-check SourceForge
+(https://sourceforge.net/projects/wordlist/files/SCOWL/) before a real study
+run in case that has changed.
 
 Usage:
 
-    python tools/build_dictionary.py --scowl-path /path/to/scowl-2020.12.07/
+    python tools/build_dictionary.py --scowl-path /path/to/scowl-2020.12.07/final/
 
 Outputs (in --output-directory):
     en_us_pinned.txt     one lowercase word per line, alphabetically sorted
-    PROVENANCE.json      SCOWL version, size band, file SHA-256, timestamp
+    PROVENANCE.json      SCOWL version, dialect, size band, file SHA-256, timestamp
 """
 
 from __future__ import annotations
@@ -43,59 +81,97 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 
 from datetime import datetime, timezone
 from pathlib import Path
+
+_DIALECT_CHOICES = ("american", "british", "british_z", "canadian", "australian")
+
+
+def _matching_word_list_files(
+        scowl_path: Path,
+        maximum_size_band: int,
+        dialect: str,
+) -> list[Path]:
+    """Return the SCOWL ``final/`` files for ``dialect`` at size <= ``maximum_size_band``.
+
+    Mirrors SCOWL's own ``mk-list`` default packaging for a single-dialect word
+    list: the ``english`` category (dialect-neutral core), the requested
+    ``dialect`` category (e.g. ``american``), and the ``special`` category
+    (``hacker``, ``roman-numerals``) — each across all of their sub-categories
+    (``words``, ``upper``, ``proper-names``, ``abbreviations``, ``contractions``).
+    Other dialect categories (e.g. ``british`` when ``dialect="american"``) are
+    excluded so the vocabulary reflects one coherent spelling convention rather
+    than a merge of several.
+    """
+    if scowl_path.is_dir():
+        candidates = sorted(scowl_path.iterdir())
+    else:
+        candidates = [scowl_path]
+
+    prefix_pattern = re.compile(rf"^(english|special|{re.escape(dialect)})-[a-z-]+$")
+
+    word_list_files = []
+    for candidate_file in candidates:
+        try:
+            size_band_number = int(candidate_file.suffix.lstrip("."))
+        except ValueError:
+            continue
+        if size_band_number > maximum_size_band:
+            continue
+        if scowl_path.is_dir() and not prefix_pattern.match(candidate_file.stem):
+            continue
+        word_list_files.append(candidate_file)
+    return word_list_files
 
 
 def _build_scowl_vocabulary(
         scowl_path: Path,
         maximum_size_band: int,
+        dialect: str,
 ) -> tuple[set[str], dict]:
     """Return ``(vocabulary_set, provenance_dict)`` from a SCOWL word-list source.
 
     SCOWL organises its word lists into size bands numbered 10, 20, 35, 50, 55,
-    60, 70, 80, and 95.  All files whose numeric suffix is less than or equal to
-    ``maximum_size_band`` are merged.  The recommended band is 60 (Atkinson,
-    SCOWL documentation: "This is the standard dictionary size").
-
-    Only tokens that are entirely alphabetic and lowercase (after stripping) are
-    retained, matching the contract of ``regimes.load_wordlist``.
+    60, 70, 80, and 95.  Only tokens that are entirely alphabetic and lowercase
+    (after stripping) are retained, matching the contract of
+    ``regimes.load_wordlist``.
 
     Parameters
     ----------
     scowl_path :
         Path to a single SCOWL word-list file or to a directory containing
-        multiple SCOWL word-list files.  When a directory is supplied, all
-        files whose suffix parses as an integer ≤ ``maximum_size_band`` are
-        merged.
+        multiple SCOWL word-list files (SCOWL's ``final/`` directory).  When a
+        directory is supplied, files are matched against the ``english``,
+        ``special``, and ``dialect`` categories (see ``_matching_word_list_files``).
     maximum_size_band :
         The largest SCOWL size band to include in the vocabulary.
+    dialect :
+        The single dialect category to include alongside ``english`` and
+        ``special`` (one of ``_DIALECT_CHOICES``).
     """
     path = Path(scowl_path)
     if not path.exists():
         raise FileNotFoundError(
             f"SCOWL path not found: {path}\n"
-            "Download a SCOWL release from http://wordlist.aspell.net/dicts/ "
-            "and pass the path via --scowl-path.")
+            "Download the prebuilt SCOWL release from "
+            "https://sourceforge.net/projects/wordlist/files/SCOWL/ "
+            "and pass its final/ directory via --scowl-path.")
 
-    if path.is_dir():
-        word_list_files = []
-        for candidate_file in sorted(path.iterdir()):
-            try:
-                size_band_number = int(candidate_file.suffix.lstrip("."))
-            except ValueError:
-                continue
-            if size_band_number <= maximum_size_band:
-                word_list_files.append(candidate_file)
-        if not word_list_files:
+    word_list_files = _matching_word_list_files(path, maximum_size_band, dialect)
+    if not word_list_files:
+        if path.is_dir():
             raise FileNotFoundError(
-                f"No SCOWL word-list files with a numeric suffix ≤ "
+                f"No SCOWL word-list files for the 'english', 'special', or "
+                f"'{dialect}' categories with a numeric suffix <= "
                 f"{maximum_size_band} found in {path}.\n"
-                "SCOWL files are named e.g. 'english-words.60'.  Check that "
-                "--scowl-path points to the extracted SCOWL release directory.")
-    else:
-        word_list_files = [path]
+                "SCOWL files are named e.g. 'english-words.60' or "
+                "'american-words.60'.  Check that --scowl-path points to the "
+                "extracted SCOWL final/ directory.")
+        raise FileNotFoundError(
+            f"{path} does not look like a SCOWL word-list file (expected a "
+            f"numeric size suffix, e.g. 'english-words.60').")
 
     vocabulary: set[str] = set()
     for word_list_file in word_list_files:
@@ -114,8 +190,9 @@ def _build_scowl_vocabulary(
     provenance = {
         "source": "scowl",
         "scowl_path": str(path),
+        "scowl_dialect": dialect,
         "scowl_maximum_size_band": maximum_size_band,
-        "word_list_files_merged": [str(file) for file in word_list_files],
+        "word_list_files_merged": sorted(str(file) for file in word_list_files),
         "sha256_of_source_files": sha256_digest,
         "language": "en",
         "vocabulary_size": len(vocabulary),
@@ -138,9 +215,9 @@ def parse_arguments() -> argparse.Namespace:
         "--scowl-path",
         type=Path,
         required=True,
-        help="path to a SCOWL word-list file or to a directory containing "
-             "multiple SCOWL word-list files (e.g. the extracted SCOWL release "
-             "directory).  Download from http://wordlist.aspell.net/dicts/",
+        help="path to a SCOWL word-list file or to the extracted SCOWL "
+             "final/ directory.  Download from "
+             "https://sourceforge.net/projects/wordlist/files/SCOWL/",
     )
     parser.add_argument(
         "--scowl-max-size",
@@ -149,6 +226,14 @@ def parse_arguments() -> argparse.Namespace:
         help="maximum SCOWL size band to include (default: 60, which Atkinson "
              "describes as 'standard dictionary coverage'; valid values are "
              "10, 20, 35, 50, 55, 60, 70, 80, 95)",
+    )
+    parser.add_argument(
+        "--scowl-dialect",
+        choices=_DIALECT_CHOICES,
+        default="american",
+        help="the single dialect category to merge alongside 'english' and "
+             "'special' (default: american).  SCOWL's own documentation warns "
+             "against merging multiple dialects into one word list.",
     )
     parser.add_argument(
         "--output-directory",
@@ -167,10 +252,11 @@ def main() -> None:
 
     print(
         f"Building SCOWL vocabulary from {arguments.scowl_path} "
-        f"(maximum size band: {arguments.scowl_max_size}) ...")
+        f"(dialect: {arguments.scowl_dialect}, "
+        f"maximum size band: {arguments.scowl_max_size}) ...")
 
     vocabulary, provenance = _build_scowl_vocabulary(
-        arguments.scowl_path, arguments.scowl_max_size)
+        arguments.scowl_path, arguments.scowl_max_size, arguments.scowl_dialect)
 
     word_list_path = output_directory / "en_us_pinned.txt"
     word_list_path.write_text("\n".join(sorted(vocabulary)) + "\n")

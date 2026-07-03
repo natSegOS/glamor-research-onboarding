@@ -65,7 +65,7 @@ def main() -> None:
     if not dict_path.exists():
         print(
             f"ERROR: dictionary not found at {dict_path}\n"
-            "Run: python tools/build_dictionary.py --source scowl ...\n"
+            "Run: python tools/build_dictionary.py --scowl-path <path> ...\n"
             "to build it first.",
             file=sys.stderr,
         )

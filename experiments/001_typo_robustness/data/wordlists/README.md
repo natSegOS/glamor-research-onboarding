@@ -19,28 +19,46 @@ making the classification non-reproducible and non-citable.  SCOWL's boundary
 is stable, pre-registrable, and citable (cite the specific version SHA recorded
 in `PROVENANCE.json`).
 
+The vocabulary is scoped to a single dialect (`english` + `american` +
+`special`, `build_dictionary.py`'s default) rather than merging every SCOWL
+dialect together.  This mirrors SCOWL's own `mk-list` tool, whose documented
+usage is "the `english` spelling category ... as well as one of `american`,
+`british`, ... `australian`" — never several at once — so the resulting list
+is recognizable as a standard single-dialect SCOWL bundle, not a bespoke
+merge.
+
 ### Build the pinned dictionary (one-time step)
 
-**Step 1** — Download a SCOWL release.  On Linux / Colab:
+**Step 1** — Download the prebuilt SCOWL release.  On Linux / Colab:
 
 ```bash
 wget -q -O /tmp/scowl.tar.gz \
-  https://github.com/en-wl/wordlist/archive/refs/tags/v2020.12.07.tar.gz
+  "https://sourceforge.net/projects/wordlist/files/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz/download"
 tar -xzf /tmp/scowl.tar.gz -C /tmp/
 # Pre-built word lists are in the final/ subdirectory.
 ```
+
+Note: this is downloaded from SourceForge, not the `en-wl/wordlist` GitHub
+repo — that repo's tags are SCOWL *source* (raw ingredients + a Makefile, no
+prebuilt `final/` directory), not the built word lists this script consumes.
+As of this writing, 2020.12.07 is also the newest version for which a
+prebuilt SCOWL archive exists in this format (check
+https://sourceforge.net/projects/wordlist/files/SCOWL/ for a newer one before
+a real study run) — newer upstream releases ship built Hunspell/Aspell
+dictionaries only.
 
 **Step 2** — Build the pinned vocabulary:
 
 ```bash
 python tools/build_dictionary.py \
-    --scowl-path /tmp/wordlist-2020.12.07/final/ \
-    --scowl-max-size 60
+    --scowl-path /tmp/scowl-2020.12.07/final/ \
+    --scowl-max-size 60 \
+    --scowl-dialect american
 ```
 
 This writes `data/wordlists/en_us_pinned.txt` (one lowercase word per line,
 alphabetically sorted) and `data/wordlists/PROVENANCE.json` (SCOWL version,
-size band, SHA-256 of source files, timestamp).
+dialect, size band, SHA-256 of source files, timestamp).
 
 ### Using the dictionary at runtime
 
