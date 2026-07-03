@@ -55,7 +55,22 @@ def parse_arguments():
     parser.add_argument(
         "--no-spacy", action="store_true",
         help="disable inline spaCy scoring (falls back to structural two-way classifier)")
-    return parser.parse_args()
+    parser.add_argument(
+        "--shard-index", type=int, default=None,
+        help="this worker's index (0-based) for parallel generation across "
+             "GPUs/sessions; requires --shard-count. Each worker writes its own "
+             "'..._w{index}of{count}_generations.jsonl' — start one process per "
+             "GPU with the same --config/--model and a distinct --shard-index, "
+             "and merge the outputs afterward (design/07 §7.7).")
+    parser.add_argument(
+        "--shard-count", type=int, default=None,
+        help="total number of parallel workers; requires --shard-index.")
+    arguments = parser.parse_args()
+    if (arguments.shard_index is None) != (arguments.shard_count is None):
+        parser.error("--shard-index and --shard-count must be given together")
+    if arguments.shard_index is not None and not (0 <= arguments.shard_index < arguments.shard_count):
+        parser.error("--shard-index must satisfy 0 <= shard_index < shard_count")
+    return arguments
 
 
 def _load_linguistic_pipeline(disabled: bool):
@@ -101,6 +116,10 @@ def main():
     if linguistic_pipeline is not None:
         print(f"[run_generation] spaCy loaded ({_SPACY_MODEL_NAME})")
 
+    shard_partition = (
+        (arguments.shard_index, arguments.shard_count)
+        if arguments.shard_index is not None else None)
+
     summary = run_experiment(
         configuration=configuration,
         engine=engine,
@@ -112,6 +131,7 @@ def main():
         quantization_method=specification.precision,
         git_commit=arguments.git_commit,
         linguistic_pipeline=linguistic_pipeline,
+        shard_partition=shard_partition,
     )
 
     print("run complete:")
