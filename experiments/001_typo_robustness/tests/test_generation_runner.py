@@ -185,9 +185,10 @@ class _ChatTemplateEngine:
     def apply_chat_template(self, user_message):
         return f"<|user|>{user_message}<|assistant|>"
 
-    def generate(self, prompts, max_new_tokens):
+    def generate_streaming(self, prompts, max_new_tokens):
         assert all(prompt.startswith("<|user|>") for prompt in prompts)
-        return ["#### 0" for _ in prompts]
+        for index, _prompt in enumerate(prompts):
+            yield index, "#### 0"
 
 
 def test_runner_applies_chat_template(tmp_path):
@@ -215,6 +216,78 @@ def test_state_vector_with_plain_strings_still_serializable(tmp_path):
     assert reloaded["semantic_class"] == "A"
     assert reloaded["operation"] == "substitute"
     assert reloaded["edit_budget"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Per-row streaming: crash mid-shard loses only in-flight requests.
+# ---------------------------------------------------------------------------
+
+class _CrashAfterNEngine:
+    """Streams real results for the first N requests, then raises — simulating
+    an engine dying mid-shard (e.g. the CUDA OOM in pilot_output.txt)."""
+    revision = "crash-test"
+
+    def __init__(self, crash_after: int):
+        self.crash_after = crash_after
+
+    def generate_streaming(self, prompts, max_new_tokens):
+        for index, _prompt in enumerate(prompts):
+            if index == self.crash_after:
+                raise RuntimeError("simulated engine death")
+            yield index, "#### 0"
+
+
+def test_crash_mid_shard_preserves_already_finished_rows(tmp_path):
+    """Rows for requests that finished before the crash must already be on
+    disk — the whole point of flushing per request instead of per batch."""
+    requests = [_make_request(f"t{i}") for i in range(5)]
+    manifest = ShardManifest(tmp_path / "manifest.json")
+    output = tmp_path / "out.jsonl"
+
+    try:
+        run_shard("shard1", requests, _CrashAfterNEngine(crash_after=3), output,
+                  manifest, model_id="m", model_revision="rev1")
+    except RuntimeError:
+        pass
+
+    rows = load_generation_rows([output])
+    assert len(rows) == 3
+    assert not manifest.is_shard_complete("shard1")
+
+
+def test_resume_after_crash_completes_only_remaining_rows(tmp_path):
+    """A second run_shard call (a fresh, non-crashing engine) must generate
+    only the requests the crashed run never reached — not redo the first 3."""
+    requests = [_make_request(f"t{i}") for i in range(5)]
+    manifest = ShardManifest(tmp_path / "manifest.json")
+    output = tmp_path / "out.jsonl"
+
+    try:
+        run_shard("shard1", requests, _CrashAfterNEngine(crash_after=3), output,
+                  manifest, model_id="m", model_revision="rev1")
+    except RuntimeError:
+        pass
+
+    written_on_resume = run_shard("shard1", requests, DeterministicDummyEngine(),
+                                  output, manifest, model_id="m", model_revision="rev1")
+
+    assert written_on_resume == 2
+    rows = load_generation_rows([output])
+    assert len(rows) == 5
+    assert len({row["row_id"] for row in rows}) == 5
+    assert manifest.is_shard_complete("shard1")
+
+
+def test_progress_callback_fires_once_per_row(tmp_path):
+    requests = [_make_request(f"t{i}") for i in range(4)]
+    manifest = ShardManifest(tmp_path / "manifest.json")
+    calls = []
+
+    run_shard("shard1", requests, DeterministicDummyEngine(), tmp_path / "out.jsonl",
+              manifest, model_id="m", model_revision="rev1",
+              progress_callback=calls.append)
+
+    assert calls == [1, 1, 1, 1]
 
 
 def test_load_generation_rows_from_multiple_files(tmp_path):
