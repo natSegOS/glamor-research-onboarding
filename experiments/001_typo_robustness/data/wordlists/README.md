@@ -19,13 +19,26 @@ making the classification non-reproducible and non-citable.  SCOWL's boundary
 is stable, pre-registrable, and citable (cite the specific version SHA recorded
 in `PROVENANCE.json`).
 
-The vocabulary is scoped to a single dialect (`english` + `american` +
-`special`, `build_dictionary.py`'s default) rather than merging every SCOWL
-dialect together.  This mirrors SCOWL's own `mk-list` tool, whose documented
-usage is "the `english` spelling category ... as well as one of `american`,
-`british`, ... `australian`" — never several at once — so the resulting list
-is recognizable as a standard single-dialect SCOWL bundle, not a bespoke
-merge.
+The vocabulary is scoped to a single dialect (`english` + `american`,
+`build_dictionary.py`'s default) rather than merging every SCOWL dialect
+together — never several dialects at once, per SCOWL's own `mk-list` tool.
+
+Unlike `mk-list`'s default packaging, only the **`words`** sub-category is
+merged — not `upper` (capitalised/proper-noun forms), `proper-names`,
+`abbreviations`, `contractions`, or the `special` category (`hacker` jargon,
+`roman-numerals`). Those sub-categories exist in SCOWL so a spell-checker
+doesn't flag "Mr.", "TCP", or "IV" as misspelled — a different question from
+what `is_word` needs to answer (is this edited token a real word a reader
+would recognise as distinct and meaningful, the check that separates Regime A
+from Regime B). Including them inflates false "landed on a real word"
+rejections in Regime A and would let Regime B accept a shift into an
+abbreviation or proper name as if it were a context-recoverable real-word
+substitution: at size band 60, the full `mk-list` bundle counts 100% of all
+single letters, 51.8% of two-letter strings, and 7.3% of three-letter
+strings as "real words," almost entirely from lower-cased abbreviations and
+roman numerals. Restricting to `words` keeps every citability/reproducibility
+property of the SCOWL choice (still the sole source, still one dialect, still
+SHA-pinned in `PROVENANCE.json`) while matching the actual construct.
 
 ### Build the pinned dictionary (one-time step)
 
