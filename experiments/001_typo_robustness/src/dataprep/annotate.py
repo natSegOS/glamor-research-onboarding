@@ -54,7 +54,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -66,6 +68,24 @@ from enums import (
     UniversalDependenciesClosedClassPartOfSpeechTag,
     UniversalDependenciesRelationLabel,
 )
+from tasks.reasoning import (
+    FRACTION_WORDS,
+    VERBAL_MULTIPLIER_WORDS,
+    deserialize_parameters,
+)
+
+# Reverse lookups (value -> the English words that spell it out), so the
+# operand-coverage check below can recognise "thrice" as covering operand
+# value 3 or "third" as covering Fraction(1, 3), not just the literal digit
+# string. Built once from the same word lists reasoning.py uses to parse
+# GSM-Symbolic templates in the first place, so the two can never drift apart.
+_NUMBER_TO_WORDS: dict[int, set[str]] = {}
+for _word, _value in VERBAL_MULTIPLIER_WORDS.items():
+    _NUMBER_TO_WORDS.setdefault(_value, set()).add(_word)
+
+_FRACTION_TO_WORDS: dict[Fraction, set[str]] = {}
+for _word, _value in FRACTION_WORDS.items():
+    _FRACTION_TO_WORDS.setdefault(_value, set()).add(_word)
 
 # Dependency relation labels whose VERBs carry no independent propositional
 # content: they express modality, aspect, or predicate structure but do not
@@ -353,19 +373,57 @@ def compute_key_term_set(
 # Template operand cross-check (for synthetic reasoning items)
 # ---------------------------------------------------------------------------
 
+def _operand_candidate_strings(operand_value: int | float | Fraction) -> set[str]:
+    """Every textual form that would count as ``operand_value`` being present
+    in the text: the digit string, plus (for ints and fractions) any English
+    word spacy could plausibly have tagged instead — a spelled-out cardinal
+    ("three"), a multiplicative adverb ("thrice", "quadruple" — these are
+    grammatically adverbs, not NUM, so spaCy never tags them as a number
+    itself, but they still spell out the same operand value), or a fraction
+    word ("third", "two thirds").
+    """
+    candidates = {str(operand_value)}
+    if isinstance(operand_value, Fraction):
+        candidates |= _FRACTION_TO_WORDS.get(operand_value, set())
+        if operand_value.denominator == 1:
+            candidates.add(str(operand_value.numerator))
+    elif isinstance(operand_value, int):
+        candidates |= _NUMBER_TO_WORDS.get(operand_value, set())
+    return candidates
+
+
 def validate_template_operand_coverage(
         item,
         key_terms: list[str],
 ) -> list[str]:
-    """Assert that every numeric template operand appears in the key-term set.
+    """Assert that every numeric template operand appears in the key-term set,
+    in *some* textual form — digit string, spelled-out cardinal, multiplicative
+    adverb ("twice"/"thrice"/"quadruple"), or fraction word ("third").
 
     For synthetic reasoning items (those with a populated ``parameters`` dict),
     the answer-determining operand values are known by construction.  This
-    function checks that every operand digit string is covered by at least one
-    key term, logging violations as warnings rather than raising so that a
-    single edge case does not abort the full annotation run.
+    function checks that every *numeric* operand (``int``, ``float``, or
+    ``Fraction`` — ``item.parameters`` must already be deserialised, i.e. run
+    through ``deserialize_parameters``, so ``Fraction`` values are real
+    ``Fraction`` instances rather than the ``{"__fraction__": [n, d]}`` JSONL
+    encoding) is covered by at least one key term, logging violations as
+    warnings rather than raising so that a single edge case does not abort the
+    full annotation run.
 
-    Returns a list of violation strings (empty if all operands are covered).
+    Non-numeric parameters (a color, a name, a currency symbol, a free-text
+    phrase) are intentionally skipped: K_P(x) (design/02 §2.x) is not expected
+    to capture them — a plain color adjective, for instance, is not a
+    NOUN/PROPN/NUM or an entity — and Regime C's operand-swap only ever
+    considers ``int``-valued parameters
+    (``regimes.make_regime_c_reasoning_operand_swap``), so a non-numeric
+    parameter can never be a Regime C swap target regardless of key-term
+    coverage. Checking them anyway produced false-positive "violations" for
+    the overwhelming majority of cases (colors, multi-word phrases compared as
+    a whole against a list of single tokens, and undeserialised ``Fraction``
+    dict reprs that could never match any text).
+
+    Returns a list of violation strings (empty if all numeric operands are
+    covered).
 
     This cross-check implements the validation oracle described in the plan:
     the K_P(x) rule is the single definition; template operands are the ground
@@ -379,11 +437,18 @@ def validate_template_operand_coverage(
     violations: list[str] = []
 
     for operand_name, operand_value in parameters.items():
-        operand_string = str(operand_value)
-        if operand_string not in key_term_text:
+        if isinstance(operand_value, bool) or not isinstance(operand_value, (int, float, Fraction)):
+            continue  # not a numeric operand; out of scope for this oracle
+
+        candidates = _operand_candidate_strings(operand_value)
+        covered = any(
+            re.search(rf"\b{re.escape(candidate)}\b", key_term_text, re.IGNORECASE)
+            for candidate in candidates
+        )
+        if not covered:
             violations.append(
-                f"Operand '{operand_name}'={operand_string!r} "
-                f"not found in key_terms={key_terms!r} "
+                f"Operand '{operand_name}'={operand_value!r} not found in "
+                f"key_terms={key_terms!r} (checked forms: {sorted(candidates)!r}) "
                 f"for item {getattr(item, 'task_id', '?')!r}"
             )
 
@@ -511,7 +576,11 @@ def annotate_jsonl_file(
                 self.task_id = task_id
 
         fake_item = _FakeItem(
-            parameters=record.get("parameters", {}),
+            # deserialize_parameters restores Fraction values from their JSONL
+            # {"__fraction__": [n, d]} encoding; without this, every fraction
+            # operand compared against that literal dict-repr string could
+            # never match and would always be reported as a false violation.
+            parameters=deserialize_parameters(record.get("parameters", {})),
             task_id=record.get("task_id", "?"),
         )
         violations = validate_template_operand_coverage(fake_item, key_terms)
