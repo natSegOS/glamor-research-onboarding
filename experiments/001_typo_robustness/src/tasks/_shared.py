@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 
+from enums import Scope
+
 
 # ---------------------------------------------------------------------------
 # Option-letter alphabet for multiple-choice questions
@@ -41,6 +43,14 @@ OPTION_LETTERS: str = "ABCDEFGHIJ"
 INSTRUCTION_CONTENT_SEPARATOR: str = "\n\n"
 
 
+def content_text_of(task_item) -> str:
+    """The perturbable text of any task item: MultipleChoiceItem's
+    content_text (question + rendered options), or ReasoningItem's
+    question_text. Shared so every consumer that walks duck-typed task items
+    agrees on this."""
+    return getattr(task_item, "content_text", None) or task_item.question_text
+
+
 def build_full_prompt(instruction: str, content: str) -> str:
     """Assemble the full prompt string from an instruction block and a content block.
 
@@ -62,15 +72,15 @@ def build_instruction_and_content_scope_spans(instruction: str, content: str) ->
     region (design/02 §2.3, §3.2).  Computing the spans from the same separator
     constant that builds the prompt ensures the boundaries are always consistent.
 
-    Returns a dict with two keys:
-        "instruction" : (start, end) — the slice [0 : len(instruction)]
-        "content"     : (start, end) — the slice covering the content block
+    Returns a dict keyed by ``str(Scope.INSTRUCTION)`` and ``str(Scope.CONTENT)``
+    (the same keys the perturbation engine looks up), each mapped to a
+    (start, end) character span within the full prompt.
     """
     instruction_length = len(instruction)
     content_start = instruction_length + len(INSTRUCTION_CONTENT_SEPARATOR)
     return {
-        "instruction": (0, instruction_length),
-        "content": (content_start, content_start + len(content)),
+        str(Scope.INSTRUCTION): (0, instruction_length),
+        str(Scope.CONTENT): (content_start, content_start + len(content)),
     }
 
 

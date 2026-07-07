@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator, Optional, Sequence
 
-from enums import Decoding, Precision, INTERACTIONAL_FAILURE_STATUSES
+from enums import Decoding, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES
 import scoring
 
 
@@ -322,7 +322,7 @@ def run_shard(
             score_result = scoring.score(
                 generated_text, request.gold_answer, request.task_family)
             if (linguistic_pipeline is not None
-                    and score_result.parse_status.value == "unparseable"):
+                    and score_result.parse_status == ParseStatus.UNPARSEABLE):
                 # Upgrade UNPARSEABLE to CLARIFICATION/REFUSAL when the
                 # linguistic classifier finds evidence.
                 refined = scoring.classify_parse_status_with_linguistic_pipeline(

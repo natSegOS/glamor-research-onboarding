@@ -13,10 +13,11 @@ robustness work — that the "typo" silently changed the question — by separat
 
     Regime B  context-recoverable real-word shift
               The edit creates a different VALID word, but context still recovers
-              the intent. Example: "France" -> "Finance". This is the dominant
-              ASR error type (acoustic confusion), so Regime B is co-primary with
-              Regime A, and its main population comes from asr.py. The
-              synthetic builder here is for cross-validation.
+              the intent. Example: "France" -> "Finance". Motivated by ASR
+              acoustic confusion (the dominant real-world real-word-shift error
+              type), so the candidate pool includes phonetic homophones
+              ("weather"/"whether") alongside the orthographic DL band — see
+              make_regime_b_real_word_shift below.
 
     Regime C  meaning-changing control
               The edit changes the intended question, so the gold answer changes
@@ -68,6 +69,12 @@ _DEMO_WORDLIST_PATH = (
     Path(__file__).resolve().parent.parent
     / "data" / "wordlists" / "demo_wordlist.txt"
 )
+
+# Candidate operand deltas for Regime C's reasoning operand swap: a step size
+# (never zero, so the operand always changes) times a scale factor, giving a
+# spread of small-to-moderate magnitude changes to search over.
+_OPERAND_DELTA_STEPS: tuple[int, ...] = (-3, -2, -1, 1, 2, 3)
+_OPERAND_DELTA_SCALES: tuple[int, ...] = (1, 2, 5)
 
 
 def load_wordlist(path: Optional[Path] = None) -> set[str]:
@@ -209,8 +216,7 @@ def make_regime_a_filler_insertion(
 
 
 # ---------------------------------------------------------------------------
-# Regime B — context-recoverable real-word shift (synthetic cross-validation
-# arm; the primary Regime B population comes from asr.py).
+# Regime B — context-recoverable real-word shift.
 # ---------------------------------------------------------------------------
 
 def make_regime_b_real_word_shift(
@@ -278,6 +284,7 @@ def make_regime_b_real_word_shift(
 def make_regime_c_reasoning_operand_swap(
         reasoning_item,
         seed: int,
+        max_attempts: int = 32,
 ) -> tuple[str, list[Edit], dict]:
     """Swap one numeric operand in a templated reasoning item and RECOMPUTE the
     gold answer from the template's own answer function, so the new gold is
@@ -308,8 +315,9 @@ def make_regime_c_reasoning_operand_swap(
 
     new_value = None
     new_gold = None
-    for _ in range(32):
-        delta = random_generator.choice([-3, -2, -1, 1, 2, 3]) * random_generator.choice([1, 2, 5])
+    for _ in range(max_attempts):
+        delta = (random_generator.choice(_OPERAND_DELTA_STEPS)
+                 * random_generator.choice(_OPERAND_DELTA_SCALES))
         candidate_value = old_value + delta
         if candidate_value <= 0 or candidate_value == old_value:
             continue
@@ -364,6 +372,7 @@ def make_regime_c_reasoning_operand_swap(
 def make_regime_c_mcq_option_permutation(
         mcq_item,
         seed: int,
+        max_attempts: int = 32,
 ) -> tuple[str, list[Edit], dict]:
     """Permute the option labels of an MCQ item deterministically and return the
     perturbed content_text plus the updated gold letter.
@@ -399,7 +408,7 @@ def make_regime_c_mcq_option_permutation(
     new_options: Optional[dict] = None
     new_gold_letter: Optional[str] = None
 
-    for _ in range(32):
+    for _ in range(max_attempts):
         shuffled_texts = option_texts.copy()
         rng.shuffle(shuffled_texts)
         candidate_options = dict(zip(letters, shuffled_texts))

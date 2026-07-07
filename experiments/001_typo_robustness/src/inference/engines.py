@@ -31,6 +31,36 @@ _GREEDY_TEMPERATURE = 0.0
 _GREEDY_TOP_P       = 1.0
 
 
+def apply_chat_template(
+        tokenizer, user_message: str, system_message: Optional[str] = None) -> str:
+    """Wrap a user message (and optionally a system message) in a tokenizer's
+    own chat template (design/05 §5.7).
+
+    Standalone so it can be applied identically to a bare HF tokenizer (e.g.
+    for pre-flight context-length sizing in pipeline.experiment, before a vLLM
+    engine exists) and to the tokenizer vLLM ends up loading internally —
+    both are the same model's ``AutoTokenizer``, so the two never diverge.
+
+    ``system_message`` is included only when the tokenizer's chat template
+    declares a "system" role slot; otherwise it is prepended to the user turn
+    with a blank line so the instruction is never silently dropped.
+    """
+    messages = []
+    template_str = getattr(tokenizer, "chat_template", "") or ""
+    supports_system = "system" in template_str
+    if system_message:
+        if supports_system:
+            messages.append({"role": "system", "content": system_message})
+        else:
+            user_message = f"{system_message}\n\n{user_message}"
+    messages.append({"role": "user", "content": user_message})
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
 class VllmEngine:
     """Offline batched vLLM engine with continuous batching and prefix caching.
 
@@ -80,26 +110,9 @@ class VllmEngine:
     def apply_chat_template(
             self, user_message: str, system_message: Optional[str] = None) -> str:
         """Wrap a user message (and optionally a system message) in the model's
-        own chat template (design/05 §5.7).
-
-        ``system_message`` is included only when the model's tokenizer chat
-        template declares a "system" role slot; otherwise it is prepended to the
-        user turn with a blank line so the instruction is never silently dropped.
-        """
-        messages = []
-        template_str = getattr(self.tokenizer, "chat_template", "") or ""
-        supports_system = "system" in template_str
-        if system_message:
-            if supports_system:
-                messages.append({"role": "system", "content": system_message})
-            else:
-                user_message = f"{system_message}\n\n{user_message}"
-        messages.append({"role": "user", "content": user_message})
-        return self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+        own chat template (design/05 §5.7). See the module-level
+        ``apply_chat_template`` for the shared implementation."""
+        return apply_chat_template(self.tokenizer, user_message, system_message)
 
     def generate(self, prompts: Sequence[str], max_new_tokens: int) -> list[str]:
         """Generate greedily for a batch of ALREADY CHAT-TEMPLATED prompts.
@@ -153,10 +166,3 @@ class VllmEngine:
                 index = index_by_request_id.pop(output.request_id)
                 yield index, output.outputs[0].text
                 remaining -= 1
-
-
-def build_inference_engine(
-        specification: ModelSpecification,
-        **keyword_arguments,
-) -> VllmEngine:
-    return VllmEngine(specification, **keyword_arguments)

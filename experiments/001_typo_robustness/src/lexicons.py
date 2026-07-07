@@ -23,39 +23,27 @@ from typing import Sequence
 _LEXICONS_DIR = Path(__file__).resolve().parent.parent / "data" / "lexicons"
 
 
-def load_word_lexicon(name: str) -> frozenset[str]:
-    """Load a word lexicon by filename from data/lexicons/.
-
-    Returns a frozenset of lowercase stripped words. Lines beginning with '#'
-    and blank lines are ignored. Suitable for fast membership tests.
-    """
+def _read_lexicon_lines(name: str) -> list[str]:
+    """Read data/lexicons/<name>, stripped, skipping blank lines and '#' comments."""
     path = _LEXICONS_DIR / name
-    words: set[str] = set()
     with open(path, encoding="utf-8") as fh:
-        for raw_line in fh:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            words.add(line.lower())
+        stripped_lines = [raw_line.strip() for raw_line in fh]
+    return [line for line in stripped_lines if line and not line.startswith("#")]
+
+
+def load_word_lexicon(name: str) -> frozenset[str]:
+    """Load a word lexicon by filename from data/lexicons/ as a lowercased
+    frozenset, suitable for fast membership tests."""
+    words = frozenset(line.lower() for line in _read_lexicon_lines(name))
     if not words:
         raise ValueError(f"lexicon {name!r} is empty or contains only comments")
-    return frozenset(words)
+    return words
 
 
 def load_phrase_lexicon(name: str) -> list[str]:
-    """Load a phrase lexicon by filename from data/lexicons/.
-
-    Lines beginning with '#' and blank lines are ignored. Entries are returned
-    as a list of stripped strings in file order.
-    """
-    path = _LEXICONS_DIR / name
-    entries: list[str] = []
-    with open(path, encoding="utf-8") as fh:
-        for raw_line in fh:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            entries.append(line)
+    """Load a phrase lexicon by filename from data/lexicons/ as a list of
+    stripped strings in file order."""
+    entries = _read_lexicon_lines(name)
     if not entries:
         raise ValueError(f"lexicon {name!r} is empty or contains only comments")
     return entries

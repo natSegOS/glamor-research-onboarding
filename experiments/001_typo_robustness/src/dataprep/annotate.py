@@ -55,7 +55,9 @@ import hashlib
 import json
 import math
 import re
+import warnings
 
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Optional, Sequence
@@ -495,6 +497,16 @@ def annotate_item(
     }
 
 
+@dataclass
+class _OperandCoverageCheckItem:
+    """Minimal stand-in for a ReasoningItem, carrying just the two attributes
+    validate_template_operand_coverage reads (getattr(item, "parameters", {})
+    and item.task_id), so the JSONL batch path can reuse it without
+    constructing a full ReasoningItem."""
+    parameters: dict
+    task_id: str
+
+
 # ---------------------------------------------------------------------------
 # Batch annotation with provenance
 # ---------------------------------------------------------------------------
@@ -570,12 +582,7 @@ def annotate_jsonl_file(
         key_terms = compute_key_term_set(question_text, linguistic_pipeline)
 
         # Template operand cross-check (for synthetic items that carry parameters).
-        class _FakeItem:
-            def __init__(self, parameters, task_id):
-                self.parameters = parameters
-                self.task_id = task_id
-
-        fake_item = _FakeItem(
+        stand_in_item = _OperandCoverageCheckItem(
             # deserialize_parameters restores Fraction values from their JSONL
             # {"__fraction__": [n, d]} encoding; without this, every fraction
             # operand compared against that literal dict-repr string could
@@ -583,9 +590,8 @@ def annotate_jsonl_file(
             parameters=deserialize_parameters(record.get("parameters", {})),
             task_id=record.get("task_id", "?"),
         )
-        violations = validate_template_operand_coverage(fake_item, key_terms)
+        violations = validate_template_operand_coverage(stand_in_item, key_terms)
         if violations:
-            import warnings
             for violation_message in violations:
                 warnings.warn(violation_message, stacklevel=2)
             violation_count += len(violations)
@@ -706,9 +712,9 @@ def build_annotation_provenance_record(
         },
         "annotation_results": [
             {
-                "input_path": str(p),
+                "input_path": str(input_path),
                 **summary,
             }
-            for p, summary in zip(input_paths, result_summaries)
+            for input_path, summary in zip(input_paths, result_summaries)
         ],
     }

@@ -43,11 +43,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
+from enums import JudgeClassification, JudgeConfidence, SemanticClass
+from tasks._shared import INSTRUCTION_CONTENT_SEPARATOR
+
 
 PROMPT_TEMPLATE_VERSION = "v1"
 
-_VALID_CLASSIFICATIONS = frozenset({"A", "B", "C", "not_applicable"})
-_VALID_CONFIDENCES = frozenset({"high", "medium", "low"})
+_VALID_CLASSIFICATIONS = frozenset(JudgeClassification)
+_VALID_CONFIDENCES = frozenset(JudgeConfidence)
 
 _JSON_BLOCK_PATTERN = re.compile(r'\{[^{}]*\}', re.DOTALL)
 
@@ -100,8 +103,8 @@ class JudgeDecision:
     perturbed_text: str
     claimed_regime: str
 
-    classification: Optional[str] = None
-    confidence: Optional[str] = None
+    classification: Optional[JudgeClassification] = None
+    confidence: Optional[JudgeConfidence] = None
     rationale: Optional[str] = None
     parse_failed: bool = False
     raw_response: str = ""
@@ -109,7 +112,7 @@ class JudgeDecision:
     def agrees_with_claimed_regime(self) -> Optional[bool]:
         """True if the judge classification matches the claimed regime, False if
         it disagrees, None if the classification is not_applicable or missing."""
-        if self.classification in (None, "not_applicable"):
+        if self.classification in (None, JudgeClassification.NOT_APPLICABLE):
             return None
         return self.classification == self.claimed_regime
 
@@ -208,7 +211,9 @@ def _build_judge_prompt(
     )
 
 
-def _parse_judge_response(raw_response: str) -> tuple[Optional[str], Optional[str], Optional[str], bool]:
+def _parse_judge_response(
+        raw_response: str,
+) -> tuple[Optional[JudgeClassification], Optional[JudgeConfidence], Optional[str], bool]:
     """Extract classification, confidence, rationale from the raw response.
 
     Returns (classification, confidence, rationale, parse_failed).
@@ -230,7 +235,7 @@ def _parse_judge_response(raw_response: str) -> tuple[Optional[str], Optional[st
     if classification not in _VALID_CLASSIFICATIONS:
         return None, None, None, True
     if confidence not in _VALID_CONFIDENCES:
-        confidence = "low"
+        confidence = JudgeConfidence.LOW
 
     return classification, confidence, str(rationale) if rationale else None, False
 
@@ -304,9 +309,8 @@ def _extract_content_text(prompt: str) -> str:
     (Workstream 8 bug fix).  Falls back to the full prompt if no separator
     is found.
     """
-    separator = "\n\n"
-    if separator in prompt:
-        return prompt.split(separator, 1)[1]
+    if INSTRUCTION_CONTENT_SEPARATOR in prompt:
+        return prompt.split(INSTRUCTION_CONTENT_SEPARATOR, 1)[1]
     return prompt
 
 
@@ -343,7 +347,8 @@ def run_judge_on_sample(
         claimed_regime = row.get("r_semantic_class", "")
 
         # Skip Regime C MCQ: structurally guaranteed, no judge needed.
-        if skip_regime_c_mcq and claimed_regime == "C" and row.get("task_family", "").startswith("mmlu"):
+        if (skip_regime_c_mcq and claimed_regime == SemanticClass.C
+                and row.get("task_family", "").startswith("mmlu")):
             continue
 
         # Bug fix: runner writes the perturbed prompt as "prompt", not as

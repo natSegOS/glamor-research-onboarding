@@ -27,6 +27,7 @@ Smoke-test keys (unit tests only, no pre-fetched data required):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
 
 from enums import DatasetRole, TaskFamily
@@ -97,13 +98,15 @@ from tasks.multiple_choice import (
 # Registry
 # ---------------------------------------------------------------------------
 
-DATASET_REGISTRY: dict[str, DatasetSpec] = {
+# Each spec's key appears once here; DATASET_REGISTRY below indexes this tuple
+# by spec.key, so the key can never drift out of sync with its dict entry.
+_DATASET_SPECS: tuple[DatasetSpec, ...] = (
 
     # ------------------------------------------------------------------
     # Primary confirmatory datasets (N=600, JSONL from pre-fetch)
     # ------------------------------------------------------------------
 
-    "gsm_symbolic_jsonl": DatasetSpec(
+    DatasetSpec(
         key="gsm_symbolic_jsonl",
         loader=load_reasoning_jsonl,
         task_family=TaskFamily.GSM_SYMBOLIC_OFFICIAL,
@@ -113,7 +116,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
         hf_config="main",
         hf_split="test",
     ),
-    "mmlu_pro_jsonl": DatasetSpec(
+    DatasetSpec(
         key="mmlu_pro_jsonl",
         loader=load_multiple_choice_jsonl,
         task_family=TaskFamily.MMLU_PRO,
@@ -129,7 +132,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     # or surface-form brittleness — design/04 §4.8)
     # ------------------------------------------------------------------
 
-    "gsm8k_jsonl": DatasetSpec(
+    DatasetSpec(
         key="gsm8k_jsonl",
         loader=load_reasoning_jsonl,
         task_family=TaskFamily.GSM8K,
@@ -139,7 +142,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
         hf_config="main",
         hf_split="test",
     ),
-    "mmlu_jsonl": DatasetSpec(
+    DatasetSpec(
         key="mmlu_jsonl",
         loader=load_multiple_choice_jsonl,
         task_family=TaskFamily.MMLU,
@@ -154,7 +157,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     # Smoke-test / offline defaults (unit tests only)
     # ------------------------------------------------------------------
 
-    "gsm_symbolic_synthetic": DatasetSpec(
+    DatasetSpec(
         key="gsm_symbolic_synthetic",
         loader=generate_synthetic_reasoning_items,
         task_family=TaskFamily.GSM_SYMBOLIC_SYNTHETIC,
@@ -162,7 +165,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
         role=DatasetRole.SMOKE_TEST,
         hf_repo=None,
     ),
-    "mcq_demo": DatasetSpec(
+    DatasetSpec(
         key="mcq_demo",
         loader=make_demonstration_multiple_choice_items,
         task_family=TaskFamily.MCQ_DEMO,
@@ -170,7 +173,9 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
         role=DatasetRole.SMOKE_TEST,
         hf_repo=None,
     ),
-}
+)
+
+DATASET_REGISTRY: dict[str, DatasetSpec] = {spec.key: spec for spec in _DATASET_SPECS}
 
 
 def get_spec(key: str) -> DatasetSpec:
@@ -201,18 +206,18 @@ def call_loader(
         raise NotImplementedError(
             f"Dataset {spec.key!r} has no loader — add one to registry.py.")
 
-    from pathlib import Path as _Path
-
     # JSONL sources — load from pre-exported file; path required.
     if spec.key.endswith("_jsonl"):
         if not path:
             raise ValueError(
                 f"Dataset {spec.key!r} requires a 'path' entry in the dataset "
                 "config (the JSONL file produced by tools/build_task_items.py).")
+        # load_reasoning_jsonl accepts item_count (to skip parsing rows beyond
+        # what's needed); load_multiple_choice_jsonl does not, hence the retry.
         try:
-            items = spec.loader(_Path(path), task_family=spec.task_family, item_count=item_count)
+            items = spec.loader(Path(path), task_family=spec.task_family, item_count=item_count)
         except TypeError:
-            items = spec.loader(_Path(path), spec.task_family)
+            items = spec.loader(Path(path), spec.task_family)
         return items[:item_count]
 
     # Synthetic offline generator — positional (item_count, seed).
