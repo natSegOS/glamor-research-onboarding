@@ -7,7 +7,7 @@
 
 # Numerical/Statistical Dependencies
 numpy>=1.26
-scipy>=1.11]
+scipy
 statsmodels>=0.14
 pandas>=2.0
 
