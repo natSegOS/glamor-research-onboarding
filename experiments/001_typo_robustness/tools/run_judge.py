@@ -48,6 +48,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from judge import run_judge_on_sample
 
+# Below this agreement rate (and with enough judged pairs for the rate to be
+# meaningful), warn that the judge model/prompt version may need review.
+_AGREEMENT_RATE_WARNING_THRESHOLD = 80.0
+_MINIMUM_DECISIONS_FOR_AGREEMENT_WARNING = 10
+
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -168,9 +173,9 @@ def main() -> None:
     )
 
     # Partition into agreeing and flagged decisions.
-    agreed = [d for d in decisions if d.agrees_with_claimed_regime() is True]
-    flagged = [d for d in decisions if
-               d.agrees_with_claimed_regime() is False or d.parse_failed]
+    agreed = [decision for decision in decisions if decision.agrees_with_claimed_regime() is True]
+    flagged = [decision for decision in decisions if
+               decision.agrees_with_claimed_regime() is False or decision.parse_failed]
     unchecked = len(rows) - len(decisions)  # skipped (Regime C MCQ)
 
     # Write flagged pairs.
@@ -181,7 +186,7 @@ def main() -> None:
 
     # Print summary.
     agreement_rate = len(agreed) / len(decisions) * 100 if decisions else float("nan")
-    parse_failed_count = sum(1 for d in decisions if d.parse_failed)
+    parse_failed_count = sum(1 for decision in decisions if decision.parse_failed)
 
     print(
         f"\n[run_judge] Summary\n"
@@ -199,7 +204,8 @@ def main() -> None:
         f"  Flagged pairs are excluded from the generation queue pending human review.\n"
     )
 
-    if agreement_rate < 80.0 and len(decisions) > 10:
+    if (agreement_rate < _AGREEMENT_RATE_WARNING_THRESHOLD
+            and len(decisions) > _MINIMUM_DECISIONS_FOR_AGREEMENT_WARNING):
         print(
             f"  WARNING: agreement rate {agreement_rate:.1f}% is below 80%. "
             f"Check judge model and prompt version.",

@@ -35,7 +35,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from pipeline.experiment import ExperimentConfiguration, build_requests, ExclusionSidecar
+from pipeline.experiment import (
+    ExperimentConfiguration,
+    build_requests,
+    load_task_items,
+    ExclusionSidecar,
+)
 from pipeline.runner import DeterministicDummyEngine
 from regimes import make_is_word
 
@@ -89,9 +94,7 @@ def main() -> None:
 
     # Build all requests (no generation).
     print(f"[build_perturbations] loading task items ...")
-    from pipeline.experiment import load_task_items, load_asr_items_by_task
     task_items = load_task_items(configuration)
-    asr_items_by_task = load_asr_items_by_task(configuration.asr_items_path)
 
     print(f"[build_perturbations] building perturbation pairs ...")
     requests = build_requests(
@@ -100,13 +103,12 @@ def main() -> None:
         is_word,
         dummy_tokenizer,
         configuration.seed,
-        asr_items_by_task,
         exclusion_sidecar=exclusion_sidecar,
     )
 
     # Write pairs JSONL.
-    perturbed_requests = [r for r in requests if not r.is_clean]
-    clean_by_task = {r.task_id: r for r in requests if r.is_clean}
+    perturbed_requests = [request for request in requests if not request.is_clean]
+    clean_by_task = {request.task_id: request for request in requests if request.is_clean}
 
     print(f"[build_perturbations] writing {len(perturbed_requests)} pairs ...")
     with output_path.open("w") as fh:
@@ -119,13 +121,11 @@ def main() -> None:
                 "perturbed_text": request.prompt,
                 "gold_answer": str(request.gold_answer),
                 "claimed_regime": request.perturbation_state_vector.get("semantic_class", ""),
-                "condition_name": next(
-                    (str(v) for k, v in request.perturbation_state_vector.items()
-                     if k == "selection_policy"), ""),
+                "condition_name": str(request.perturbation_state_vector.get("selection_policy", "")),
                 "edit_budget": request.perturbation_state_vector.get("edit_budget", 0),
                 "edit_script": [
-                    e.to_dict() if hasattr(e, "to_dict") else e
-                    for e in request.edit_script
+                    edit.to_dict() if hasattr(edit, "to_dict") else edit
+                    for edit in request.edit_script
                 ],
                 **request.extra_fields,
             }

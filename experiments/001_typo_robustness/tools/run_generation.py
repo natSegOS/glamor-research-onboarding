@@ -29,8 +29,14 @@ import sys
 
 from pathlib import Path
 
-from pipeline import ExperimentConfiguration, run_experiment
-from inference import build_inference_engine
+from pipeline import (
+    ExperimentConfiguration,
+    build_requests,
+    load_task_items,
+    required_context_length,
+    run_experiment,
+)
+from inference import VllmEngine
 from inference import assert_revisions_pinned, get_model_specification
 from regimes import make_is_word
 
@@ -95,6 +101,32 @@ def _load_linguistic_pipeline(disabled: bool):
         return None
 
 
+def _measure_max_model_length(configuration, specification, is_word) -> int:
+    """Load the tokenizer up front and size vLLM's context window from the
+    request set this run will actually submit, rather than the model's native
+    (often 10x+ larger) default context.
+
+    Rebuilds the same requests ``run_experiment`` builds internally (cheap,
+    deterministic, CPU-only — see the shard_partition note in
+    run_experiment's docstring for the established precedent of redoing this
+    step rather than threading it through); no exclusion_sidecar is passed
+    here, so this pass logs nothing and cannot double-count exclusions.
+    """
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        specification.huggingface_identifier,
+        revision=specification.revision if specification.revision_is_pinned else None,
+    )
+    task_items = load_task_items(configuration)
+    requests = build_requests(
+        task_items, configuration.conditions, is_word, tokenizer, configuration.seed)
+    return required_context_length(
+        requests, tokenizer,
+        configuration.max_new_tokens_reasoning,
+        configuration.max_new_tokens_multiple_choice)
+
+
 def main():
     arguments = parse_arguments()
 
@@ -106,10 +138,14 @@ def main():
     if configuration.is_confirmatory:
         assert_revisions_pinned([specification])
 
-    engine = build_inference_engine(specification)
-
     dictionary_path = arguments.dictionary or _DEFAULT_DICTIONARY
     is_word = make_is_word(_load_dictionary(dictionary_path))
+
+    max_model_length = _measure_max_model_length(configuration, specification, is_word)
+    print(f"[run_generation] sized max_model_len={max_model_length} from the "
+          f"actual request set")
+
+    engine = VllmEngine(specification, max_model_length=max_model_length)
 
     print(f"[run_generation] loading spaCy pipeline ({_SPACY_MODEL_NAME}) ...")
     linguistic_pipeline = _load_linguistic_pipeline(arguments.no_spacy)

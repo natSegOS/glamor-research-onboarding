@@ -2,9 +2,8 @@
 
 Runs entirely offline — no GPU, no HuggingFace access needed. Loads synthetic
 reasoning items and the built-in demo MCQ items, applies every condition in the
-config file (ASR conditions are skipped — they require pre-built audio items),
-and writes a self-contained HTML file showing the original and perturbed text
-side-by-side with changes highlighted.
+config file, and writes a self-contained HTML file showing the original and
+perturbed text side-by-side with changes highlighted.
 
 Usage:
 
@@ -31,7 +30,7 @@ from pathlib import Path
 # Make src/ importable when run as `python tools/preview_perturbations.py`.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from enums import ConditionSource, SemanticClass
+from enums import SemanticClass
 from pipeline.experiment import DatasetConfig, ExperimentConfiguration, load_task_items
 from perturbation.engine import damerau_levenshtein_distance
 from perturbation import PerturbationError
@@ -129,9 +128,9 @@ def _build_condition_rows(
 # ---------------------------------------------------------------------------
 
 _REGIME_BADGE = {
-    "A": '<span class="badge bg-warning text-dark">Regime A — nonword typo</span>',
-    "B": '<span class="badge bg-info text-dark">Regime B — real-word shift</span>',
-    "C": '<span class="badge bg-secondary">Regime C — meaning change</span>',
+    str(SemanticClass.A): '<span class="badge bg-warning text-dark">Regime A — nonword typo</span>',
+    str(SemanticClass.B): '<span class="badge bg-info text-dark">Regime B — real-word shift</span>',
+    str(SemanticClass.C): '<span class="badge bg-secondary">Regime C — meaning change</span>',
 }
 
 
@@ -214,15 +213,8 @@ def _condition_card_html(condition, rows: list[dict], index: int) -> str:
 
 
 def _build_html(condition_cards: list[str], config_path: str,
-                item_count: int, seed: int, skipped_conditions: list[str]) -> str:
+                item_count: int, seed: int) -> str:
     cards_html = "\n".join(condition_cards)
-
-    skipped_note = ""
-    if skipped_conditions:
-        names = ", ".join(f"<code>{c}</code>" for c in skipped_conditions)
-        skipped_note = (
-            f'<div class="alert alert-secondary mb-3">'
-            f'<strong>Skipped (ASR — requires pre-built audio items):</strong> {names}</div>')
 
     return f"""<!doctype html>
 <html lang="en">
@@ -266,7 +258,6 @@ def _build_html(condition_cards: list[str], config_path: str,
     </p>
   </div>
 
-  {skipped_note}
   {cards_html}
 
 </div>
@@ -317,7 +308,6 @@ def main() -> None:
         DatasetConfig(key="gsm_symbolic_synthetic", item_count=args.items),
         DatasetConfig(key="mcq_demo"),
     ]
-    configuration.asr_items_path = None
 
     print("loading word list ...")
     wordlist = regimes.load_wordlist(args.dictionary)
@@ -328,14 +318,8 @@ def main() -> None:
     print(f"  {len(task_items)} total items")
 
     condition_cards: list[str] = []
-    skipped: list[str] = []
 
     for index, condition in enumerate(configuration.conditions):
-        if condition.source == ConditionSource.ASR:
-            skipped.append(condition.name)
-            print(f"  skip (ASR): {condition.name}")
-            continue
-
         print(f"  building: {condition.name} ...")
         rows = _build_condition_rows(condition, task_items, is_word, args.seed)
         condition_cards.append(
@@ -348,7 +332,6 @@ def main() -> None:
         config_path=str(args.config),
         item_count=args.items,
         seed=args.seed,
-        skipped_conditions=skipped,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

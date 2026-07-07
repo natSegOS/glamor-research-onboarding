@@ -9,7 +9,7 @@ Two views per condition cell:
             correctness, and parse status.
 
 Each global cell is a collapsible Bootstrap card. The local drill-down starts
-collapsed — click "Show items" to expand. ASR conditions are grouped separately.
+collapsed — click "Show items" to expand.
 
 Usage:
 
@@ -42,7 +42,7 @@ from analysis.results import (
     group_pairs_into_cells,
 )
 from analysis import statistics
-from enums import FragmentationStratum
+from enums import FragmentationStratum, ParseStatus, SemanticClass
 from pipeline.runner import load_generation_rows
 
 
@@ -139,7 +139,7 @@ def _items_table_html(pairs_with_data: list[dict], items_id: str) -> str:
 
         parse_status = row.get("parse_status", "")
         parse_badge = ""
-        if parse_status == "valid":
+        if parse_status == ParseStatus.VALID:
             parse_badge = '<span class="badge bg-light text-dark border">valid</span>'
         elif parse_status:
             parse_badge = f'<span class="badge bg-warning text-dark">{html_module.escape(parse_status)}</span>'
@@ -212,25 +212,25 @@ def _items_table_html(pairs_with_data: list[dict], items_id: str) -> str:
 
 def _frag_strata_html(pairs_with_data: list[dict]) -> str:
     """Build a two-row Low / High fragmentation breakdown for one cell."""
-    low_clean = [r["clean_is_correct"] for r in pairs_with_data
-                 if r.get("fragmentation_stratum") == FragmentationStratum.LOW]
-    low_perturbed = [r["perturbed_is_correct"] for r in pairs_with_data
-                     if r.get("fragmentation_stratum") == FragmentationStratum.LOW]
-    high_clean = [r["clean_is_correct"] for r in pairs_with_data
-                  if r.get("fragmentation_stratum") == FragmentationStratum.HIGH]
-    high_perturbed = [r["perturbed_is_correct"] for r in pairs_with_data
-                      if r.get("fragmentation_stratum") == FragmentationStratum.HIGH]
+    low_clean = [row["clean_is_correct"] for row in pairs_with_data
+                 if row.get("fragmentation_stratum") == FragmentationStratum.LOW]
+    low_perturbed = [row["perturbed_is_correct"] for row in pairs_with_data
+                     if row.get("fragmentation_stratum") == FragmentationStratum.LOW]
+    high_clean = [row["clean_is_correct"] for row in pairs_with_data
+                  if row.get("fragmentation_stratum") == FragmentationStratum.HIGH]
+    high_perturbed = [row["perturbed_is_correct"] for row in pairs_with_data
+                      if row.get("fragmentation_stratum") == FragmentationStratum.HIGH]
 
-    def _mini_summary(clean_c, pert_c):
-        if not clean_c:
+    def _mini_summary(clean_correctness, perturbed_correctness):
+        if not clean_correctness:
             return "(no data)", "—", "—"
-        n = len(clean_c)
-        ccf = statistics.clean_conditioned_failure(clean_c, pert_c)
-        delta = statistics.paired_degradation(clean_c, pert_c)
-        return f"n={n}", _pct(ccf), _pct(delta)
+        pair_count = len(clean_correctness)
+        ccf = statistics.clean_conditioned_failure(clean_correctness, perturbed_correctness)
+        delta = statistics.paired_degradation(clean_correctness, perturbed_correctness)
+        return f"n={pair_count}", _pct(ccf), _pct(delta)
 
-    l_n, l_ccf, l_delta = _mini_summary(low_clean, low_perturbed)
-    h_n, h_ccf, h_delta = _mini_summary(high_clean, high_perturbed)
+    low_pair_count, low_ccf, low_delta = _mini_summary(low_clean, low_perturbed)
+    high_pair_count, high_ccf, high_delta = _mini_summary(high_clean, high_perturbed)
 
     if not low_clean and not high_clean:
         return ""
@@ -243,11 +243,11 @@ def _frag_strata_html(pairs_with_data: list[dict]) -> str:
               <th class="small py-0">CCF</th><th class="small py-0">Δ</th></tr></thead>
             <tbody>
               <tr><td><span class="badge bg-light text-dark border">Low</span></td>
-                <td class="small">{l_n}</td>
-                <td class="small">{l_ccf}</td><td class="small">{l_delta}</td></tr>
+                <td class="small">{low_pair_count}</td>
+                <td class="small">{low_ccf}</td><td class="small">{low_delta}</td></tr>
               <tr><td><span class="badge bg-info text-dark">High</span></td>
-                <td class="small">{h_n}</td>
-                <td class="small">{h_ccf}</td><td class="small">{h_delta}</td></tr>
+                <td class="small">{high_pair_count}</td>
+                <td class="small">{high_ccf}</td><td class="small">{high_delta}</td></tr>
             </tbody>
           </table>
         </div>"""
@@ -258,10 +258,10 @@ def _frag_strata_html(pairs_with_data: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 _REGIME_BADGE = {
-    "A": '<span class="badge bg-warning text-dark">Regime A — nonword typo</span>',
-    "B": '<span class="badge bg-info text-dark">Regime B — real-word shift</span>',
-    "C": '<span class="badge bg-secondary">Regime C — meaning change</span>',
-    "clean": '<span class="badge bg-light text-dark border">clean baseline</span>',
+    str(SemanticClass.A): '<span class="badge bg-warning text-dark">Regime A — nonword typo</span>',
+    str(SemanticClass.B): '<span class="badge bg-info text-dark">Regime B — real-word shift</span>',
+    str(SemanticClass.C): '<span class="badge bg-secondary">Regime C — meaning change</span>',
+    str(SemanticClass.CLEAN): '<span class="badge bg-light text-dark border">clean baseline</span>',
 }
 
 
@@ -278,28 +278,27 @@ def _cell_card_html(summary: dict, pairs_with_data: list[dict], card_index: int)
     model = str(summary.get("model_revision", ""))
 
     badge = _REGIME_BADGE.get(regime, f'<span class="badge bg-dark">{regime}</span>')
-    is_asr = "asr" in operation.lower()
-    budget_label = "measured DL" if is_asr else f"k={budget}"
+    budget_label = f"k={budget}"
 
-    n = summary.get("n", 0)
-    p = summary.get("mcnemar_p_value")
-    sig = _significance_badge(p)
+    pair_count = summary.get("n", 0)
+    p_value = summary.get("mcnemar_p_value")
+    significance = _significance_badge(p_value)
 
     # 2×2 counts
-    bc = summary.get("both_correct", 0)
-    bk = summary.get("broke", 0)
-    rv = summary.get("recovered", 0)
-    bw = summary.get("both_wrong", 0)
+    both_correct = summary.get("both_correct", 0)
+    broke = summary.get("broke", 0)
+    recovered = summary.get("recovered", 0)
+    both_wrong = summary.get("both_wrong", 0)
 
     table_2x2 = f"""<table class="table table-bordered table-sm mb-0" style="width:auto;font-size:.8rem">
           <thead class="table-light"><tr><th></th><th>pert ✓</th><th>pert ✗</th></tr></thead>
           <tbody>
             <tr><th>clean ✓</th>
-              <td class="bg-success bg-opacity-10">{bc}</td>
-              <td class="bg-danger bg-opacity-10"><strong>{bk}</strong></td></tr>
+              <td class="bg-success bg-opacity-10">{both_correct}</td>
+              <td class="bg-danger bg-opacity-10"><strong>{broke}</strong></td></tr>
             <tr><th>clean ✗</th>
-              <td class="bg-info bg-opacity-10">{rv}</td>
-              <td>{bw}</td></tr>
+              <td class="bg-info bg-opacity-10">{recovered}</td>
+              <td>{both_wrong}</td></tr>
           </tbody>
         </table>"""
 
@@ -329,7 +328,7 @@ def _cell_card_html(summary: dict, pairs_with_data: list[dict], card_index: int)
 
           <div>
             <div class="text-muted small mb-1">n pairs</div>
-            <div class="fs-5 fw-bold">{n}</div>
+            <div class="fs-5 fw-bold">{pair_count}</div>
           </div>
           <div>
             <div class="text-muted small mb-1">CCF</div>
@@ -341,7 +340,7 @@ def _cell_card_html(summary: dict, pairs_with_data: list[dict], card_index: int)
           </div>
           <div>
             <div class="text-muted small mb-1">McNemar p</div>
-            <div class="fw-bold">{_p_value(p)} {sig}</div>
+            <div class="fw-bold">{_p_value(p_value)} {significance}</div>
           </div>
           <div>
             <div class="text-muted small mb-1">discordant rate</div>
@@ -374,13 +373,10 @@ def _cell_card_html(summary: dict, pairs_with_data: list[dict], card_index: int)
 
 def _build_page(
         keyboard_sections: list[str],
-        asr_sections: list[str],
         meta: dict,
 ) -> str:
     keyboard_html = "\n".join(keyboard_sections) if keyboard_sections else (
         '<p class="text-muted">No keyboard-typo conditions found.</p>')
-    asr_html = "\n".join(asr_sections) if asr_sections else (
-        '<p class="text-muted">No ASR conditions found (set asr_items_path in the config).</p>')
 
     source_files = html_module.escape(", ".join(meta.get("source_files", [])))
     n_pairs = meta.get("n_pairs", 0)
@@ -434,10 +430,6 @@ def _build_page(
   <h4 class="border-bottom pb-2 mb-3">Keyboard-typo arm</h4>
   {keyboard_html}
 
-  <!-- === ASR ARM === -->
-  <h4 class="border-bottom pb-2 mb-3 mt-5">ASR arm</h4>
-  {asr_html}
-
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmWLzEOA6DpPOHFPk+WRZ4M9wEMo"
@@ -449,10 +441,6 @@ def _build_page(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
-def _is_asr_cell(summary: dict) -> bool:
-    return "asr" in str(summary.get("r_operation", "")).lower()
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -467,8 +455,8 @@ def main() -> None:
         "--output", required=True, type=Path,
         help="output HTML file path (e.g. results/pilot/report.html)")
     parser.add_argument(
-        "--bootstrap-resamples", type=int, default=10_000,
-        help="BCa bootstrap resamples (default: 10000)")
+        "--bootstrap-resamples", type=int, default=statistics.DEFAULT_BOOTSTRAP_RESAMPLES,
+        help=f"BCa bootstrap resamples (default: {statistics.DEFAULT_BOOTSTRAP_RESAMPLES})")
     parser.add_argument(
         "--seed", type=int, default=1729,
         help="random seed for bootstrap (default: 1729)")
@@ -503,7 +491,7 @@ def main() -> None:
     perturbed_by_key: dict = {}
     for row in perturbed_rows:
         key = (row["model_revision"], row["task_id"],
-               tuple(row.get(k) for k in CELL_DIMENSION_KEYS))
+               tuple(row.get(dimension_key) for dimension_key in CELL_DIMENSION_KEYS))
         perturbed_by_key[key] = row
 
     # Group pairs by cell_key, augmented with per-row data.
@@ -535,34 +523,29 @@ def main() -> None:
     print("building HTML ...")
 
     keyboard_cards: list[str] = []
-    asr_cards: list[str] = []
-    unique_models = {s.get("model_revision") for s in cell_summaries}
+    unique_models = {summary.get("model_revision") for summary in cell_summaries}
 
     # Sort: by model, then task, then regime, then budget.
-    def _sort_key(s):
+    def _sort_key(summary):
         return (
-            str(s.get("model_revision", "")),
-            str(s.get("task_family", "")),
-            str(s.get("r_semantic_class", "")),
-            str(s.get("r_selection_policy", "")),
-            str(s.get("r_scope", "")),
-            int(s.get("r_edit_budget") or 0),
+            str(summary.get("model_revision", "")),
+            str(summary.get("task_family", "")),
+            str(summary.get("r_semantic_class", "")),
+            str(summary.get("r_selection_policy", "")),
+            str(summary.get("r_scope", "")),
+            int(summary.get("r_edit_budget") or 0),
         )
 
     for card_index, summary in enumerate(sorted(cell_summaries, key=_sort_key)):
-        cell_key = tuple(summary.get(k) for k in CELL_DIMENSION_KEYS)
-        pwd = pairs_with_data_by_cell.get(cell_key, [])
-        card_html = _cell_card_html(summary, pwd, card_index)
-        if _is_asr_cell(summary):
-            asr_cards.append(card_html)
-        else:
-            keyboard_cards.append(card_html)
+        cell_key = tuple(summary.get(dimension_key) for dimension_key in CELL_DIMENSION_KEYS)
+        pairs_with_data = pairs_with_data_by_cell.get(cell_key, [])
+        card_html = _cell_card_html(summary, pairs_with_data, card_index)
+        keyboard_cards.append(card_html)
 
     page_html = _build_page(
         keyboard_sections=keyboard_cards,
-        asr_sections=asr_cards,
         meta={
-            "source_files": [str(p) for p in args.generations],
+            "source_files": [str(path) for path in args.generations],
             "n_rows": len(rows),
             "n_pairs": len(pairs),
             "n_models": len(unique_models),
