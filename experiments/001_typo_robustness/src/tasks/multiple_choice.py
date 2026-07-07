@@ -18,6 +18,7 @@ MMLU (Hendrycks et al., ICLR 2021, arXiv:2009.03300): standard 4-option MCQ.
 from __future__ import annotations
 
 import json
+import random
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -177,8 +178,6 @@ def load_official_mmlu_pro(
     if None, all subjects are included. Items are shuffled deterministically.
     """
 
-    import random as _random
-
     load_dataset = _require_datasets_package()
     dataset = load_dataset("TIGER-Lab/MMLU-Pro", revision=dataset_revision, split="test")
     records = list(dataset)
@@ -186,7 +185,7 @@ def load_official_mmlu_pro(
     if categories:
         records = [record for record in records if record.get("category") in categories]
 
-    _random.Random(seed).shuffle(records)
+    random.Random(seed).shuffle(records)
 
     items: list[MultipleChoiceItem] = []
 
@@ -230,8 +229,6 @@ def load_official_mmlu(
     ``categories`` optionally restricts to a list of MMLU subject strings.
     """
 
-    import random as _random
-
     load_dataset = _require_datasets_package()
     dataset = load_dataset("cais/mmlu", "all", revision=dataset_revision, split="test")
     records = list(dataset)
@@ -239,7 +236,7 @@ def load_official_mmlu(
     if categories:
         records = [record for record in records if record.get("subject") in categories]
 
-    _random.Random(seed).shuffle(records)
+    random.Random(seed).shuffle(records)
 
     items: list[MultipleChoiceItem] = []
 

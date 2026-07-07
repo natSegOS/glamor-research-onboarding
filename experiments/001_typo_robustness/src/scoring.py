@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from enums import (
+    ExtractionTier,
     ParseStatus,
     INTERACTIONAL_FAILURE_STATUSES,
     REASONING_FAMILIES,
@@ -101,14 +102,7 @@ class ScoreResult:
     parsed_answer: Optional[str]
     is_correct: int                    # 1 or 0
     parse_status: ParseStatus
-    # Which extraction tier fired (Workstream 4). One of:
-    #   "hash_delimited"        — #### <number> pattern (reasoning)
-    #   "last_number_fallback"  — any number in text (reasoning fallback)
-    #   "mcq_explicit_marker"   — "answer is X" / "Answer: X"
-    #   "mcq_line_leading"      — letter at start of line
-    #   "mcq_standalone_sentence" — letter in last sentence
-    #   "unparseable"           — nothing found
-    extraction_tier: str = "unparseable"
+    extraction_tier: ExtractionTier = ExtractionTier.UNPARSEABLE
 
 
 def normalize_number(raw: str) -> Optional[float]:
@@ -123,31 +117,30 @@ def normalize_number(raw: str) -> Optional[float]:
         return None
 
 
-def extract_reasoning_answer(generation: str) -> tuple[Optional[float], str]:
+def extract_reasoning_answer(generation: str) -> tuple[Optional[float], ExtractionTier]:
     """Extract the final numeric answer from a reasoning generation.
 
     Priority (design/04 §4.2, matching the GSM-Symbolic / GSM8K answer format):
     the number after the LAST '####' delimiter, else the LAST number anywhere in
-    the text.
-
-    Returns (parsed_answer, extraction_tier) where extraction_tier is one of
-    "hash_delimited", "last_number_fallback", or "unparseable".
+    the text. Returns (parsed_answer, extraction_tier).
     """
     hash_delimited_matches = _HASH_DELIMITED_ANSWER.findall(generation)
     if hash_delimited_matches:
         value = normalize_number(hash_delimited_matches[-1])
-        return value, ("hash_delimited" if value is not None else "unparseable")
+        return value, (ExtractionTier.HASH_DELIMITED if value is not None
+                        else ExtractionTier.UNPARSEABLE)
 
     any_number_matches = _ANY_NUMBER.findall(generation)
     if any_number_matches:
         value = normalize_number(any_number_matches[-1])
-        return value, ("last_number_fallback" if value is not None else "unparseable")
+        return value, (ExtractionTier.LAST_NUMBER_FALLBACK if value is not None
+                        else ExtractionTier.UNPARSEABLE)
 
-    return None, "unparseable"
+    return None, ExtractionTier.UNPARSEABLE
 
 
 def extract_multiple_choice_answer(
-        generation: str, option_count: int = 10) -> tuple[Optional[str], str]:
+        generation: str, option_count: int = 10) -> tuple[Optional[str], ExtractionTier]:
     """Extract the chosen option letter from an MCQ generation.
 
     Priority:
@@ -156,9 +149,7 @@ def extract_multiple_choice_answer(
       3. standalone valid letter in the **last sentence only** (restricted from
          the full generation to avoid picking up A–J letters in reasoning chains)
 
-    Returns (letter, extraction_tier) where extraction_tier is one of
-    "mcq_explicit_marker", "mcq_line_leading", "mcq_standalone_sentence", or
-    "unparseable".
+    Returns (letter, extraction_tier).
     """
     valid_letters = OPTION_LETTERS[:option_count]
 
@@ -167,23 +158,23 @@ def extract_multiple_choice_answer(
         if letter.upper() in valid_letters
     ]
     if explicit_marker_hits:
-        return explicit_marker_hits[-1], "mcq_explicit_marker"
+        return explicit_marker_hits[-1], ExtractionTier.MCQ_EXPLICIT_MARKER
 
     line_leading_hits = [
         letter.upper() for letter in _MCQ_LINE_LEADING_LETTER.findall(generation)
         if letter.upper() in valid_letters
     ]
     if line_leading_hits:
-        return line_leading_hits[-1], "mcq_line_leading"
+        return line_leading_hits[-1], ExtractionTier.MCQ_LINE_LEADING
 
     # Restrict standalone scan to last sentence to avoid spurious letter
     # matches earlier in reasoning chains (Workstream 4, MMLU-Pro 10-option).
     last_sentence = generation.rsplit(".", 1)[-1]
     standalone_hits = re.findall(rf"\b([{valid_letters}])\b", last_sentence)
     if standalone_hits:
-        return standalone_hits[-1].upper(), "mcq_standalone_sentence"
+        return standalone_hits[-1].upper(), ExtractionTier.MCQ_STANDALONE_SENTENCE
 
-    return None, "unparseable"
+    return None, ExtractionTier.UNPARSEABLE
 
 
 def classify_parse_status(parsed_answer) -> ParseStatus:
@@ -314,7 +305,7 @@ def score_reasoning(generation: str, gold_answer: float, tolerance: float = 1e-6
         # Conservative: an interactional non-answer counts against accuracy even
         # if a number happens to appear elsewhere in the text.
         recorded_answer = None if parsed_answer is None else str(parsed_answer)
-        return ScoreResult(recorded_answer, 0, parse_status, "unparseable")
+        return ScoreResult(recorded_answer, 0, parse_status, ExtractionTier.UNPARSEABLE)
 
     if parsed_answer is None:
         return ScoreResult(None, 0, parse_status, tier)
@@ -334,7 +325,7 @@ def score_multiple_choice(generation: str, gold_letter: str, option_count: int =
     parse_status = classify_parse_status(parsed_answer)
 
     if parse_status in INTERACTIONAL_FAILURE_STATUSES:
-        return ScoreResult(parsed_answer, 0, parse_status, "unparseable")
+        return ScoreResult(parsed_answer, 0, parse_status, ExtractionTier.UNPARSEABLE)
 
     if parsed_answer is None:
         return ScoreResult(None, 0, parse_status, tier)

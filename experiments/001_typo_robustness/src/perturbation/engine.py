@@ -60,7 +60,6 @@ SELECTION_POLICIES: tuple[SelectionPolicy, ...] = (
     SelectionPolicy.REAL_WORD,          # whole-word substitution to a valid-word neighbor
     SelectionPolicy.WHITESPACE,         # dormant: split/merge (kept for old-JSONL replay)
     SelectionPolicy.FILLER_WORD,        # discourse-particle insertion (Workstream 3)
-    SelectionPolicy.ASR_TRANSCRIPTION,  # produced by asr.py, never by this engine
 )
 
 # Ordered tuple of discourse particle values for random selection.  The source
@@ -417,10 +416,6 @@ def perturb(
         raise PerturbationError(f"unknown selection_policy {selection_policy!r}")
     if scope not in PERTURBATION_SCOPES:
         raise PerturbationError(f"unknown scope {scope!r}")
-
-    if selection_policy == SelectionPolicy.ASR_TRANSCRIPTION:
-        raise PerturbationError(
-            "asr_transcription items are produced by asr.py, not perturb()")
 
     if edit_budget < 0:
         raise PerturbationError("edit_budget must be >= 0")
@@ -799,22 +794,22 @@ def apply_edit_script(original_text: str, edits: Sequence) -> str:
         operation = fields["operation"]
         index = fields["index"]
 
-        if operation == "substitute":
+        if operation == Operation.SUBSTITUTE:
             assert current_text[index] == fields["before"], f"reconstruction mismatch at {index}"
             current_text = current_text[:index] + fields["after"] + current_text[index + 1:]
 
-        elif operation == "insert":
+        elif operation == Operation.INSERT:
             current_text = current_text[:index] + fields["after"] + current_text[index:]
 
-        elif operation == "delete":
+        elif operation == Operation.DELETE:
             assert current_text[index] == fields["before"], f"reconstruction mismatch at {index}"
             current_text = current_text[:index] + current_text[index + 1:]
 
-        elif operation == "transpose":
+        elif operation == Operation.TRANSPOSE:
             assert current_text[index:index + 2] == fields["before"], f"reconstruction mismatch at {index}"
             current_text = current_text[:index] + fields["after"] + current_text[index + 2:]
 
-        elif operation == "word_substitute":
+        elif operation == Operation.WORD_SUBSTITUTE:
             length_before = len(fields["before"])
             assert current_text[index:index + length_before] == fields["before"], \
                 f"reconstruction mismatch at {index}"

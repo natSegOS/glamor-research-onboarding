@@ -32,7 +32,6 @@ class Operation(_StrEnum):
     INSERT = "insert"
     TRANSPOSE = "transpose"
     WORD_SUBSTITUTE = "word_substitute"   # whole-word swap (Regime B / Regime C)
-    ASR = "asr"                           # ASR arm tag, not an engine primitive
     NONE = "none"                         # sentinel for clean (unperturbed) rows
 
 
@@ -46,9 +45,6 @@ class SelectionPolicy(_StrEnum):
     # Intent is preserved definitionally (particles carry no propositional content);
     # no rejection sampling needed (Workstream 3). Novel versus prior work.
     FILLER_WORD = "filler_word"
-    ASR_TRANSCRIPTION = "asr_transcription"   # recognised by engine but rejected
-    ASR_CLEAN = "asr_clean"                   # produced by asr.py (quiet condition)
-    ASR_NOISY = "asr_noisy"                   # produced by asr.py (noisy condition)
     NONE = "none"                             # sentinel for clean rows
 
 
@@ -148,6 +144,18 @@ INTERACTIONAL_FAILURE_STATUSES: frozenset[ParseStatus] = frozenset({
 })
 
 
+class ExtractionTier(_StrEnum):
+    """Which answer-extraction rule fired, in priority order per task type
+    (Workstream 4; design/04 §4.2). Recorded on every generation row so a
+    reviewer can audit which surface pattern a scored answer came from."""
+    HASH_DELIMITED = "hash_delimited"                    # "#### <number>" (reasoning)
+    LAST_NUMBER_FALLBACK = "last_number_fallback"         # any number in text (reasoning fallback)
+    MCQ_EXPLICIT_MARKER = "mcq_explicit_marker"           # "answer is X" / "Answer: X"
+    MCQ_LINE_LEADING = "mcq_line_leading"                 # letter at start of line
+    MCQ_STANDALONE_SENTENCE = "mcq_standalone_sentence"   # letter in last sentence
+    UNPARSEABLE = "unparseable"                           # nothing found
+
+
 # ---------------------------------------------------------------------------
 # Tokenization vocabulary
 # ---------------------------------------------------------------------------
@@ -165,7 +173,6 @@ class FragmentationStratum(_StrEnum):
 class ConditionSource(_StrEnum):
     """How a perturbation condition's samples are produced."""
     SYNTHETIC = "synthetic"   # perturbation engine
-    ASR = "asr"               # pre-built AsrItems
 
 
 class Precision(_StrEnum):
@@ -202,6 +209,57 @@ class DatasetRole(_StrEnum):
     PRIMARY = "primary"
     CONTAMINATION_CONTRAST = "contamination_contrast"
     SMOKE_TEST = "smoke_test"
+
+
+# ---------------------------------------------------------------------------
+# Statistics vocabulary
+# ---------------------------------------------------------------------------
+
+class McNemarTestMethod(_StrEnum):
+    """Which McNemar variant produced a McNemarResult (design/06 §6.4)."""
+    EXACT_MIDP = "exact_midp"
+    ASYMPTOTIC = "asymptotic"
+
+
+class SampleSizeMethod(_StrEnum):
+    """Which formula mcnemar_sample_size used (design/06 §6.3)."""
+    CONNOR = "connor"
+    SIMPLE = "simple"
+
+
+class ConvergenceMethod(_StrEnum):
+    """Which step of the mixed-effects convergence fallback ladder succeeded
+    (design/06 §6.6). Distinct from the ``method=`` kwarg passed to
+    statsmodels' own ``.fit()`` (e.g. "lbfgs" for the variational step) — this
+    is our result label, not the solver name."""
+    LAPLACE = "laplace"
+    VARIATIONAL = "variational"
+    GLM_APPROXIMATION = "glm_approximation"
+
+
+# ---------------------------------------------------------------------------
+# LLM-judge vocabulary
+# ---------------------------------------------------------------------------
+
+class JudgeClassification(_StrEnum):
+    """The regime-audit judge's classification of a perturbation pair (judge.py).
+
+    Shares its A/B/C values with SemanticClass by design (the judge is
+    classifying into the same three regimes) but is a distinct vocabulary: the
+    judge's own opinion, not the engine's internal state tag, and it adds
+    NOT_APPLICABLE for pairs too minor or ambiguous to classify.
+    """
+    A = "A"
+    B = "B"
+    C = "C"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class JudgeConfidence(_StrEnum):
+    """The judge's self-reported confidence in its classification (judge.py)."""
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
 
 
 # ---------------------------------------------------------------------------

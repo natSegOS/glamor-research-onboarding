@@ -6,9 +6,7 @@ This module consumes the JSONL rows written by pipeline.runner.run_shard and
 produces the analysis deliverables of design/06 §6.10 and design/08:
   - matched clean/perturbed pairs joined per (model_revision, task_id);
   - one statistics.summarize_cell block per reporting cell;
-  - the figures of design/08 §8.7, including the keyboard-vs-ASR degradation
-    profile that the latest review motivated (the two noise sources are the
-    study's two arms and deserve a direct side-by-side).
+  - the figures of design/08 §8.7.
 
 Every cell is keyed by the r_-prefixed perturbation-state fields that the runner
 writes, so the analysis dimensions and the logged dimensions cannot drift apart.
@@ -26,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
-from enums import ParseStatus, SelectionPolicy
+from enums import ParseStatus
 from analysis import statistics
 
 
@@ -94,7 +92,7 @@ def join_matched_pairs(rows: Sequence[dict]) -> list[MatchedPair]:
             perturbed_is_correct=int(perturbed_row["is_correct"]),
             clean_answer=clean_row.get("parsed_answer"),
             perturbed_answer=perturbed_row.get("parsed_answer"),
-            perturbed_parse_status=perturbed_row.get("parse_status", "valid"),
+            perturbed_parse_status=perturbed_row.get("parse_status", ParseStatus.VALID),
             cell_key=_cell_key(perturbed_row),
         ))
 
@@ -166,8 +164,7 @@ def summarize_all_cells(matched_pairs: Sequence[MatchedPair],
 
         # VALID-only sensitivity (Part 4).
         valid_pairs = [pair for pair in pairs
-                       if pair.perturbed_parse_status == ParseStatus.VALID.value
-                       or pair.perturbed_parse_status == ParseStatus.VALID]
+                       if pair.perturbed_parse_status == ParseStatus.VALID]
         if len(valid_pairs) >= 2:
             valid_clean = [pair.clean_is_correct for pair in valid_pairs]
             valid_perturbed = [pair.perturbed_is_correct for pair in valid_pairs]
@@ -248,63 +245,6 @@ def figure_clean_conditioned_failure_vs_edit_budget(
     axes.set_title("Typo-induced failure vs severity, by edit operation")
     if series_by_operation:
         axes.legend(title="operation")
-    figure.tight_layout()
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=150)
-    pyplot.close(figure)
-    return output_path
-
-
-def figure_keyboard_versus_asr_profile(
-        cell_summaries: Sequence[dict], output_path: Path) -> Optional[Path]:
-    """Side-by-side degradation profile for the two noise sources — keyboard
-    typos versus ASR transcription errors — the figure the latest review
-    motivated. Bars are mean paired degradation per model, grouped by source.
-    """
-    pyplot = _import_pyplot()
-    if pyplot is None:
-        return None
-
-    keyboard_policies = {SelectionPolicy.KEYBOARD_NEIGHBOR, SelectionPolicy.INFORMATIVE_WORD}
-    asr_policies = {SelectionPolicy.ASR_CLEAN, SelectionPolicy.ASR_NOISY}
-
-    degradation_by_model: dict = defaultdict(lambda: {"keyboard": [], "asr": []})
-    for summary in cell_summaries:
-        policy = summary.get("r_selection_policy")
-        model = summary.get("model_revision")
-        delta = summary.get("delta")
-        if model is None or delta is None:
-            continue
-        if policy in keyboard_policies:
-            degradation_by_model[model]["keyboard"].append(delta)
-        elif policy in asr_policies:
-            degradation_by_model[model]["asr"].append(delta)
-
-    models = sorted(degradation_by_model)
-    if not models:
-        return None
-
-    def mean_or_zero(values):
-        return sum(values) / len(values) if values else 0.0
-
-    keyboard_means = [mean_or_zero(degradation_by_model[m]["keyboard"]) for m in models]
-    asr_means = [mean_or_zero(degradation_by_model[m]["asr"]) for m in models]
-
-    figure, axes = pyplot.subplots(figsize=(8, 5))
-    bar_positions = range(len(models))
-    bar_width = 0.38
-    axes.bar([p - bar_width / 2 for p in bar_positions], keyboard_means,
-             bar_width, label="keyboard typos")
-    axes.bar([p + bar_width / 2 for p in bar_positions], asr_means,
-             bar_width, label="ASR transcription")
-
-    axes.set_xticks(list(bar_positions))
-    axes.set_xticklabels(models, rotation=30, ha="right")
-    axes.set_ylabel("mean paired degradation")
-    axes.set_title("Degradation by noise source, per model")
-    axes.legend()
     figure.tight_layout()
 
     output_path = Path(output_path)

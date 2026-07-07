@@ -47,29 +47,31 @@ class ModelSpecification:
 
 
 # The roster. Identifiers verified on HuggingFace, June 2026 (docs/PROVENANCE.md
-# §4). Revisions are PIN_ME until pre-registration.
-MODEL_ROSTER: dict[str, ModelSpecification] = {
+# §4). Revisions are PIN_ME until pre-registration. Each spec's roster_key
+# appears once here; MODEL_ROSTER below indexes this tuple by that key, so the
+# key can never drift out of sync with its dict entry.
+_MODEL_SPECIFICATIONS: tuple[ModelSpecification, ...] = (
     # Colab pilot (T4 GPU, ungated, fp16). Qwen2.5-1.5B fits a T4 comfortably
     # and needs no HF gating approval — use for the pilot; swap to a main-study
     # model for the confirmatory run.
-    "qwen_1b5_pilot": ModelSpecification(
+    ModelSpecification(
         "qwen_1b5_pilot", "Qwen/Qwen2.5-1.5B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
 
     # Main study models (gated; pin revisions before a confirmatory run).
-    "llama_1b": ModelSpecification(
+    ModelSpecification(
         "llama_1b", "meta-llama/Llama-3.2-1B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "llama_3b": ModelSpecification(
+    ModelSpecification(
         "llama_3b", "meta-llama/Llama-3.2-3B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "llama_8b": ModelSpecification(
+    ModelSpecification(
         "llama_8b", "meta-llama/Llama-3.1-8B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "llama_8b_awq": ModelSpecification(
+    ModelSpecification(
         "llama_8b_awq", "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4",
         REVISION_PLACEHOLDER, Precision.AWQ),
-    "qwen_7b": ModelSpecification(
+    ModelSpecification(
         "qwen_7b", "Qwen/Qwen2.5-7B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "qwen_7b_awq": ModelSpecification(
+    ModelSpecification(
         "qwen_7b_awq", "Qwen/Qwen2.5-7B-Instruct-AWQ", REVISION_PLACEHOLDER, Precision.AWQ),
-    "mistral_7b": ModelSpecification(
+    ModelSpecification(
         "mistral_7b", "mistralai/Mistral-7B-Instruct-v0.3", REVISION_PLACEHOLDER, Precision.FP16),
 
     # Cross-family regime-audit judge. Gemma 2 9B is from Google DeepMind —
@@ -80,10 +82,13 @@ MODEL_ROSTER: dict[str, ModelSpecification] = {
     # The judge always runs at temperature=0 (greedy) via run_judge() in
     # src/judge.py; all decisions are cached content-addressably so the judge
     # is called at most once per unique (judge_revision, prompt_version, input).
-    "gemma2_9b_judge": ModelSpecification(
+    ModelSpecification(
         "gemma2_9b_judge", "google/gemma-2-9b-it", REVISION_PLACEHOLDER, Precision.FP16,
         gpu_memory_utilization=0.90),
-}
+)
+
+MODEL_ROSTER: dict[str, ModelSpecification] = {
+    spec.roster_key: spec for spec in _MODEL_SPECIFICATIONS}
 
 
 def get_model_specification(roster_key: str) -> ModelSpecification:

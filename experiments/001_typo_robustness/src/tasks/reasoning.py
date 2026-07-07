@@ -176,6 +176,36 @@ _ANSWER_SECTION_RE = re.compile(r"#answer\s*[=:]\s*(.+?)(?:\n#|\Z)", re.IGNORECA
 # Fraction/int/float arithmetic are needed; no import or function calls.
 
 # ---------------------------------------------------------------------------
+# {param,value} annotation typing — the single source of truth used by
+# parse_gsm_symbolic_template, load_reasoning_jsonl, and _fetch_gsm_from_hf.
+# ---------------------------------------------------------------------------
+
+def _typed_parameter_value(raw_value: str, *, resolve_verbal_multipliers: bool = False):
+    """Classify one {param,value} annotation string into its typed Python
+    value: int (digit string) > Fraction (FRACTION_WORDS) >
+    [verbal multiplier (VERBAL_MULTIPLIER_WORDS), if enabled] > str."""
+    stripped = raw_value.strip()
+    if stripped.lstrip("-").isdigit():
+        return int(stripped)
+    if stripped in FRACTION_WORDS:
+        return FRACTION_WORDS[stripped]
+    if resolve_verbal_multipliers and stripped.lower() in VERBAL_MULTIPLIER_WORDS:
+        return VERBAL_MULTIPLIER_WORDS[stripped.lower()]
+    return stripped
+
+
+def _extract_annotated_parameters(
+        question_annotated: str, *, resolve_verbal_multipliers: bool = False) -> dict:
+    """Parse every {param,value} annotation in ``question_annotated`` into a
+    typed parameter dict, via ``_typed_parameter_value``."""
+    return {
+        match.group(1).strip(): _typed_parameter_value(
+            match.group(2), resolve_verbal_multipliers=resolve_verbal_multipliers)
+        for match in _PARAM_VALUE_RE.finditer(question_annotated)
+    }
+
+
+# ---------------------------------------------------------------------------
 # Parameter serialisation / deserialisation
 # ---------------------------------------------------------------------------
 # Fraction values (e.g. Fraction(1, 3) for "third") are not JSON-serializable.
@@ -377,18 +407,7 @@ def parse_gsm_symbolic_template(record: dict) -> Optional["ReasoningTemplate"]:
         return None
 
     # Step 1: extract {param, value} pairs.
-    parameters: dict = {}
-    for match in _PARAM_VALUE_RE.finditer(question_annotated):
-        param_name = match.group(1).strip()
-        param_value_str = match.group(2).strip()
-        # Type classification: integer > fraction word > raw string.
-        if param_value_str.lstrip("-").isdigit():
-            parameters[param_name] = int(param_value_str)
-        elif param_value_str in FRACTION_WORDS:
-            parameters[param_name] = FRACTION_WORDS[param_value_str]
-        else:
-            parameters[param_name] = param_value_str  # name or unknown string
-
+    parameters = _extract_annotated_parameters(question_annotated)
     if not parameters:
         return None
 
@@ -704,18 +723,8 @@ def load_reasoning_jsonl(
                     # are the base-question values and may not match this instance;
                     # Regime C will validate at operand-swap time and exclude items
                     # where the defaults do not reproduce gold_answer.
-                    for match in _PARAM_VALUE_RE.finditer(record["question_annotated"]):
-                        p_name = match.group(1).strip()
-                        p_val = match.group(2).strip()
-                        lower = p_val.lower()
-                        if p_val.lstrip("-").isdigit():
-                            parameters[p_name] = int(p_val)
-                        elif p_val in FRACTION_WORDS:
-                            parameters[p_name] = FRACTION_WORDS[p_val]
-                        elif lower in VERBAL_MULTIPLIER_WORDS:
-                            parameters[p_name] = VERBAL_MULTIPLIER_WORDS[lower]
-                        else:
-                            parameters[p_name] = p_val
+                    parameters = _extract_annotated_parameters(
+                        record["question_annotated"], resolve_verbal_multipliers=True)
 
         items.append(ReasoningItem(
             task_id=record.get("task_id", f"{task_family}_{line_index:05d}"),
@@ -819,15 +828,7 @@ def _fetch_gsm_from_hf(
             if parsed is not None:
                 template = parsed
                 # Re-extract typed parameters from the annotation.
-                _param_pairs = _PARAM_VALUE_RE.findall(record["question_annotated"])
-                for p_name, p_val in _param_pairs:
-                    p_val = p_val.strip()
-                    if p_val.lstrip("-").isdigit():
-                        parameters[p_name] = int(p_val)
-                    elif p_val in FRACTION_WORDS:
-                        parameters[p_name] = FRACTION_WORDS[p_val]
-                    else:
-                        parameters[p_name] = p_val
+                parameters = _extract_annotated_parameters(record["question_annotated"])
 
         items.append(ReasoningItem(
             task_id=f"{task_family}_{record_index:05d}",

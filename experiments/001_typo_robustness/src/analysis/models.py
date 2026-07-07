@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from enums import ConvergenceMethod
+
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
@@ -39,7 +41,7 @@ from typing import Optional
 class MixedEffectsLogisticResult:
     """Summary of a fitted crossed mixed-effects logistic model."""
     converged: bool
-    method: str                   # "laplace" | "variational" | "glm_approximation"
+    method: ConvergenceMethod
     log_likelihood: Optional[float]
     n_observations: int
     n_items: int
@@ -132,10 +134,11 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
     fixed_formula = " + ".join(fixed_terms)
     formula = f"is_correct ~ {fixed_formula}"
 
-    # Convergence fallback ladder.
+    # Convergence fallback ladder. The outer label is our result tag
+    # (ConvergenceMethod); fit_kwargs["method"] is statsmodels' own solver name.
     for method_name, fit_kwargs in [
-        ("laplace", {"method": "laplace", "maxiter": 200}),
-        ("variational", {"method": "lbfgs", "maxiter": 400}),
+        (ConvergenceMethod.LAPLACE, {"method": "laplace", "maxiter": 200}),
+        (ConvergenceMethod.VARIATIONAL, {"method": "lbfgs", "maxiter": 400}),
     ]:
         try:
             model = smf.mixedlm(
@@ -170,7 +173,7 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
         }
         return MixedEffectsLogisticResult(
             converged=True,
-            method="glm_approximation",
+            method=ConvergenceMethod.GLM_APPROXIMATION,
             log_likelihood=float(glm_result.llf),
             n_observations=n_obs,
             n_items=n_items,
@@ -182,7 +185,7 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
     except Exception as error:
         return MixedEffectsLogisticResult(
             converged=False,
-            method="glm_approximation",
+            method=ConvergenceMethod.GLM_APPROXIMATION,
             log_likelihood=None,
             n_observations=n_obs,
             n_items=n_items,
@@ -193,7 +196,7 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
         )
 
 
-def _pack_mixed_result(result, method_name: str,
+def _pack_mixed_result(result, method_name: ConvergenceMethod,
                        n_obs: int, n_items: int, n_models: int
                        ) -> MixedEffectsLogisticResult:
     import numpy as np

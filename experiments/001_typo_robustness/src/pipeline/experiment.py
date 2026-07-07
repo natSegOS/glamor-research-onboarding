@@ -13,8 +13,6 @@ Key guarantees
   tokenizer. These are the inputs to the primary mediation analysis.
 - key_terms are passed to the perturbation engine, so informative_word and
   answer_critical policies target the correct words.
-- The ASR arm is wired in: when conditions include an ASR source,
-  build_requests reads pre-built AsrItems and emits the corresponding rows.
 - scope is a configurable dimension passed through to the engine via
   scope_spans, not hardcoded.
 - Confirmatory runs assert every model revision is pinned before generating
@@ -24,6 +22,7 @@ Key guarantees
 from __future__ import annotations
 
 import json
+import math
 import time
 
 from dataclasses import dataclass, field
@@ -38,6 +37,7 @@ from enums import (
     REASONING_FAMILIES, TaskFamily,
 )
 
+from inference.engines import apply_chat_template
 import regimes
 from perturbation import PerturbationError, damerau_levenshtein_distance
 from pipeline.runner import (
@@ -46,7 +46,9 @@ from pipeline.runner import (
     deterministic_row_id,
     run_shard,
 )
+from progress import ProgressBar
 from tasks import get_spec
+from tasks._shared import content_text_of
 from tasks.registry import call_loader
 import tokenization
 
@@ -119,7 +121,6 @@ class ExperimentConfiguration:
     datasets: Optional[list] = None
     max_new_tokens_reasoning: int = 512
     max_new_tokens_multiple_choice: int = 256
-    asr_items_path: Optional[str] = None
     is_confirmatory: bool = False
 
     def __post_init__(self):
@@ -215,18 +216,6 @@ def load_task_items(configuration: ExperimentConfiguration) -> list:
     return items
 
 
-def _prompt_of(task_item) -> str:
-    return task_item.full_prompt
-
-
-def _content_text_of(task_item) -> str:
-    return getattr(task_item, "content_text", None) or task_item.question_text
-
-
-def _gold_of(task_item):
-    return getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
-
-
 # ---------------------------------------------------------------------------
 # Request building.
 # ---------------------------------------------------------------------------
@@ -237,7 +226,6 @@ def build_requests(
         is_word: Callable[[str], bool],
         tokenizer: object,
         seed: int,
-        asr_items_by_task: Optional[dict] = None,
         exclusion_sidecar: Optional[ExclusionSidecar] = None,
 ) -> list[GenerationRequest]:
     """Build the full list of clean and perturbed generation requests.
@@ -250,13 +238,13 @@ def build_requests(
     item that could not be perturbed (PerturbationError), replacing the prior
     silent ``continue`` (Workstream 3).
     """
-    asr_items_by_task = asr_items_by_task or {}
     requests: list[GenerationRequest] = []
     seen_clean_task_ids: set = set()
 
     for task_item in task_items:
-        clean_prompt = _prompt_of(task_item)
-        gold_answer = _gold_of(task_item)
+        clean_prompt = task_item.full_prompt
+        # ReasoningItem carries gold_answer; MultipleChoiceItem carries gold_letter.
+        gold_answer = getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
 
         if task_item.task_id not in seen_clean_task_ids:
             requests.append(GenerationRequest(
@@ -278,15 +266,9 @@ def build_requests(
             seen_clean_task_ids.add(task_item.task_id)
 
         for condition in conditions:
-            if condition.source == ConditionSource.ASR:
-                requests.extend(_build_asr_requests(
-                    task_item, gold_answer, clean_prompt,
-                    asr_items_by_task.get(task_item.task_id, []), tokenizer,
-                    seed=seed))
-            else:
-                requests.extend(_build_synthetic_requests(
-                    task_item, condition, gold_answer, clean_prompt,
-                    is_word, tokenizer, seed, exclusion_sidecar=exclusion_sidecar))
+            requests.extend(_build_synthetic_requests(
+                task_item, condition, gold_answer, clean_prompt,
+                is_word, tokenizer, seed, exclusion_sidecar=exclusion_sidecar))
 
     return requests
 
@@ -299,7 +281,7 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
     its edit budgets."""
     requests: list[GenerationRequest] = []
 
-    content_text = _content_text_of(task_item)
+    content_text = content_text_of(task_item)
     key_terms = list(getattr(task_item, "key_terms", []))
     scope_spans = getattr(task_item, "scope_spans", None)
 
@@ -468,73 +450,50 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits) -> 
     return fields
 
 
-def _build_asr_requests(task_item, gold_answer, clean_prompt,
-                        asr_items, tokenizer, seed: int = 0) -> list[GenerationRequest]:
-    """Build requests from pre-built AsrItems for one task.
+# ---------------------------------------------------------------------------
+# Context-length sizing.
+# ---------------------------------------------------------------------------
 
-    Each AsrItem already carries its transcription, measured edit distance,
-    severity band, and clean/noisy tag. We substitute the transcription for the
-    clean content and attach token metrics, exactly as for synthetic items, so
-    the ASR arm and the keyboard arm share one analysis path.
+def required_context_length(
+        requests: Sequence[GenerationRequest],
+        tokenizer,
+        max_new_tokens_reasoning: int,
+        max_new_tokens_multiple_choice: int,
+        *,
+        safety_margin: float = 1.20,
+        round_to: int = 256,
+) -> int:
+    """Return vLLM's ``max_model_len``, sized from the request set a run will
+    actually submit rather than trusted to the model's native context window.
 
-    ``seed`` is the root experiment seed, used to derive a per-item seed via
-    regimes.derived_seed so the seed is stable across processes and
-    PYTHONHASHSEED values (see the seed= field in the GenerationRequest below).
+    Every request (every clean and perturbed prompt — see ``build_requests``)
+    is chat-templated and tokenized with the model's own tokenizer, then
+    paired with its family's completion budget (task families
+    in ``REASONING_FAMILIES`` get ``max_new_tokens_reasoning``; everything
+    else gets ``max_new_tokens_multiple_choice``). The longest resulting
+    prompt-plus-completion sets the floor.
+
+    ``safety_margin`` and ``round_to`` guard only against tokenizer/version
+    drift between this measurement and the tokenizer the engine loads
+    internally — they never discount the measured requirement. Every request
+    in a run is generated exactly once, so there is nothing to reuse and
+    nothing to gain by shrinking below what was measured; the point of this
+    function is solely to stop reserving KV-cache/CUDA-graph-capture memory
+    for context no request in the run ever uses (the model's spec-sheet
+    context length is typically far larger than any prompt here), which is
+    what exhausted a 15GB Colab T4 during the pilot.
     """
-    requests: list[GenerationRequest] = []
-    content_text = _content_text_of(task_item)
+    longest_needed = 0
+    for request in requests:
+        completion_budget = (
+            max_new_tokens_reasoning if request.task_family in REASONING_FAMILIES
+            else max_new_tokens_multiple_choice)
+        templated_prompt = apply_chat_template(tokenizer, request.prompt)
+        prompt_tokens = len(tokenizer.encode(templated_prompt, add_special_tokens=False))
+        longest_needed = max(longest_needed, prompt_tokens + completion_budget)
 
-    for asr_item in asr_items:
-        perturbed_prompt = clean_prompt.replace(content_text, asr_item["transcription"])
-
-        token_metric_fields = {
-            "token_inflation_ratio": tokenization.token_inflation_ratio(
-                tokenizer, content_text, asr_item["transcription"]),
-            "asr_edit_distance": asr_item["damerau_levenshtein_distance"],
-            "asr_band": asr_item["band"],
-            "asr_signal_to_noise_ratio_db": asr_item.get("signal_to_noise_ratio_db"),
-        }
-
-        requests.append(GenerationRequest(
-            task_id=task_item.task_id,
-            task_family=task_item.task_family,
-            prompt=perturbed_prompt,
-            gold_answer=gold_answer,
-            is_clean=False,
-            perturbation_state_vector={
-                "semantic_class": SemanticClass(asr_item.get("regime_candidate", SemanticClass.B)),
-                "operation": Operation.ASR,
-                "selection_policy": SelectionPolicy(asr_item["selection_policy"]),
-                "scope": Scope.CONTENT,
-                "edit_budget": asr_item["damerau_levenshtein_distance"],
-            },
-            # Use a SHA-256-derived seed rather than Python's __hash__ so the
-            # seed is identical across processes and PYTHONHASHSEED values
-            # (hash randomisation was added in Python 3.3 for security; it
-            # breaks cross-process reproducibility when used as a seed).
-            # The base experiment seed is threaded through build_requests so
-            # that all requests in a run derive from the same root seed.
-            seed=regimes.derived_seed(seed, task_item.task_id),
-            clean_prompt=clean_prompt,
-            extra_fields=token_metric_fields,
-        ))
-
-    return requests
-
-
-def load_asr_items_by_task(path: Optional[str]) -> dict:
-    """Load pre-built AsrItems (a JSONL exported by the ASR pre-processing step)
-    and index them by task_id, for the ASR arm."""
-    if not path:
-        return {}
-
-    asr_items_by_task: dict = {}
-    for line in Path(path).read_text().splitlines():
-        if not line.strip():
-            continue
-        record = json.loads(line)
-        asr_items_by_task.setdefault(record["task_id"], []).append(record)
-    return asr_items_by_task
+    with_margin = math.ceil(longest_needed * safety_margin)
+    return math.ceil(with_margin / round_to) * round_to
 
 
 # ---------------------------------------------------------------------------
@@ -584,7 +543,6 @@ def run_experiment(
     output_directory.mkdir(parents=True, exist_ok=True)
 
     task_items = load_task_items(configuration)
-    asr_items_by_task = load_asr_items_by_task(configuration.asr_items_path)
 
     worker_index, worker_count = shard_partition if shard_partition else (0, 1)
     worker_suffix = f"_w{worker_index}of{worker_count}" if shard_partition else ""
@@ -596,8 +554,7 @@ def run_experiment(
 
     requests = build_requests(
         task_items, configuration.conditions, is_word, tokenizer,
-        configuration.seed, asr_items_by_task,
-        exclusion_sidecar=exclusion_sidecar)
+        configuration.seed, exclusion_sidecar=exclusion_sidecar)
 
     if shard_partition:
         requests = [
@@ -608,14 +565,12 @@ def run_experiment(
                 request.is_clean), 16) % worker_count == worker_index
         ]
 
-    reasoning_requests = [r for r in requests if r.task_family in REASONING_FAMILIES]
-    other_requests = [r for r in requests if r.task_family not in REASONING_FAMILIES]
+    reasoning_requests = [request for request in requests if request.task_family in REASONING_FAMILIES]
+    other_requests = [request for request in requests if request.task_family not in REASONING_FAMILIES]
 
     manifest = ShardManifest(
         output_directory / f"{configuration.run_id}{worker_suffix}_manifest.json")
     output_path = output_directory / f"{configuration.run_id}{worker_suffix}_generations.jsonl"
-
-    from progress import ProgressBar
 
     total_new_rows = 0
     total_pending = len(requests)
