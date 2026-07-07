@@ -27,7 +27,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from analysis import results as result_analysis
+from enums import SemanticClass
 from pipeline.runner import load_generation_rows
+
+# Minimum Regime A row count below which the mediation model is not fit
+# (design/06 §6.8 — too few rows to estimate the mediator/outcome coefficients
+# meaningfully).
+_MINIMUM_ROWS_FOR_MEDIATION_MODEL = 10
 
 
 def parse_arguments():
@@ -68,7 +74,7 @@ def _build_model_dataframe(rows):
                 row.get("subword_count_change", 0.0) or 0.0),
             # Covariate for word-length confound control (Workstream 3).
             "word_length_before": int(row.get("word_length_before", 0) or 0),
-            "r_semantic_class": row.get("r_semantic_class", "clean"),
+            "r_semantic_class": row.get("r_semantic_class", SemanticClass.CLEAN),
             "r_edit_budget": row.get("r_edit_budget", 0),
             "task_family": row.get("task_family", ""),
             "extraction_tier": row.get("extraction_tier", ""),
@@ -125,8 +131,8 @@ def _run_statistical_models(rows, output_directory: Path) -> None:
         print(f"  Mixed-effects model failed: {error}", file=sys.stderr)
 
     # Mediation (design/06 §6.8): Regime A perturbed rows + their clean counterparts.
-    regime_a_data = data[data["r_semantic_class"] == "A"]
-    if len(regime_a_data) >= 10:
+    regime_a_data = data[data["r_semantic_class"] == SemanticClass.A]
+    if len(regime_a_data) >= _MINIMUM_ROWS_FOR_MEDIATION_MODEL:
         print("  Fitting mediation model (Regime A)...")
         try:
             mediation_result = compute_mediation_proportion(regime_a_data)
@@ -155,7 +161,7 @@ def _run_statistical_models(rows, output_directory: Path) -> None:
             print(f"  Mediation model failed: {error}", file=sys.stderr)
     else:
         print(f"  Mediation skipped: {len(regime_a_data)} Regime A rows "
-              f"(need ≥ 10).", file=sys.stderr)
+              f"(need ≥ {_MINIMUM_ROWS_FOR_MEDIATION_MODEL}).", file=sys.stderr)
 
 
 def main():
@@ -174,8 +180,6 @@ def main():
     figure_paths = [
         result_analysis.figure_clean_conditioned_failure_vs_edit_budget(
             cell_summaries, arguments.output_directory / "figure_ccf_vs_edit_budget.png"),
-        result_analysis.figure_keyboard_versus_asr_profile(
-            cell_summaries, arguments.output_directory / "figure_keyboard_vs_asr.png"),
     ]
 
     print(f"rows analyzed:    {len(rows)}")

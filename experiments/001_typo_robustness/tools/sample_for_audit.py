@@ -33,14 +33,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from enums import SemanticClass
 from pipeline.runner import load_generation_rows
 from progress import ProgressBar
 
 
 _DEFAULT_SAMPLE_SIZE = 200
 _DEFAULT_SEED = 1729
+_DEFAULT_CACHE_FILENAME = "judge_cache.jsonl"
 
-_TARGET_REGIMES = ("A", "B", "C")
+_TARGET_REGIMES = (SemanticClass.A, SemanticClass.B, SemanticClass.C)
 
 
 def _is_perturbed_row(row: dict) -> bool:
@@ -206,7 +208,7 @@ def main() -> None:
     all_rows = load_generation_rows(arguments.generations)
     print(f"  loaded {len(all_rows)} rows total")
 
-    perturbed_rows = [r for r in all_rows if _is_perturbed_row(r)]
+    perturbed_rows = [row for row in all_rows if _is_perturbed_row(row)]
     print(f"  {len(perturbed_rows)} perturbed rows eligible for sampling")
 
     sample = _stratified_sample(perturbed_rows, arguments.sample_size, arguments.seed)
@@ -227,13 +229,13 @@ def main() -> None:
             audit_items.append(_build_audit_item(row, judge_decision=None))
     else:
         from judge import run_judge_on_sample
-        from inference import build_inference_engine, get_model_specification
+        from inference import VllmEngine, get_model_specification
 
         specification = get_model_specification(arguments.model)
         cache_path = arguments.cache or (arguments.output.parent / _DEFAULT_CACHE_FILENAME)
 
         print(f"building judge engine ({specification.huggingface_identifier}) ...")
-        engine = build_inference_engine(specification)
+        engine = VllmEngine(specification)
 
         print(f"running judge on {len(sample)} items (cache: {cache_path}) ...")
         with ProgressBar(total=len(sample), description="judging") as progress:
@@ -249,14 +251,14 @@ def main() -> None:
             audit_items.append(_build_audit_item(row, judge_decision=decision))
 
         agreement_count = sum(
-            1 for d in decisions
-            if d.agrees_with_claimed_regime() is True
+            1 for decision in decisions
+            if decision.agrees_with_claimed_regime() is True
         )
         disagreement_count = sum(
-            1 for d in decisions
-            if d.agrees_with_claimed_regime() is False
+            1 for decision in decisions
+            if decision.agrees_with_claimed_regime() is False
         )
-        parse_failed_count = sum(1 for d in decisions if d.parse_failed)
+        parse_failed_count = sum(1 for decision in decisions if decision.parse_failed)
         print(
             f"  judge agrees: {agreement_count}, "
             f"disagrees: {disagreement_count}, "
@@ -275,9 +277,6 @@ def main() -> None:
     arguments.output.write_text(json.dumps(output, indent=2))
     print(f"\naudit sample written to {arguments.output}")
     print(f"open tools/regime_audit_ui.html in a browser to begin human validation")
-
-
-_DEFAULT_CACHE_FILENAME = "judge_cache.jsonl"
 
 
 if __name__ == "__main__":

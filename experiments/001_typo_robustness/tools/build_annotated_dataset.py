@@ -235,7 +235,7 @@ def main(argv=None) -> int:
 
     print(
         f"\nAnnotation complete.  "
-        f"{sum(s['annotated_count'] for s in result_summaries)} items annotated "
+        f"{sum(summary['annotated_count'] for summary in result_summaries)} items annotated "
         f"across {len(jsonl_paths)} file(s)."
     )
     if not arguments.dry_run:
