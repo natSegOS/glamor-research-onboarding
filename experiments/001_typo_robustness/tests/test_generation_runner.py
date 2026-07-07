@@ -8,10 +8,8 @@ and varied request types.
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 
-from enums import SemanticClass, Operation, SelectionPolicy, Scope, TaskFamily, Precision
+from enums import SemanticClass, Operation, SelectionPolicy, Scope, TaskFamily
 from pipeline.runner import (
     DeterministicDummyEngine,
     GenerationRequest,
@@ -121,14 +119,14 @@ def test_run_shard_writes_complete_schema(tmp_path):
 
 
 def test_run_shard_row_count_equals_request_count(tmp_path):
-    for n in [1, 3, 5]:
-        out = tmp_path / f"out_{n}.jsonl"
-        m = ShardManifest(tmp_path / f"m_{n}.json")
-        requests = [_make_request(f"t{i}") for i in range(n)]
-        written = run_shard(f"s{n}", requests, DeterministicDummyEngine(), out, m,
-                            model_id="m", model_revision="rev")
-        assert written == n
-        assert len(load_generation_rows([out])) == n
+    for request_count in [1, 3, 5]:
+        output_path = tmp_path / f"out_{request_count}.jsonl"
+        manifest = ShardManifest(tmp_path / f"m_{request_count}.json")
+        requests = [_make_request(f"t{i}") for i in range(request_count)]
+        written = run_shard(f"s{request_count}", requests, DeterministicDummyEngine(),
+                            output_path, manifest, model_id="m", model_revision="rev")
+        assert written == request_count
+        assert len(load_generation_rows([output_path])) == request_count
 
 
 def test_run_shard_is_idempotent(tmp_path):
@@ -202,7 +200,7 @@ def test_runner_applies_chat_template(tmp_path):
 # Enum coercion in state vectors (plain strings must serialize correctly)
 # ---------------------------------------------------------------------------
 
-def test_state_vector_with_plain_strings_still_serializable(tmp_path):
+def test_state_vector_with_plain_strings_still_serializable():
     """A state vector containing (str, Enum) members must serialize to JSON cleanly."""
     vector = {
         "semantic_class": SemanticClass.A,

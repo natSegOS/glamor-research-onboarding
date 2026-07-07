@@ -70,20 +70,21 @@ def test_scope_spans_are_non_overlapping():
     """Instruction and content spans must not overlap."""
     for item in tasks_reasoning.generate_synthetic_reasoning_items(10, seed=6):
         spans = item.scope_spans
-        i_s, i_e = spans["instruction"]
-        c_s, c_e = spans["content"]
+        instruction_start, instruction_end = spans["instruction"]
+        content_start, content_end = spans["content"]
         # The two spans must not overlap.
-        assert i_e <= c_s or c_e <= i_s, (
-            f"item {item.task_id}: instruction [{i_s},{i_e}) overlaps content [{c_s},{c_e})")
+        assert instruction_end <= content_start or content_end <= instruction_start, (
+            f"item {item.task_id}: instruction [{instruction_start},{instruction_end}) "
+            f"overlaps content [{content_start},{content_end})")
 
 
 def test_scope_spans_slice_full_prompt():
     """Both spans must fall within the full prompt."""
     for item in tasks_reasoning.generate_synthetic_reasoning_items(10, seed=8):
         full = item.full_prompt
-        for key, (s, e) in item.scope_spans.items():
-            assert 0 <= s <= e <= len(full), (
-                f"scope {key!r}: [{s},{e}) out of range for prompt of length {len(full)}")
+        for scope_name, (start, end) in item.scope_spans.items():
+            assert 0 <= start <= end <= len(full), (
+                f"scope {scope_name!r}: [{start},{end}) out of range for prompt of length {len(full)}")
 
 
 def test_synthetic_items_support_regime_c_official_do_not():
@@ -177,8 +178,8 @@ def test_load_reasoning_jsonl_coerces_task_family():
             "key_terms": ["5"],
             "parameters": {"a": 5},
             "scope_spans": {"instruction": [0, 2], "content": [3, 20]},
-            "task_family": "gsm_symbolic_synthetic",    # plain string
-            "source": "gsm_symbolic_synthetic",
+            "task_family": str(TaskFamily.GSM_SYMBOLIC_SYNTHETIC),    # plain string
+            "source": str(TaskFamily.GSM_SYMBOLIC_SYNTHETIC),
             "supports_regime_c_operand_swap": False,
         }
         f.write(json.dumps(record) + "\n")
@@ -199,7 +200,7 @@ def test_load_multiple_choice_jsonl_coerces_task_family():
             "question": "Which is the capital of France?",
             "options": {"A": "Paris", "B": "Berlin"},
             "answer": "A",
-            "task_family": "mmlu_pro",   # plain string — must be coerced
+            "task_family": str(TaskFamily.MMLU_PRO),   # plain string — must be coerced
             "key_terms": ["capital", "France"],
             "category": "Geography",
         }

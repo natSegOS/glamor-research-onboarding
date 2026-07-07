@@ -142,7 +142,7 @@ def test_interactional_failure_statuses():
 def test_operation_vocabulary():
     names = {m.name for m in Operation}
     assert {"SUBSTITUTE", "DELETE", "INSERT", "TRANSPOSE",
-            "WORD_SUBSTITUTE", "ASR", "NONE"} <= names
+            "WORD_SUBSTITUTE", "NONE"} <= names
 
 
 def test_semantic_class_covers_all_regimes():

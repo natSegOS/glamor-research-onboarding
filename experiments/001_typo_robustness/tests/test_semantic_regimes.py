@@ -11,6 +11,7 @@ from enums import Operation, SemanticClass
 import regimes as semantic_regimes
 from perturbation import PerturbationError
 from tasks import generate_synthetic_reasoning_items
+from tasks.multiple_choice import make_demonstration_multiple_choice_items
 
 
 # ---------------------------------------------------------------------------
@@ -31,8 +32,8 @@ def test_derived_seed_varies_with_label():
 
 
 def test_derived_seed_returns_int():
-    s = semantic_regimes.derived_seed(42, "X", 7)
-    assert isinstance(s, int)
+    seed_value = semantic_regimes.derived_seed(42, "X", 7)
+    assert isinstance(seed_value, int)
 
 
 # ---------------------------------------------------------------------------
@@ -192,9 +193,6 @@ def test_regime_c_metadata_keys():
 # ---------------------------------------------------------------------------
 # Regime C MCQ — option permutation
 # ---------------------------------------------------------------------------
-
-from tasks.multiple_choice import make_demonstration_multiple_choice_items
-
 
 def test_regime_c_mcq_option_permutation_changes_gold():
     items = make_demonstration_multiple_choice_items()

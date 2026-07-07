@@ -19,19 +19,19 @@ from enums import ParseStatus, TaskFamily
 # ---------------------------------------------------------------------------
 
 def test_reasoning_prefers_hash_delimited_answer():
-    assert scoring.extract_reasoning_answer("blah 5 blah\n#### 19") == 19.0
+    assert scoring.extract_reasoning_answer("blah 5 blah\n#### 19")[0] == 19.0
 
 
 def test_reasoning_falls_back_to_last_number():
-    assert scoring.extract_reasoning_answer("the answer is 7 then 19") == 19.0
+    assert scoring.extract_reasoning_answer("the answer is 7 then 19")[0] == 19.0
 
 
 def test_reasoning_handles_currency_and_commas():
-    assert scoring.extract_reasoning_answer("Total: $1,234") == 1234.0
+    assert scoring.extract_reasoning_answer("Total: $1,234")[0] == 1234.0
 
 
 def test_reasoning_returns_none_without_number():
-    assert scoring.extract_reasoning_answer("no digits here") is None
+    assert scoring.extract_reasoning_answer("no digits here")[0] is None
 
 
 # ---------------------------------------------------------------------------
@@ -40,41 +40,41 @@ def test_reasoning_returns_none_without_number():
 
 def test_multiple_hash_delimiters_last_wins():
     """When there are multiple '####' lines, the LAST one is authoritative."""
-    assert scoring.extract_reasoning_answer("#### 5\n#### 19") == 19.0
+    assert scoring.extract_reasoning_answer("#### 5\n#### 19")[0] == 19.0
 
 
 def test_negative_number_extracted():
-    assert scoring.extract_reasoning_answer("#### -7") == -7.0
+    assert scoring.extract_reasoning_answer("#### -7")[0] == -7.0
 
 
 def test_number_with_trailing_decimal():
-    assert scoring.extract_reasoning_answer("answer: 3.14") == 3.14
+    assert scoring.extract_reasoning_answer("answer: 3.14")[0] == 3.14
 
 
 def test_number_zero():
-    assert scoring.extract_reasoning_answer("#### 0") == 0.0
+    assert scoring.extract_reasoning_answer("#### 0")[0] == 0.0
 
 
 def test_empty_string_returns_none():
-    assert scoring.extract_reasoning_answer("") is None
+    assert scoring.extract_reasoning_answer("")[0] is None
 
 
 def test_whitespace_only_returns_none():
-    assert scoring.extract_reasoning_answer("   \n\t  ") is None
+    assert scoring.extract_reasoning_answer("   \n\t  ")[0] is None
 
 
 def test_hash_delimiter_with_currency_and_commas():
-    assert scoring.extract_reasoning_answer("#### $1,234.50") == 1234.50
+    assert scoring.extract_reasoning_answer("#### $1,234.50")[0] == 1234.50
 
 
 def test_last_number_fallback_when_no_delimiter():
     # Among several numbers, fallback picks the LAST one.
-    assert scoring.extract_reasoning_answer("3 cats and 7 dogs") == 7.0
+    assert scoring.extract_reasoning_answer("3 cats and 7 dogs")[0] == 7.0
 
 
 def test_hash_takes_precedence_over_last_number():
     # "#### 5" comes before the "12" but must win because it's hash-delimited.
-    assert scoring.extract_reasoning_answer("text 12 more\n#### 5") == 5.0
+    assert scoring.extract_reasoning_answer("text 12 more\n#### 5")[0] == 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -82,16 +82,16 @@ def test_hash_takes_precedence_over_last_number():
 # ---------------------------------------------------------------------------
 
 def test_mcq_prefers_explicit_marker():
-    assert scoring.extract_multiple_choice_answer("I think A but Answer: C") == "C"
+    assert scoring.extract_multiple_choice_answer("I think A but Answer: C")[0] == "C"
 
 
 def test_mcq_line_leading_letter():
-    assert scoring.extract_multiple_choice_answer("B) Photosynthesis") == "B"
+    assert scoring.extract_multiple_choice_answer("B) Photosynthesis")[0] == "B"
 
 
 def test_mcq_respects_option_count():
     # 'J' is invalid when there are only 4 options.
-    assert scoring.extract_multiple_choice_answer("The answer is J", option_count=4) is None
+    assert scoring.extract_multiple_choice_answer("The answer is J", option_count=4)[0] is None
 
 
 # ---------------------------------------------------------------------------
@@ -100,42 +100,42 @@ def test_mcq_respects_option_count():
 
 def test_mcq_letter_at_max_option_count_is_valid():
     # J is valid when there are 10 options (the full A–J range).
-    assert scoring.extract_multiple_choice_answer("Answer: J", option_count=10) == "J"
+    assert scoring.extract_multiple_choice_answer("Answer: J", option_count=10)[0] == "J"
 
 
 def test_mcq_last_explicit_marker_wins():
     """The LAST explicit marker is returned."""
-    assert scoring.extract_multiple_choice_answer("Answer: A ... Answer: C") == "C"
+    assert scoring.extract_multiple_choice_answer("Answer: A ... Answer: C")[0] == "C"
 
 
 def test_mcq_case_insensitive_marker():
-    assert scoring.extract_multiple_choice_answer("ANSWER: B") == "B"
-    assert scoring.extract_multiple_choice_answer("answer is c") == "C"
+    assert scoring.extract_multiple_choice_answer("ANSWER: B")[0] == "B"
+    assert scoring.extract_multiple_choice_answer("answer is c")[0] == "C"
 
 
 def test_mcq_no_valid_letter_returns_none():
     # Must use text with no A-J letters that would accidentally match.
     # "no response provided" — no a-j uppercase, no "answer <letter>" pattern.
-    assert scoring.extract_multiple_choice_answer("no response provided at all") is None
+    assert scoring.extract_multiple_choice_answer("no response provided at all")[0] is None
 
 
 def test_mcq_empty_string_returns_none():
-    assert scoring.extract_multiple_choice_answer("") is None
+    assert scoring.extract_multiple_choice_answer("")[0] is None
 
 
 def test_mcq_explicit_beats_line_leading():
     text = "B) is wrong\nAnswer: D"
-    assert scoring.extract_multiple_choice_answer(text) == "D"
+    assert scoring.extract_multiple_choice_answer(text)[0] == "D"
 
 
 def test_mcq_letter_k_always_invalid():
     # K is never in the A–J alphabet for any option count.
-    assert scoring.extract_multiple_choice_answer("Answer: K") is None
+    assert scoring.extract_multiple_choice_answer("Answer: K")[0] is None
 
 
 def test_mcq_option_count_one_only_accepts_a():
-    assert scoring.extract_multiple_choice_answer("Answer: A", option_count=1) == "A"
-    assert scoring.extract_multiple_choice_answer("Answer: B", option_count=1) is None
+    assert scoring.extract_multiple_choice_answer("Answer: A", option_count=1)[0] == "A"
+    assert scoring.extract_multiple_choice_answer("Answer: B", option_count=1)[0] is None
 
 
 # ---------------------------------------------------------------------------

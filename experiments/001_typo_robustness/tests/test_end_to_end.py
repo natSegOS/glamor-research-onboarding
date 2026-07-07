@@ -87,7 +87,7 @@ def test_orchestrator_runs_and_logs_token_metrics(tmp_path):
 
     # Fix S2: both scopes are present in the logged rows.
     scopes = {row["r_scope"] for row in perturbed_rows}
-    assert {"anywhere", "content"} <= scopes
+    assert {Scope.ANYWHERE, Scope.CONTENT} <= scopes
 
 
 def test_analysis_reproduces_matched_pair_counts(tmp_path):
