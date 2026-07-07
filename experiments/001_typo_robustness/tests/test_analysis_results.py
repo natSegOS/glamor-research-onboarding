@@ -20,7 +20,7 @@ from enums import ParseStatus, SemanticClass
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_pair(task_id, clean_correct, pert_correct, parse_status="valid",
+def _make_pair(task_id, clean_correct, pert_correct, parse_status=ParseStatus.VALID,
                model_revision="model_a", task_family="gsm_symbolic_synthetic",
                cell_extra=None):
     cell_key = (
@@ -36,7 +36,7 @@ def _make_pair(task_id, clean_correct, pert_correct, parse_status="valid",
         clean_is_correct=clean_correct,
         perturbed_is_correct=pert_correct,
         clean_answer=str(clean_correct),
-        perturbed_answer=str(pert_correct) if parse_status == "valid" else None,
+        perturbed_answer=str(pert_correct) if parse_status == ParseStatus.VALID else None,
         perturbed_parse_status=parse_status,
         cell_key=cell_key,
     )
@@ -61,15 +61,15 @@ def _make_outcome(task_id, excluded: bool, regime=SemanticClass.A):
 def test_join_matched_pairs_basic():
     rows = [
         {"model_revision": "m1", "task_id": "t1", "is_clean": True,
-         "is_correct": 1, "parsed_answer": "42", "parse_status": "valid",
+         "is_correct": 1, "parsed_answer": "42", "parse_status": str(ParseStatus.VALID),
          "task_family": "gsm_symbolic_synthetic",
-         "r_semantic_class": "A", "r_operation": "substitute",
+         "r_semantic_class": str(SemanticClass.A), "r_operation": "substitute",
          "r_selection_policy": "keyboard_neighbor", "r_scope": "anywhere",
          "r_edit_budget": 1},
         {"model_revision": "m1", "task_id": "t1", "is_clean": False,
-         "is_correct": 0, "parsed_answer": None, "parse_status": "unparseable",
+         "is_correct": 0, "parsed_answer": None, "parse_status": str(ParseStatus.UNPARSEABLE),
          "task_family": "gsm_symbolic_synthetic",
-         "r_semantic_class": "A", "r_operation": "substitute",
+         "r_semantic_class": str(SemanticClass.A), "r_operation": "substitute",
          "r_selection_policy": "keyboard_neighbor", "r_scope": "anywhere",
          "r_edit_budget": 1},
     ]
@@ -82,9 +82,9 @@ def test_join_matched_pairs_basic():
 def test_join_matched_pairs_unmatched_perturbed_is_skipped():
     rows = [
         {"model_revision": "m1", "task_id": "t_orphan", "is_clean": False,
-         "is_correct": 0, "parsed_answer": None, "parse_status": "unparseable",
+         "is_correct": 0, "parsed_answer": None, "parse_status": str(ParseStatus.UNPARSEABLE),
          "task_family": "gsm_symbolic_synthetic",
-         "r_semantic_class": "A", "r_operation": "substitute",
+         "r_semantic_class": str(SemanticClass.A), "r_operation": "substitute",
          "r_selection_policy": "keyboard_neighbor", "r_scope": "anywhere",
          "r_edit_budget": 1},
     ]
@@ -158,7 +158,7 @@ def test_audit_gate_confirmed_items_counted():
 # ---------------------------------------------------------------------------
 
 def test_valid_only_delta_present_when_enough_valid_pairs():
-    pairs = [_make_pair(f"t{i}", 1, 0, parse_status="valid") for i in range(10)]
+    pairs = [_make_pair(f"t{i}", 1, 0, parse_status=ParseStatus.VALID) for i in range(10)]
     summaries = summarize_all_cells(pairs, resamples=100)
     assert summaries[0]["delta_valid_only"] is not None
     assert math.isclose(summaries[0]["delta_valid_only"], 1.0, abs_tol=1e-9)
@@ -167,9 +167,9 @@ def test_valid_only_delta_present_when_enough_valid_pairs():
 def test_valid_only_excludes_unparseable_pairs():
     """VALID-only delta computed on only the VALID-status subset."""
     # 6 valid pairs (all clean=1, pert=0 → delta=1), 4 unparseable (pert=0 but UNPARSEABLE)
-    valid_pairs = [_make_pair(f"tv{i}", 1, 0, parse_status="valid") for i in range(6)]
+    valid_pairs = [_make_pair(f"tv{i}", 1, 0, parse_status=ParseStatus.VALID) for i in range(6)]
     # Unparseable pairs: clean=1, pert=0; but VALID-only should only use the 6 above
-    unp_pairs = [_make_pair(f"tu{i}", 1, 0, parse_status="unparseable") for i in range(4)]
+    unp_pairs = [_make_pair(f"tu{i}", 1, 0, parse_status=ParseStatus.UNPARSEABLE) for i in range(4)]
     summaries = summarize_all_cells(valid_pairs + unp_pairs, resamples=100)
     assert summaries[0]["delta_valid_only"] is not None
     # VALID-only uses 6 pairs, all broke → delta_valid_only = 1.0
@@ -179,7 +179,7 @@ def test_valid_only_excludes_unparseable_pairs():
 
 
 def test_valid_only_none_when_fewer_than_two_valid_pairs():
-    pairs = [_make_pair("t0", 1, 0, parse_status="unparseable")]
+    pairs = [_make_pair("t0", 1, 0, parse_status=ParseStatus.UNPARSEABLE)]
     summaries = summarize_all_cells(pairs, resamples=100)
     assert summaries[0]["delta_valid_only"] is None
     assert summaries[0]["mcnemar_p_valid_only"] is None
@@ -187,7 +187,7 @@ def test_valid_only_none_when_fewer_than_two_valid_pairs():
 
 def test_valid_only_coincides_with_allin_when_icr_is_zero():
     """When all parse statuses are VALID, delta_valid_only == delta."""
-    pairs = [_make_pair(f"t{i}", 1, 0, parse_status="valid") for i in range(20)]
+    pairs = [_make_pair(f"t{i}", 1, 0, parse_status=ParseStatus.VALID) for i in range(20)]
     summaries = summarize_all_cells(pairs, resamples=200)
     assert math.isclose(
         summaries[0]["delta"],
@@ -198,9 +198,9 @@ def test_valid_only_coincides_with_allin_when_icr_is_zero():
 
 def test_valid_only_mcnemar_p_present():
     pairs = [
-        _make_pair("t0", 1, 0, parse_status="valid"),
-        _make_pair("t1", 1, 1, parse_status="valid"),
-        _make_pair("t2", 0, 0, parse_status="valid"),
+        _make_pair("t0", 1, 0, parse_status=ParseStatus.VALID),
+        _make_pair("t1", 1, 1, parse_status=ParseStatus.VALID),
+        _make_pair("t2", 0, 0, parse_status=ParseStatus.VALID),
     ]
     summaries = summarize_all_cells(pairs, resamples=100)
     assert summaries[0]["mcnemar_p_valid_only"] is not None

@@ -18,6 +18,7 @@ from analysis.models import (
     fit_crossed_mixed_effects_logistic,
     compute_mediation_proportion,
 )
+from enums import ConvergenceMethod
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ _SKIP_NO_STATSMODELS = pytest.mark.skipif(
 def test_mixed_effects_result_has_required_fields():
     result = MixedEffectsLogisticResult(
         converged=True,
-        method="laplace",
+        method=ConvergenceMethod.LAPLACE,
         log_likelihood=-42.3,
         n_observations=100,
         n_items=50,
@@ -85,7 +86,7 @@ def test_mixed_effects_result_has_required_fields():
         model_summary="summary text",
     )
     assert result.converged is True
-    assert result.method == "laplace"
+    assert result.method == ConvergenceMethod.LAPLACE
     assert result.n_observations == 100
     assert "is_perturbed" in result.fixed_effects
 
@@ -154,7 +155,7 @@ def test_mixed_effects_returns_result_object():
     result = fit_crossed_mixed_effects_logistic(data)
     assert isinstance(result, MixedEffectsLogisticResult)
     assert result.n_observations == len(data)
-    assert result.method in ("laplace", "variational", "glm_approximation")
+    assert result.method in set(ConvergenceMethod)
 
 
 @_SKIP_NO_STATSMODELS

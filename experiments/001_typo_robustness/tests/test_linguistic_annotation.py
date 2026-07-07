@@ -12,7 +12,7 @@ Covers:
   - Template operand coverage validation: violations are detected and reported.
   - GSM_SYMBOLIC backward-compatibility shim: old "gsm_symbolic" tag is
     re-tagged to GSM_SYMBOLIC_OFFICIAL on load.
-  - ASR seed determinism: regimes.derived_seed is stable across calls.
+  - Seed determinism: regimes.derived_seed is stable across calls.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from dataprep.annotate import (
     _token_is_key_term,
     compute_key_term_set,
     validate_template_operand_coverage,
-    KEY_TERM_RULE_VERSION,
+    KEY_TERM_IDENTIFICATION_RULE_VERSION,
 )
 
 
@@ -142,8 +142,19 @@ class TestTokenIsKeyTerm:
         token = _StubToken("city", pos_="ADJ", ent_iob_="O")
         assert _token_is_key_term(token) is False  # ADJ, no entity, no special features
 
-    def test_verb_without_special_features_is_not_a_key_term(self):
+    def test_non_auxiliary_verb_is_a_key_term(self):
+        # Main verbs carry the question's operation ("costs", "earns", "doubles")
+        # and are answer-critical by design (design/04 §4.6) — only copula/
+        # auxiliary verbs are excluded, not verbs in general.
         token = _StubToken("runs", pos_="VERB")
+        assert _token_is_key_term(token) is True
+
+    def test_auxiliary_verb_is_not_a_key_term(self):
+        token = _StubToken("has", pos_="VERB", dep_="aux")
+        assert _token_is_key_term(token) is False
+
+    def test_copula_verb_is_not_a_key_term(self):
+        token = _StubToken("is", pos_="VERB", dep_="cop")
         assert _token_is_key_term(token) is False
 
 
@@ -157,7 +168,12 @@ class TestComputeKeyTermSet:
     def test_returns_key_terms_in_document_order(self):
         tokens = [
             _StubToken("If",     pos_="SCONJ"),
-            _StubToken("France", pos_="PROPN"),
+            # A real spaCy pipeline tags a country name as a named entity (GPE);
+            # ent_iob_="B" here reflects that, so "France" gets tier-1 (structurally
+            # guaranteed) priority ahead of the TF-IDF-ranked tier-2 tokens — the
+            # same priority a numeric operand or negation gets, and for the same
+            # reason: it is answer-determining regardless of corpus frequency.
+            _StubToken("France", pos_="PROPN", ent_iob_="B"),
             _StubToken("has",    pos_="AUX"),
             _StubToken("50",     pos_="NUM"),
             _StubToken("cities", pos_="NOUN"),
@@ -307,10 +323,10 @@ class TestGsmSymbolicBackwardCompatShim:
 
 
 # ---------------------------------------------------------------------------
-# ASR seed determinism
+# Seed determinism
 # ---------------------------------------------------------------------------
 
-class TestAsrSeedDeterminism:
+class TestDerivedSeedDeterminism:
     """regimes.derived_seed is stable across calls and independent of PYTHONHASHSEED."""
 
     def test_same_inputs_produce_same_seed(self):

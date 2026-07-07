@@ -14,7 +14,7 @@ import random
 import pytest
 
 from analysis import statistics as st
-from enums import ParseStatus
+from enums import McNemarTestMethod, ParseStatus, SampleSizeMethod
 
 
 # ---------------------------------------------------------------------------
@@ -22,13 +22,13 @@ from enums import ParseStatus
 # ---------------------------------------------------------------------------
 
 def test_simple_sample_size_matches_design_tables():
-    assert st.mcnemar_sample_size(0.05, 0.20, method="simple") == 628
-    assert st.mcnemar_sample_size(0.03, 0.10, method="simple") == 873
-    assert st.mcnemar_sample_size(0.05, 0.10, method="simple") == 314
+    assert st.mcnemar_sample_size(0.05, 0.20, method=SampleSizeMethod.SIMPLE) == 628
+    assert st.mcnemar_sample_size(0.03, 0.10, method=SampleSizeMethod.SIMPLE) == 873
+    assert st.mcnemar_sample_size(0.05, 0.10, method=SampleSizeMethod.SIMPLE) == 314
 
 
 def test_connor_sample_size_supports_provisional_600_per_cell():
-    assert st.mcnemar_sample_size(0.05, 0.19, method="connor") <= 600
+    assert st.mcnemar_sample_size(0.05, 0.19, method=SampleSizeMethod.CONNOR) <= 600
 
 
 def test_audit_sample_size_matches_design():
@@ -42,8 +42,8 @@ def test_audit_sample_size_matches_design():
 
 def test_sample_size_increases_with_smaller_mde():
     """Smaller MDE (harder to detect) requires more samples."""
-    n_large_mde = st.mcnemar_sample_size(0.10, 0.25, method="simple")
-    n_small_mde = st.mcnemar_sample_size(0.05, 0.25, method="simple")
+    n_large_mde = st.mcnemar_sample_size(0.10, 0.25, method=SampleSizeMethod.SIMPLE)
+    n_small_mde = st.mcnemar_sample_size(0.05, 0.25, method=SampleSizeMethod.SIMPLE)
     assert n_small_mde > n_large_mde
 
 
@@ -53,16 +53,16 @@ def test_sample_size_varies_with_discordant_rate():
     # The simple McNemar formula n ∝ p*(1-p)/d^2; this peaks at p=0.5.
     # At our target d=0.05: n(p=0.10) < n(p=0.20) < n(p=0.25) because
     # 0.10*0.90=0.09 < 0.20*0.80=0.16 < 0.25*0.75=0.1875.
-    n_low = st.mcnemar_sample_size(0.05, 0.10, method="simple")
-    n_mid = st.mcnemar_sample_size(0.05, 0.20, method="simple")
-    n_high = st.mcnemar_sample_size(0.05, 0.25, method="simple")
+    n_low = st.mcnemar_sample_size(0.05, 0.10, method=SampleSizeMethod.SIMPLE)
+    n_mid = st.mcnemar_sample_size(0.05, 0.20, method=SampleSizeMethod.SIMPLE)
+    n_high = st.mcnemar_sample_size(0.05, 0.25, method=SampleSizeMethod.SIMPLE)
     assert n_low < n_mid < n_high
 
 
 def test_connor_is_no_larger_than_simple():
     for difference, rate in [(0.05, 0.20), (0.03, 0.10), (0.05, 0.30)]:
-        connor = st.mcnemar_sample_size(difference, rate, method="connor")
-        simple = st.mcnemar_sample_size(difference, rate, method="simple")
+        connor = st.mcnemar_sample_size(difference, rate, method=SampleSizeMethod.CONNOR)
+        simple = st.mcnemar_sample_size(difference, rate, method=SampleSizeMethod.SIMPLE)
         assert connor <= simple
 
 
@@ -143,13 +143,13 @@ def test_paired_table_clean_all_correct_pert_all_wrong():
 
 def test_mcnemar_exact_when_few_discordant():
     result = st.mcnemar_test(broke=3, recovered=1)
-    assert result.method == "exact_midp"
+    assert result.method == McNemarTestMethod.EXACT_MIDP
     assert 0.0 <= result.p_value <= 1.0
 
 
 def test_mcnemar_asymptotic_when_many_discordant():
     result = st.mcnemar_test(broke=40, recovered=10)
-    assert result.method == "asymptotic"
+    assert result.method == McNemarTestMethod.ASYMPTOTIC
     assert result.p_value < 0.05
 
 
@@ -179,9 +179,9 @@ def test_mcnemar_exact_asymptotic_threshold():
     """Verify the exact-vs-asymptotic dispatch boundary is stable.
     With discordant count <= some threshold, method should be exact."""
     small = st.mcnemar_test(broke=4, recovered=2)
-    assert small.method == "exact_midp"
+    assert small.method == McNemarTestMethod.EXACT_MIDP
     large = st.mcnemar_test(broke=25, recovered=5)
-    assert large.method == "asymptotic"
+    assert large.method == McNemarTestMethod.ASYMPTOTIC
 
 
 # ---------------------------------------------------------------------------
