@@ -6,29 +6,29 @@
 # docs/PROVENANCE.md §8.
 
 # Numerical/Statistical Dependencies
-numpy>=1.26
+numpy
 scipy
-statsmodels>=0.14
-pandas>=2.0
+statsmodels
+pandas
 
 # Config
-pyyaml>=6.0
+pyyaml
 
 # Dataset Loading
-datasets>=3.0
+datasets
 
 # Figures
-matplotlib>=3.8
+matplotlib
 
 # CMU Pronouncing
-pronouncing>=0.2
+pronouncing
 
 # Progress bars
-tqdm>=4.66
+tqdm
 
 # TF-IDF proxy for key-term ranking in the K_P(x) annotation rule.
-wordfreq>=3.0
-spacy>=3.7
-spacy-transformers>=1.2   # required for en_core_web_trf (GPU-accelerated on Colab)
-click>=8.0
+wordfreq
+spacy
+spacy-transformers   # required for en_core_web_trf (GPU-accelerated on Colab)
+click
 
