@@ -5,28 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "typo_robustness"
 version = "0.1.0"
-description = "Tokenization-mediated LLM robustness to ASR transcription errors and typographical noise"
+description = "Tokenization-mediated LLM robustness to typographical noise"
 readme = "README.md"
 requires-python = ">=3.10"
 
 # Runtime dependencies are tracked in requirements.txt (core) and
-# requirements-gpu.txt (GPU/ASR). They are intentionally NOT duplicated here as
+# requirements-gpu.txt (GPU). They are intentionally NOT duplicated here as
 # version specifiers, because the two-file split (CPU-only analysis vs the heavy
-# GPU/audio stack) is part of the design (docs/PROVENANCE.md §8) and pip's
+# GPU stack) is part of the design (docs/PROVENANCE.md §8) and pip's
 # extras would blur that line. Install with:
 #     pip install -e .                       # the package itself
 #     pip install -r requirements.txt        # core
-#     pip install -r requirements-gpu.txt    # GPU/ASR, on the cluster only
+#     pip install -r requirements-gpu.txt    # GPU, on the cluster only
 
 # The source layout is flat under src/:
 #   sub-packages: perturbation/, tasks/, inference/, pipeline/, analysis/
-#   root modules: regimes.py, tokenization.py, scoring.py, asr.py
+#   root modules: regimes.py, tokenization.py, scoring.py
 # `pip install -e .` adds src/ to the path, making all of these importable
 # directly (e.g. `import regimes`, `from perturbation import perturb`).
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["enums", "lexicons", "regimes", "tokenization", "scoring", "asr"]
+py-modules = ["enums", "lexicons", "regimes", "tokenization", "scoring"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
