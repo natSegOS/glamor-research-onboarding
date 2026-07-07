@@ -1,6 +1,5 @@
-# GPU-side and ASR dependencies — needed only for the generation step
-# (running the models) and the ASR pre-processing step (TTS -> Whisper).
-# Install these on the USC cluster or Colab, on top of requirements.txt.
+# GPU-side dependencies — needed only for the generation step (running the
+# models). Install these on the USC cluster or Colab, on top of requirements.txt.
 #
 # Versions verified against PyPI in June 2026. See docs/PROVENANCE.md §8.
 #
@@ -27,7 +26,10 @@ accelerate>=0.33
 # are unavailable on a given machine (design/05 §5.4, HFEngine).
 bitsandbytes>=0.43
 
-# ASR arm (dormant — owned by PI; do not add here). The asr.py and
-# build_asr_items.py modules remain in the repo for the PI's workstream.
-# openai-whisper, edge-tts, soundfile are NOT required for the written-text
-# perturbation pipeline and are intentionally omitted to keep the GPU image lean.
+# The ASR (speech) arm — TTS -> noise -> Whisper transcription as a source of
+# real-word-shift perturbations — is out of scope for this study (PI decision)
+# and has been removed from the codebase, not merely deferred. openai-whisper,
+# edge-tts, and soundfile are therefore not dependencies here. The written-text
+# real-word-shift builder (regimes.make_regime_b_real_word_shift) still draws on
+# phonetic homophones via the lightweight `pronouncing` package (optional; see
+# requirements.txt) — that is independent of the removed audio pipeline.
