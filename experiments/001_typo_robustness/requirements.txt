@@ -5,6 +5,9 @@
 # registered analysis is frozen. Rationale for the CPU/GPU split: see
 # docs/PROVENANCE.md §8.
 
+# Compatibility for Google Colab
+huggingface-hub>=1.2.0
+
 # Numerical/Statistical Dependencies
 numpy
 scipy
