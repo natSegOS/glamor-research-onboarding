@@ -5,63 +5,30 @@
 # registered analysis is frozen. Rationale for the CPU/GPU split: see
 # docs/PROVENANCE.md §8.
 
-# Numerical and statistical core.
-numpy>=1.26,<3.0          # array math; 2.x is fine, capped below a hypothetical 3.0
-scipy>=1.11               # bootstrap, McNemar binomial/chi-square, norm.ppf
+# Numerical/Statistical Dependencies
+numpy>=1.26
+scipy>=1.11]
+statsmodels>=0.14
+pandas>=2.0
 
-# Config files.
+# Config
 pyyaml>=6.0
 
-# Dataset loading (HuggingFace `datasets`). Pulls the official GSM-Symbolic and
-# MMLU-Pro data. CPU-only; does not require torch for plain dataset loading.
+# Dataset Loading
 datasets>=3.0
 
-# HuggingFace Hub client — used to resolve and assert pinned model revisions
-# (commit SHAs) even on the analysis machine. Held at >=1.2.0 for compatibility
-# with gradio 6.19.0 (requires huggingface-hub<2.0,>=1.2.0) in environments that
-# also run a gradio UI. This is incompatible with spacy-transformers, which caps
-# transformers<4.53.3 (and every release in that range caps huggingface-hub
-# below 1.0) — that's why spacy/spacy-transformers live in the separate
-# requirements-annotation.txt instead of here; see that file's header.
-huggingface-hub>=1.2.0
-
-# Figures. analysis/results.py degrades gracefully (returns None) if matplotlib
-# is absent, so this is effectively optional, but the figures are part of the
-# deliverable so it is listed here.
+# Figures
 matplotlib>=3.8
 
-# Mixed-effects logistic regression (the full-design model, design/06 §6.6).
-# statsmodels provides binomial GLM and, via formula, mixed effects; for the
-# maximal crossed random-effects structure we document a fallback to a
-# Bayesian/penalized fit in design/06 §6.6 if statsmodels fails to converge.
-statsmodels>=0.14
-pandas>=2.0               # statsmodels and the cell-table I/O depend on it
-
-# CMU Pronouncing Dictionary wrapper — used by the real_word selection policy
-# to generate phonetic-homophone candidates for Regime B (design/02 §2.4).
-# Falls back gracefully (orthographic DL band only) if absent, so offline /
-# smoke-test runs continue without audio dependencies.
+# CMU Pronouncing
 pronouncing>=0.2
 
-# Progress bars for long-running pipeline steps. Uses tqdm's auto-detection to
-# render a notebook widget in Colab and a terminal bar on the cluster.
+# Progress bars
 tqdm>=4.66
 
 # TF-IDF proxy for key-term ranking in the K_P(x) annotation rule.
-# Used by tools/build_annotated_dataset.py; falls back to TF-only ranking
-# (count_in_item order) when not installed, so offline/smoke runs continue
-# without it.  Install for correct annotation ranking behaviour.
 wordfreq>=3.0
+spacy>=3.7
+spacy-transformers>=1.2   # required for en_core_web_trf (GPU-accelerated on Colab)
+click>=8.0
 
-# ---------------------------------------------------------------------------
-# Build-tool dependencies (Stage 0: data preparation)
-# ---------------------------------------------------------------------------
-# spaCy/spacy-transformers (used by tools/build_annotated_dataset.py to annotate
-# item JSONL files with frozen K_P(x) key terms) live in a separate file,
-# requirements-annotation.txt, and are installed in their own environment.
-# spacy-transformers pins transformers<4.53.3, which forces huggingface-hub<1.0
-# — irreconcilable with the huggingface-hub>=1.2.0 pin above (needed for
-# gradio 6.19.0). Since annotation is a one-time Stage 0 step whose output is
-# committed as a frozen JSONL artifact (not needed during generation or
-# analysis), it does not need to share this environment. tools/run_generation.py
-# already treats spaCy as optional at runtime (--no-spacy flag).

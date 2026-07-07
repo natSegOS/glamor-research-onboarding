@@ -1,25 +1,5 @@
 # GPU-side dependencies — needed only for the generation step (running the
 # models). Install these on the USC cluster or Colab, on top of requirements.txt.
-#
-# Install together with requirements-annotation.txt in a single pip invocation
-# (`pip install -r requirements-gpu.txt -r requirements-annotation.txt`) rather
-# than as two separate commands. spacy-transformers (in requirements-annotation.txt)
-# caps transformers<4.53.3; installed alone this file would resolve transformers
-# to the latest <5.0 release, which is newer than that cap. A single combined
-# install lets pip's resolver pick one transformers version (there is overlap:
-# 4.44-4.53.2) that satisfies both files, instead of two sequential installs
-# silently fighting over the same package. See colab_driver.ipynb Cell 2.
-#
-# Versions verified against PyPI in June 2026. See docs/PROVENANCE.md §8.
-#
-# COMPATIBILITY NOTE (important): as of June 2026 the newest vLLM (0.23.x) ships
-# on torch 2.11 / CUDA 13, and `transformers` has moved to the 5.x series, which
-# carries breaking changes from the 4.x line. For a reproducible research
-# pipeline we pin to a known-good, widely-deployed window rather than the
-# bleeding edge. The pins below are mutually compatible and run on the common
-# Colab/cluster CUDA 12.x images. Confirm against your cluster's CUDA at
-# pre-registration and bump together if needed (vLLM's CUDA policy follows
-# PyTorch's).
 
 # Inference engine. Continuous batching + prefix caching (design/07 §7.2).
 # 0.10.x is the last 0.10 series on the torch 2.x / CUDA 12.x line and is what
@@ -31,14 +11,8 @@ vllm>=0.10,<0.11
 # breaking change and is deliberately avoided here.
 transformers>=4.44,<5.0
 accelerate>=0.33
+
 # bitsandbytes powers the nf4 stand-in in the HF fallback engine when AWQ wheels
 # are unavailable on a given machine (design/05 §5.4, HFEngine).
 bitsandbytes>=0.43
 
-# The ASR (speech) arm — TTS -> noise -> Whisper transcription as a source of
-# real-word-shift perturbations — is out of scope for this study (PI decision)
-# and has been removed from the codebase, not merely deferred. openai-whisper,
-# edge-tts, and soundfile are therefore not dependencies here. The written-text
-# real-word-shift builder (regimes.make_regime_b_real_word_shift) still draws on
-# phonetic homophones via the lightweight `pronouncing` package (optional; see
-# requirements.txt) — that is independent of the removed audio pipeline.
