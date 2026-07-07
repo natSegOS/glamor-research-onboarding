@@ -17,11 +17,13 @@ pyyaml>=6.0
 datasets>=3.0
 
 # HuggingFace Hub client — used to resolve and assert pinned model revisions
-# (commit SHAs) even on the analysis machine. Capped below 1.0: spacy-transformers
-# (below) pins transformers<4.53.3, and no transformers release in that range
-# supports huggingface-hub>=1.0, so an uncapped/1.x pin here forces pip to
-# backtrack transformers down to ancient releases with no prebuilt wheels.
-huggingface-hub>=0.30,<1.0
+# (commit SHAs) even on the analysis machine. Held at >=1.2.0 for compatibility
+# with gradio 6.19.0 (requires huggingface-hub<2.0,>=1.2.0) in environments that
+# also run a gradio UI. This is incompatible with spacy-transformers, which caps
+# transformers<4.53.3 (and every release in that range caps huggingface-hub
+# below 1.0) — that's why spacy/spacy-transformers live in the separate
+# requirements-annotation.txt instead of here; see that file's header.
+huggingface-hub>=1.2.0
 
 # Figures. analysis/results.py degrades gracefully (returns None) if matplotlib
 # is absent, so this is effectively optional, but the figures are part of the
@@ -54,19 +56,12 @@ wordfreq>=3.0
 # ---------------------------------------------------------------------------
 # Build-tool dependencies (Stage 0: data preparation)
 # ---------------------------------------------------------------------------
-# Required for tools/build_annotated_dataset.py, which annotates item JSONL
-# files with frozen K_P(x) key terms.  Not needed during generation or
-# analysis; the annotation output is committed as a frozen JSONL artifact.
-#
-# spaCy model: both pilot and confirmatory runs use en_core_web_trf
-# (RoBERTa-based; highest morphological and NER accuracy; spacy.io/models/en).
-# Run after installing spacy and spacy-transformers:
-#   python -m spacy download en_core_web_trf
-# The exact model name and meta.json SHA-256 are recorded in
-# data/items/annotation_PROVENANCE.json.
-spacy>=3.7
-spacy-transformers>=1.2   # required for en_core_web_trf (GPU-accelerated on Colab)
-
-# spacy's CLI imports click directly, but recent typer releases (a spacy dep)
-# no longer pull click in transitively, so it must be listed explicitly.
-click>=8.0
+# spaCy/spacy-transformers (used by tools/build_annotated_dataset.py to annotate
+# item JSONL files with frozen K_P(x) key terms) live in a separate file,
+# requirements-annotation.txt, and are installed in their own environment.
+# spacy-transformers pins transformers<4.53.3, which forces huggingface-hub<1.0
+# — irreconcilable with the huggingface-hub>=1.2.0 pin above (needed for
+# gradio 6.19.0). Since annotation is a one-time Stage 0 step whose output is
+# committed as a frozen JSONL artifact (not needed during generation or
+# analysis), it does not need to share this environment. tools/run_generation.py
+# already treats spaCy as optional at runtime (--no-spacy flag).
