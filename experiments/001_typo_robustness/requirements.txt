@@ -18,7 +18,7 @@ datasets>=3.0
 
 # HuggingFace Hub client — used to resolve and assert pinned model revisions
 # (commit SHAs) even on the analysis machine.
-huggingface-hub>=0.34
+huggingface-hub>=1.2.0
 
 # Figures. analysis/results.py degrades gracefully (returns None) if matplotlib
 # is absent, so this is effectively optional, but the figures are part of the
