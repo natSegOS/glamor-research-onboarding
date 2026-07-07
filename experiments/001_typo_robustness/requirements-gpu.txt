@@ -1,6 +1,15 @@
 # GPU-side dependencies — needed only for the generation step (running the
 # models). Install these on the USC cluster or Colab, on top of requirements.txt.
 #
+# Install together with requirements-annotation.txt in a single pip invocation
+# (`pip install -r requirements-gpu.txt -r requirements-annotation.txt`) rather
+# than as two separate commands. spacy-transformers (in requirements-annotation.txt)
+# caps transformers<4.53.3; installed alone this file would resolve transformers
+# to the latest <5.0 release, which is newer than that cap. A single combined
+# install lets pip's resolver pick one transformers version (there is overlap:
+# 4.44-4.53.2) that satisfies both files, instead of two sequential installs
+# silently fighting over the same package. See colab_driver.ipynb Cell 2.
+#
 # Versions verified against PyPI in June 2026. See docs/PROVENANCE.md §8.
 #
 # COMPATIBILITY NOTE (important): as of June 2026 the newest vLLM (0.23.x) ships

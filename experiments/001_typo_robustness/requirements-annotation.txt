@@ -1,0 +1,31 @@
+# Stage 0 annotation dependencies — needed only to run
+# tools/build_annotated_dataset.py, which annotates item JSONL files with
+# frozen K_P(x) key terms. Install these in their OWN virtual environment,
+# separate from requirements.txt.
+#
+# Why separate: spacy-transformers pins transformers<4.53.3, and every
+# transformers release in that range caps huggingface-hub<1.0. requirements.txt
+# holds huggingface-hub>=1.2.0 (needed for gradio 6.19.0 compatibility), which
+# is irreconcilable with that cap — installing both sets in one environment
+# forces pip to backtrack transformers down to ancient (~4.12) releases whose
+# `tokenizers` dependency has no prebuilt wheels for modern Python. Annotation
+# is a one-time step whose output is committed as a frozen JSONL artifact, so
+# it does not need to share an environment with the analysis/generation stack.
+#
+# spaCy model: both pilot and confirmatory runs use en_core_web_trf
+# (RoBERTa-based; highest morphological and NER accuracy; spacy.io/models/en).
+# After installing this file, run:
+#   python -m spacy download en_core_web_trf
+# The exact model name and meta.json SHA-256 are recorded in
+# data/items/annotation_PROVENANCE.json.
+spacy>=3.7
+spacy-transformers>=1.2   # required for en_core_web_trf (GPU-accelerated on Colab)
+
+# spacy's CLI imports click directly, but recent typer releases (a spacy dep)
+# no longer pull click in transitively, so it must be listed explicitly.
+click>=8.0
+
+# TF-IDF proxy for key-term ranking in the K_P(x) annotation rule. Also listed
+# as optional in requirements.txt (falls back to TF-only ranking if absent),
+# but this stage always wants correct ranking behaviour.
+wordfreq>=3.0
