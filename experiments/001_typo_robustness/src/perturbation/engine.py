@@ -39,6 +39,7 @@ import random
 import re
 
 from dataclasses import dataclass, asdict
+from functools import lru_cache
 from typing import Callable, Optional, Sequence
 
 from enums import EnglishDiscourseParticle, Operation, SelectionPolicy, Scope, Unit, SemanticClass
@@ -132,9 +133,10 @@ def _load_phoneme_index() -> bool:
     return _phoneme_index_available
 
 
+@lru_cache(maxsize=None)
 def _cmu_homophone_neighbors(
         word: str,
-        is_word: Optional[Callable[[str], bool]]) -> list[str]:
+        is_word: Optional[Callable[[str], bool]]) -> frozenset[str]:
     """Return valid-word exact homophones of ``word`` from the CMU Pronouncing
     Dictionary.
 
@@ -142,32 +144,34 @@ def _cmu_homophone_neighbors(
     confusions where an ASR system outputs a different word with an identical
     phoneme sequence (e.g. "weather" / "whether", "there" / "their").
 
-    Falls back silently to an empty list when the ``pronouncing`` package is
+    Falls back silently to an empty set when the ``pronouncing`` package is
     absent, the word has no CMUdict entry, or ``is_word`` is not supplied — in
     those cases the orthographic Damerau-Levenshtein band still applies.
+
+    Cached per ``(word, is_word)``: a pure function of both (the same
+    ``is_word`` dictionary is reused for an entire run), and the same word
+    recurs across many items, conditions, and rejection-sampling attempts.
     """
 
     if is_word is None or not _load_phoneme_index():
-        return []
+        return frozenset()
 
-    try:
-        import pronouncing  # noqa: PLC0415 — lazy import by design
-    except ImportError:
-        return []
+    import pronouncing  # noqa: PLC0415 — lazy import by design; already
+    # cached in sys.modules once _load_phoneme_index() has returned True.
 
-    homophone_candidates: set[str] = set()
-
-    for space_separated_phones in pronouncing.phones_for_word(word.lower()):
-        stress_stripped_phoneme_key = tuple(
-            re.sub(r"\d", "", phoneme)
-            for phoneme in space_separated_phones.split()
-        )
-        for candidate_word in _phoneme_sequence_to_words.get(
-                stress_stripped_phoneme_key, []):
-            if candidate_word != word.lower() and is_word(candidate_word):
-                homophone_candidates.add(candidate_word)
-
-    return sorted(homophone_candidates)
+    phoneme_keys_for_word = (
+        tuple(re.sub(r"\d", "", phoneme) for phoneme in space_separated_phones.split())
+        for space_separated_phones in pronouncing.phones_for_word(word.lower())
+    )
+    candidate_words = (
+        candidate_word
+        for phoneme_key in phoneme_keys_for_word
+        for candidate_word in _phoneme_sequence_to_words.get(phoneme_key, [])
+    )
+    return frozenset(
+        candidate_word for candidate_word in candidate_words
+        if candidate_word != word.lower() and is_word(candidate_word)
+    )
 
 
 class PerturbationError(Exception):
@@ -204,36 +208,48 @@ class Edit:
 def damerau_levenshtein_distance(first_string: str, second_string: str) -> int:
     """The Damerau-Levenshtein distance: minimum number of insertions,
     deletions, substitutions, and adjacent transpositions to turn one string
-    into the other (Damerau, 1964)."""
+    into the other (Damerau, 1964).
+
+    Row ``i`` of the classic DP matrix only ever reads rows ``i-1`` and
+    ``i-2`` (the latter for the transposition check), so this keeps three
+    rolling rows instead of the full ``(first_length+1) x (second_length+1)``
+    matrix — identical algorithm and result, O(second_length) memory instead
+    of O(first_length * second_length). This is called on full prompt-length
+    strings (not single words), where that difference is significant.
+    """
     first_length, second_length = len(first_string), len(second_string)
 
-    distance = [[0] * (second_length + 1) for _ in range(first_length + 1)]
-
-    for i in range(first_length + 1):
-        distance[i][0] = i
-    for j in range(second_length + 1):
-        distance[0][j] = j
+    two_rows_back = [0] * (second_length + 1)
+    previous_row = list(range(second_length + 1))
+    current_row = [0] * (second_length + 1)
 
     for i in range(1, first_length + 1):
+        current_row[0] = i
+        first_character = first_string[i - 1]
+
         for j in range(1, second_length + 1):
+            second_character = second_string[j - 1]
+            substitution_cost = 0 if first_character == second_character else 1
 
-            substitution_cost = 0 if first_string[i - 1] == second_string[j - 1] else 1
-
-            distance[i][j] = min(
-                distance[i - 1][j] + 1,                       # deletion
-                distance[i][j - 1] + 1,                       # insertion
-                distance[i - 1][j - 1] + substitution_cost,   # substitution
+            best_distance = min(
+                previous_row[j] + 1,                        # deletion
+                current_row[j - 1] + 1,                      # insertion
+                previous_row[j - 1] + substitution_cost,     # substitution
             )
 
             is_adjacent_transposition = (
                 i > 1 and j > 1
-                and first_string[i - 1] == second_string[j - 2]
-                and first_string[i - 2] == second_string[j - 1]
+                and first_character == second_string[j - 2]
+                and first_string[i - 2] == second_character
             )
             if is_adjacent_transposition:
-                distance[i][j] = min(distance[i][j], distance[i - 2][j - 2] + 1)
+                best_distance = min(best_distance, two_rows_back[j - 2] + 1)
 
-    return distance[first_length][second_length]
+            current_row[j] = best_distance
+
+        two_rows_back, previous_row, current_row = previous_row, current_row, two_rows_back
+
+    return previous_row[second_length]
 
 
 # ---------------------------------------------------------------------------
@@ -662,32 +678,38 @@ def _apply_filler_word_insertion(character_cells, random_generator, is_eligible)
                 word_index=word_index, word_before=word_before, word_after=filler_token)
 
 
-def _damerau_levenshtein_one_neighbors(word: str) -> set[str]:
+@lru_cache(maxsize=None)
+def _damerau_levenshtein_one_neighbors(word: str) -> frozenset[str]:
     """Return every Damerau-Levenshtein-distance-1 letter variant of ``word``
     (substitution, deletion, insertion, adjacent transposition). Used by the
-    real-word policy to find valid-word neighbors."""
-    variants: set[str] = set()
+    real-word policy to find valid-word neighbors.
 
-    for i in range(len(word)):
-        for replacement in LOWERCASE_ALPHABET:                       # substitution
-            if replacement != word[i].lower():
-                cased = replacement.upper() if word[i].isupper() else replacement
-                variants.add(word[:i] + cased + word[i + 1:])
-        variants.add(word[:i] + word[i + 1:])                        # deletion
+    Cached: distance-2 neighborhoods (below) expand every distance-1 variant
+    through this same function again, and the same word recurs across many
+    items, conditions, and rejection-sampling attempts within a run.
+    """
+    substitutions = {
+        word[:i] + (replacement.upper() if word[i].isupper() else replacement) + word[i + 1:]
+        for i in range(len(word))
+        for replacement in LOWERCASE_ALPHABET
+        if replacement != word[i].lower()
+    }
+    deletions = {word[:i] + word[i + 1:] for i in range(len(word))}
+    insertions = {
+        word[:i] + inserted + word[i:]
+        for i in range(len(word) + 1)
+        for inserted in LOWERCASE_ALPHABET
+    }
+    transpositions = {
+        word[:i] + word[i + 1] + word[i] + word[i + 2:]
+        for i in range(len(word) - 1)
+        if word[i] != word[i + 1]
+    }
+    return frozenset(substitutions | deletions | insertions | transpositions) - {word}
 
-    for i in range(len(word) + 1):
-        for inserted in LOWERCASE_ALPHABET:                          # insertion
-            variants.add(word[:i] + inserted + word[i:])
 
-    for i in range(len(word) - 1):                                   # transposition
-        if word[i] != word[i + 1]:
-            variants.add(word[:i] + word[i + 1] + word[i] + word[i + 2:])
-
-    variants.discard(word)
-    return variants
-
-
-def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> set[str]:
+@lru_cache(maxsize=None)
+def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> frozenset[str]:
     """Return all string variants of ``word`` within Damerau-Levenshtein distance
     ``max_distance``.
 
@@ -696,27 +718,21 @@ def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> set
     result is the complete DL ≤ 2 neighbourhood, computed by expanding every
     level-1 variant by one additional DL-1 step.  The original word is excluded.
     """
-    level1 = _damerau_levenshtein_one_neighbors(word)
+    level_one_neighbors = _damerau_levenshtein_one_neighbors(word)
     if max_distance < 2:
-        return level1
-    # Level 2: expand from every level-1 variant; include both levels.
-    result: set[str] = set(level1)
-    for neighbor in level1:
-        result |= _damerau_levenshtein_one_neighbors(neighbor)
-    result.discard(word)
-    return result
+        return level_one_neighbors
+    level_two_neighbors = level_one_neighbors.union(
+        *(_damerau_levenshtein_one_neighbors(neighbor) for neighbor in level_one_neighbors))
+    return level_two_neighbors - {word}
 
 
-def _apply_real_word_substitution(
-        character_cells,
-        random_generator,
-        is_eligible,
-        is_word,
-        *,
-        max_word_distance: int = 1) -> Edit:
-    """Replace a whole word with a valid-word neighbor.
-
-    Candidates are drawn from the union of two pools:
+@lru_cache(maxsize=None)
+def _valid_real_word_neighbors(
+        word: str,
+        max_word_distance: int,
+        is_word: Callable[[str], bool]) -> tuple[str, ...]:
+    """Return the sorted, deduplicated valid-word neighbors of ``word``, drawn
+    from the union of two pools:
 
     1. **Orthographic band** — all strings within DL distance ``max_word_distance``
        of the source word that are recognised as valid words.  At distance 1 this
@@ -730,9 +746,28 @@ def _apply_real_word_substitution(
        the ``pronouncing`` package is installed.  If the package is absent the
        pool falls back to the orthographic band only.
 
-    The final candidate list is the sorted union of both pools, filtered to
-    valid words distinct from the source word, and selection is deterministic
-    given the random generator state.
+    Cached per ``(word, max_word_distance, is_word)``: the same word recurs
+    across many items, conditions, and rejection-sampling attempts within a
+    run, and this is the single most expensive step in Regime B construction.
+    """
+    orthographic = {
+        candidate for candidate in _damerau_levenshtein_band_neighbors(word, max_word_distance)
+        if is_word(candidate.lower()) and candidate.lower() != word.lower()
+    }
+    phonetic = _cmu_homophone_neighbors(word, is_word) - {word.lower()}
+    return tuple(sorted(orthographic | phonetic))
+
+
+def _apply_real_word_substitution(
+        character_cells,
+        random_generator,
+        is_eligible,
+        is_word,
+        *,
+        max_word_distance: int = 1) -> Edit:
+    """Replace a whole word with a valid-word neighbor (see
+    ``_valid_real_word_neighbors`` for how the candidate pool is built).
+    Selection is deterministic given the random generator state.
     """
     if is_word is None:
         raise PerturbationError("the real_word policy requires an is_word callable")
@@ -750,17 +785,7 @@ def _apply_real_word_substitution(
         if not is_word(word.lower()):
             continue
 
-        # Orthographic band (DL ≤ max_word_distance).
-        orthographic = {
-            candidate for candidate in
-            _damerau_levenshtein_band_neighbors(word, max_word_distance)
-            if is_word(candidate.lower()) and candidate.lower() != word.lower()
-        }
-        # Phonetic homophones (exact CMUdict pronunciation match).
-        phonetic = set(_cmu_homophone_neighbors(word, is_word))
-        phonetic.discard(word.lower())
-
-        valid_word_neighbors = sorted(orthographic | phonetic)
+        valid_word_neighbors = _valid_real_word_neighbors(word, max_word_distance, is_word)
         if not valid_word_neighbors:
             continue
 
