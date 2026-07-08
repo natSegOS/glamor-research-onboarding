@@ -4,7 +4,7 @@
 # Inference engine. Continuous batching + prefix caching (design/07 §7.2).
 # 0.10.x is the last 0.10 series on the torch 2.x / CUDA 12.x line and is what
 # the Colab/cluster images of this era ship; pin exactly at pre-registration.
-vllm==0.10.1
+vllm==0.10.0
 
 # Model loading / tokenizers / fallback HF generation engine. Held in the 4.x
 # line for compatibility with the pinned vLLM above; the 5.x series is a
