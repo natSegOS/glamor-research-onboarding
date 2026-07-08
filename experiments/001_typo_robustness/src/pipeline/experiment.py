@@ -39,7 +39,7 @@ from enums import (
 
 from inference.engines import apply_chat_template
 import regimes
-from perturbation import PerturbationError, damerau_levenshtein_distance
+from perturbation import PerturbationError
 from pipeline.runner import (
     GenerationRequest,
     ShardManifest,
@@ -241,34 +241,40 @@ def build_requests(
     requests: list[GenerationRequest] = []
     seen_clean_task_ids: set = set()
 
-    for task_item in task_items:
-        clean_prompt = task_item.full_prompt
-        # ReasoningItem carries gold_answer; MultipleChoiceItem carries gold_letter.
-        gold_answer = getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
+    with ProgressBar(
+            total=len(task_items),
+            description="building perturbation requests",
+    ) as progress:
+        for task_item in task_items:
+            clean_prompt = task_item.full_prompt
+            # ReasoningItem carries gold_answer; MultipleChoiceItem carries gold_letter.
+            gold_answer = getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
 
-        if task_item.task_id not in seen_clean_task_ids:
-            requests.append(GenerationRequest(
-                task_id=task_item.task_id,
-                task_family=task_item.task_family,
-                prompt=clean_prompt,
-                gold_answer=gold_answer,
-                is_clean=True,
-                perturbation_state_vector={
-                    "semantic_class": SemanticClass.CLEAN,
-                    "operation": Operation.NONE,
-                    "selection_policy": SelectionPolicy.NONE,
-                    "scope": Scope.NONE,
-                    "edit_budget": 0,
-                },
-                seed=seed,
-                clean_prompt=clean_prompt,
-            ))
-            seen_clean_task_ids.add(task_item.task_id)
+            if task_item.task_id not in seen_clean_task_ids:
+                requests.append(GenerationRequest(
+                    task_id=task_item.task_id,
+                    task_family=task_item.task_family,
+                    prompt=clean_prompt,
+                    gold_answer=gold_answer,
+                    is_clean=True,
+                    perturbation_state_vector={
+                        "semantic_class": SemanticClass.CLEAN,
+                        "operation": Operation.NONE,
+                        "selection_policy": SelectionPolicy.NONE,
+                        "scope": Scope.NONE,
+                        "edit_budget": 0,
+                    },
+                    seed=seed,
+                    clean_prompt=clean_prompt,
+                ))
+                seen_clean_task_ids.add(task_item.task_id)
 
-        for condition in conditions:
-            requests.extend(_build_synthetic_requests(
-                task_item, condition, gold_answer, clean_prompt,
-                is_word, tokenizer, seed, exclusion_sidecar=exclusion_sidecar))
+            for condition in conditions:
+                requests.extend(_build_synthetic_requests(
+                    task_item, condition, gold_answer, clean_prompt,
+                    is_word, tokenizer, seed, exclusion_sidecar=exclusion_sidecar))
+
+            progress.advance()
 
     return requests
 
@@ -319,7 +325,8 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
         perturbed_prompt = clean_prompt.replace(content_text, perturbed_content)
 
         token_metric_fields = _tokenization_fields(
-            tokenizer, content_text, perturbed_content, edits)
+            tokenizer, content_text, perturbed_content, edits,
+            measured_dl=regime_metadata["damerau_levenshtein_distance"])
 
         requests.append(GenerationRequest(
             task_id=task_item.task_id,
@@ -413,7 +420,7 @@ def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
         "_construct_regime_c before reaching this function")
 
 
-def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits) -> dict:
+def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits, measured_dl: int) -> dict:
     """Compute the tokenization metrics for a perturbed item.
 
     Token-inflation is whole-text; subword-count change and fragmentation
@@ -423,7 +430,14 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits) -> 
     Adds (Workstream 3):
       ``measured_dl``       — actual DL distance between clean and perturbed
                               content strings (verification stat; edit_budget in the
-                              PSV is the operational lever).
+                              PSV is the operational lever). Passed in rather than
+                              recomputed here: the regime builder that produced
+                              ``perturbed_content`` already computed this exact
+                              distance between these exact two strings for its own
+                              metadata, and Damerau-Levenshtein over full prompt
+                              text (not single words) is expensive enough that
+                              computing it twice per request measurably slows
+                              request construction.
       ``word_length_before`` — character count of the first edited word before the
                                edit; controls for length confound in the mixed-effects
                                model (Workstream 9).
@@ -431,7 +445,7 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits) -> 
     fields: dict[str, object] = {
         "token_inflation_ratio":
             tokenization.token_inflation_ratio(tokenizer, clean_content, perturbed_content),
-        "measured_dl": damerau_levenshtein_distance(clean_content, perturbed_content),
+        "measured_dl": measured_dl,
     }
 
     edited_words = [
@@ -484,13 +498,15 @@ def required_context_length(
     what exhausted a 15GB Colab T4 during the pilot.
     """
     longest_needed = 0
-    for request in requests:
-        completion_budget = (
-            max_new_tokens_reasoning if request.task_family in REASONING_FAMILIES
-            else max_new_tokens_multiple_choice)
-        templated_prompt = apply_chat_template(tokenizer, request.prompt)
-        prompt_tokens = len(tokenizer.encode(templated_prompt, add_special_tokens=False))
-        longest_needed = max(longest_needed, prompt_tokens + completion_budget)
+    with ProgressBar(total=len(requests), description="sizing context length") as progress:
+        for request in requests:
+            completion_budget = (
+                max_new_tokens_reasoning if request.task_family in REASONING_FAMILIES
+                else max_new_tokens_multiple_choice)
+            templated_prompt = apply_chat_template(tokenizer, request.prompt)
+            prompt_tokens = len(tokenizer.encode(templated_prompt, add_special_tokens=False))
+            longest_needed = max(longest_needed, prompt_tokens + completion_budget)
+            progress.advance()
 
     with_margin = math.ceil(longest_needed * safety_margin)
     return math.ceil(with_margin / round_to) * round_to
