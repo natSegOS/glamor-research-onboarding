@@ -18,6 +18,7 @@ run (the n<2 guard lives in statistics.summarize_cell).
 from __future__ import annotations
 
 import csv
+import os
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -209,6 +210,14 @@ def write_cell_table(cell_summaries: Sequence[dict], output_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def _import_pyplot():
+    # matplotlib reads MPLBACKEND at import time, before matplotlib.use() below
+    # ever runs — so a stray inherited value (e.g. Jupyter/Colab's own
+    # "module://matplotlib_inline.backend_inline", leaked into this process's
+    # environment from the parent kernel that launched it) crashes the import
+    # itself with a ValueError, not an ImportError. Force the headless backend
+    # this analysis step actually needs before matplotlib ever reads that
+    # variable, regardless of what environment it was launched from.
+    os.environ["MPLBACKEND"] = "Agg"
     try:
         import matplotlib
         matplotlib.use("Agg")
