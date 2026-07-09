@@ -134,8 +134,19 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
     fixed_formula = " + ".join(fixed_terms)
     formula = f"is_correct ~ {fixed_formula}"
 
+    # Exceptions statsmodels/numpy raise for a numerical fit failure (singular
+    # matrix, non-convergence, quasi-complete separation) — expected, and
+    # exactly what the fallback ladder exists to absorb. Anything else
+    # (TypeError, AttributeError, KeyError, ...) is a real bug in the calling
+    # code, not a fit failure, and must propagate rather than be silently
+    # treated as "try the next method."
+    statistical_fit_failure_exceptions = (ValueError, RuntimeError, np.linalg.LinAlgError)
+
     # Convergence fallback ladder. The outer label is our result tag
     # (ConvergenceMethod); fit_kwargs["method"] is statsmodels' own solver name.
+    # Failure reasons accumulate here so a totally-non-converged result still
+    # tells the caller why each rung was skipped, instead of just "GLM ran".
+    fit_failure_reasons: list[str] = []
     for method_name, fit_kwargs in [
         (ConvergenceMethod.LAPLACE, {"method": "laplace", "maxiter": 200}),
         (ConvergenceMethod.VARIATIONAL, {"method": "lbfgs", "maxiter": 400}),
@@ -150,7 +161,9 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
             if result.converged:
                 return _pack_mixed_result(
                     result, method_name, n_obs, n_items, n_models)
-        except Exception:
+            fit_failure_reasons.append(f"{method_name}: fit ran but did not converge")
+        except statistical_fit_failure_exceptions as error:
+            fit_failure_reasons.append(f"{method_name}: {error}")
             continue
 
     # GLM approximation fallback: treat item and model as fixed factors.
@@ -182,7 +195,8 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
             random_effects_variance={},
             model_summary=str(glm_result.summary()),
         )
-    except Exception as error:
+    except statistical_fit_failure_exceptions as error:
+        fit_failure_reasons.append(f"{ConvergenceMethod.GLM_APPROXIMATION}: {error}")
         return MixedEffectsLogisticResult(
             converged=False,
             method=ConvergenceMethod.GLM_APPROXIMATION,
@@ -192,7 +206,7 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
             n_models=n_models,
             fixed_effects={},
             random_effects_variance={},
-            model_summary=str(error),
+            model_summary="; ".join(fit_failure_reasons),
         )
 
 
@@ -210,11 +224,15 @@ def _pack_mixed_result(result, method_name: ConvergenceMethod,
             "p": float(result.pvalues[name]) if name in result.pvalues else float("nan"),
         }
 
+    # Random-effects variance is supplementary reporting, not part of the
+    # core result — a malformed or absent cov_re (AttributeError/KeyError
+    # from an unexpected statsmodels result shape) degrades to an empty dict
+    # rather than failing the whole fit.
     re_var = {}
     try:
         for key, value in result.cov_re.to_dict().items():
             re_var[key] = {sub_key: float(sub_val) for sub_key, sub_val in value.items()}
-    except Exception:
+    except (AttributeError, KeyError, ValueError):
         pass
 
     return MixedEffectsLogisticResult(
@@ -261,10 +279,14 @@ def compute_mediation_proportion(data) -> MediationResult:
     """
     try:
         import statsmodels.formula.api as smf
+        import numpy as np
     except ImportError as error:
         raise ImportError(
             "compute_mediation_proportion requires statsmodels and pandas: "
             "pip install statsmodels pandas") from error
+
+    # See fit_crossed_mixed_effects_logistic for why this tuple, not Exception.
+    statistical_fit_failure_exceptions = (ValueError, RuntimeError, np.linalg.LinAlgError)
 
     if not hasattr(data, "columns"):
         raise TypeError("data must be a pandas DataFrame")
@@ -318,7 +340,7 @@ def compute_mediation_proportion(data) -> MediationResult:
             supp_indirect = alpha_s * beta_s
             supp_total = gamma_s + supp_indirect
             supp_proportion = (supp_indirect / supp_total) if abs(supp_total) > 1e-12 else None
-        except Exception:
+        except statistical_fit_failure_exceptions:
             pass  # supplementary is advisory; primary mediation must succeed
 
     # Bootstrap CI on proportion mediated (n >= 50 only).
@@ -349,6 +371,8 @@ def _bootstrap_proportion_mediated(data, n_resamples: int = 500, seed: int = 172
     except ImportError:
         return None
 
+    # See fit_crossed_mixed_effects_logistic for why this tuple, not Exception.
+    statistical_fit_failure_exceptions = (ValueError, RuntimeError, np.linalg.LinAlgError)
     rng = np.random.default_rng(seed)
     proportions = []
     task_ids = data["task_id"].unique()
@@ -373,8 +397,8 @@ def _bootstrap_proportion_mediated(data, n_resamples: int = 500, seed: int = 172
             total_b = gamma_b + alpha_b * beta_b
             if abs(total_b) > 1e-12:
                 proportions.append((alpha_b * beta_b) / total_b)
-        except Exception:
-            continue
+        except statistical_fit_failure_exceptions:
+            continue  # this resample failed to fit; skip it, keep resampling
 
     if len(proportions) < 10:
         return None

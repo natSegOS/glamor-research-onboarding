@@ -23,13 +23,22 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import time
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from itertools import repeat
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 import yaml
+# loky (not concurrent.futures.ProcessPoolExecutor) — it pickles worker
+# arguments with cloudpickle instead of stdlib pickle, which is required
+# here: real reasoning items carry a `ReasoningTemplate.answer_function`
+# built as a closure over a parsed answer expression
+# (tasks/reasoning.py::_make_answer_function), and stdlib pickle cannot
+# serialize a closure across a process boundary at all.
+from loky import ProcessPoolExecutor
 
 from enums import (
     SemanticClass, Operation, SelectionPolicy, Scope,
@@ -41,6 +50,7 @@ from inference.engines import apply_chat_template
 import regimes
 from perturbation import PerturbationError
 from pipeline.runner import (
+    DUMMY_ENGINE_REVISION,
     GenerationRequest,
     ShardManifest,
     deterministic_row_id,
@@ -149,12 +159,46 @@ class ExperimentConfiguration:
 # Exclusion sidecar (Workstream 3).
 # ---------------------------------------------------------------------------
 
+def build_exclusion_record(
+        *,
+        task_id: str,
+        condition_name: str,
+        edit_budget: int,
+        failure_stage: str,
+        failure_reason: str,
+        item_length: int = 0,
+        word_before: str = "",
+        attempt: int = 0,
+) -> dict:
+    """Build one exclusion record (design/08 §8.4) as a plain, picklable dict.
+
+    A pure function rather than a method on ``ExclusionSidecar``: request
+    construction runs in parallel worker processes (see ``build_requests``),
+    and a worker must never hold a file handle or write to a shared path —
+    it builds records and returns them, and only the parent process ever
+    writes.
+    """
+    return {
+        "timestamp": time.time(),
+        "task_id": task_id,
+        "condition_name": condition_name,
+        "edit_budget": edit_budget,
+        "failure_stage": failure_stage,
+        "failure_reason": failure_reason,
+        "item_length": item_length,
+        "word_before": word_before,
+        "attempt": attempt,
+    }
+
+
 class ExclusionSidecar:
     """Append-only log of items excluded from the generation queue.
 
     Each record carries enough context to reconstruct why an item was dropped,
     with the same level of provenance as a generated row (design/08 §8.4).
-    Records are written immediately on append so a killed job does not lose them.
+    Records are written immediately on append so a killed job does not lose
+    them. Only the parent process ever constructs one of these or calls
+    ``write_all`` — see ``build_exclusion_record``.
     """
 
     def __init__(self, path: Path) -> None:
@@ -162,33 +206,14 @@ class ExclusionSidecar:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._count = 0
 
-    def log(
-            self,
-            *,
-            task_id: str,
-            condition_name: str,
-            edit_budget: int,
-            failure_stage: str,
-            failure_reason: str,
-            item_length: int = 0,
-            word_before: str = "",
-            attempt: int = 0,
-    ) -> None:
-        """Append one exclusion record."""
-        record = {
-            "timestamp": time.time(),
-            "task_id": task_id,
-            "condition_name": condition_name,
-            "edit_budget": edit_budget,
-            "failure_stage": failure_stage,
-            "failure_reason": failure_reason,
-            "item_length": item_length,
-            "word_before": word_before,
-            "attempt": attempt,
-        }
+    def write_all(self, records: Sequence[dict]) -> None:
+        """Append every record in ``records``, in order, in one write."""
+        if not records:
+            return
         with self.path.open("a") as fh:
-            fh.write(json.dumps(record) + "\n")
-        self._count += 1
+            for record in records:
+                fh.write(json.dumps(record) + "\n")
+        self._count += len(records)
 
     @property
     def count(self) -> int:
@@ -220,6 +245,25 @@ def load_task_items(configuration: ExperimentConfiguration) -> list:
 # Request building.
 # ---------------------------------------------------------------------------
 
+# Below this many task items, ProcessPoolExecutor's worker-startup overhead
+# (spawning/forking processes, re-pickling shared arguments to each) costs
+# more than the parallel construction saves — run sequentially instead.
+_MINIMUM_ITEMS_FOR_PARALLEL_BUILD = 20
+
+
+def _partition_into_slices(sequence: Sequence, slice_count: int) -> list[list]:
+    """Split ``sequence`` into ``slice_count`` contiguous, disjoint,
+    order-preserving slices (concatenating them in order reproduces
+    ``sequence``). Each slice is an independent unit of work for one worker —
+    disjoint and order-preserving is what lets ``build_requests`` parallelize
+    without any cross-worker coordination and still produce byte-identical
+    output to the sequential version."""
+    slice_count = max(1, slice_count)
+    slice_size = math.ceil(len(sequence) / slice_count) if sequence else 1
+    return [list(sequence[start:start + slice_size])
+            for start in range(0, len(sequence), slice_size)] or [[]]
+
+
 def build_requests(
         task_items: Sequence,
         conditions: Sequence[PerturbationCondition],
@@ -234,58 +278,122 @@ def build_requests(
     condition and each edit budget we emit perturbed requests with tokenization
     metrics attached.
 
-    ``exclusion_sidecar``, when provided, receives a logged record for every
-    item that could not be perturbed (PerturbationError), replacing the prior
-    silent ``continue`` (Workstream 3).
+    ``exclusion_sidecar``, when provided, is written every exclusion record
+    produced for an item that could not be perturbed (PerturbationError),
+    replacing the prior silent ``continue`` (Workstream 3).
+
+    Runs across a ``ProcessPoolExecutor`` when there are enough items to make
+    it worthwhile (``_MINIMUM_ITEMS_FOR_PARALLEL_BUILD``): ``task_items`` is
+    split into disjoint, order-preserving slices (``_partition_into_slices``),
+    one per worker, and each worker (``_build_requests_for_item_slice``) is a
+    pure function — no shared file handles, no shared mutable state, nothing
+    to coordinate — that returns its requests and exclusion records rather
+    than writing them. Only this (parent) process ever appends to the
+    returned list or writes to ``exclusion_sidecar``. Slices are submitted
+    and collected in order (``executor.map``, not ``as_completed``), so the
+    result is byte-identical to the sequential path, just faster. Progress
+    advances one slice at a time rather than one item at a time, since
+    per-item progress can't stream out of a separate process without
+    materially more complexity than it's worth here.
     """
+    worker_count = min(os.cpu_count() or 1, len(task_items))
+    run_in_parallel = (
+        worker_count > 1 and len(task_items) >= _MINIMUM_ITEMS_FOR_PARALLEL_BUILD)
+    item_slices = _partition_into_slices(
+        task_items, worker_count if run_in_parallel else 1)
+
     requests: list[GenerationRequest] = []
-    seen_clean_task_ids: set = set()
 
     with ProgressBar(
             total=len(task_items),
             description="building perturbation requests",
     ) as progress:
-        for task_item in task_items:
-            clean_prompt = task_item.full_prompt
-            # ReasoningItem carries gold_answer; MultipleChoiceItem carries gold_letter.
-            gold_answer = getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
-
-            if task_item.task_id not in seen_clean_task_ids:
-                requests.append(GenerationRequest(
-                    task_id=task_item.task_id,
-                    task_family=task_item.task_family,
-                    prompt=clean_prompt,
-                    gold_answer=gold_answer,
-                    is_clean=True,
-                    perturbation_state_vector={
-                        "semantic_class": SemanticClass.CLEAN,
-                        "operation": Operation.NONE,
-                        "selection_policy": SelectionPolicy.NONE,
-                        "scope": Scope.NONE,
-                        "edit_budget": 0,
-                    },
-                    seed=seed,
-                    clean_prompt=clean_prompt,
-                ))
-                seen_clean_task_ids.add(task_item.task_id)
-
-            for condition in conditions:
-                requests.extend(_build_synthetic_requests(
-                    task_item, condition, gold_answer, clean_prompt,
-                    is_word, tokenizer, seed, exclusion_sidecar=exclusion_sidecar))
-
-            progress.advance()
+        if run_in_parallel:
+            # Fast tokenizers spawn Rust threads that warn or deadlock if a
+            # fork happens mid-use; harmless and required whichever start
+            # method the platform defaults to.
+            os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+            with ProcessPoolExecutor(max_workers=worker_count) as executor:
+                slice_results = executor.map(
+                    _build_requests_for_item_slice, item_slices,
+                    repeat(conditions), repeat(is_word), repeat(tokenizer), repeat(seed))
+                for item_slice, (slice_requests, slice_exclusion_records) in zip(
+                        item_slices, slice_results):
+                    requests.extend(slice_requests)
+                    if exclusion_sidecar is not None:
+                        exclusion_sidecar.write_all(slice_exclusion_records)
+                    progress.advance(count=len(item_slice))
+        else:
+            for item_slice in item_slices:
+                slice_requests, slice_exclusion_records = _build_requests_for_item_slice(
+                    item_slice, conditions, is_word, tokenizer, seed)
+                requests.extend(slice_requests)
+                if exclusion_sidecar is not None:
+                    exclusion_sidecar.write_all(slice_exclusion_records)
+                progress.advance(count=len(item_slice))
 
     return requests
 
 
+def _build_requests_for_item_slice(
+        task_items_slice: Sequence,
+        conditions: Sequence[PerturbationCondition],
+        is_word: Callable[[str], bool],
+        tokenizer: object,
+        seed: int,
+) -> tuple[list[GenerationRequest], list[dict]]:
+    """Build every request for one disjoint slice of task items.
+
+    The unit of work ``build_requests`` submits to each worker process: pure
+    and side-effect-free (returns requests and exclusion records instead of
+    appending/writing them), so running many of these concurrently needs no
+    locking or shared state.
+    """
+    slice_requests: list[GenerationRequest] = []
+    slice_exclusion_records: list[dict] = []
+    seen_clean_task_ids: set = set()
+
+    for task_item in task_items_slice:
+        clean_prompt = task_item.full_prompt
+        # ReasoningItem carries gold_answer; MultipleChoiceItem carries gold_letter.
+        gold_answer = getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
+
+        if task_item.task_id not in seen_clean_task_ids:
+            slice_requests.append(GenerationRequest(
+                task_id=task_item.task_id,
+                task_family=task_item.task_family,
+                prompt=clean_prompt,
+                gold_answer=gold_answer,
+                is_clean=True,
+                perturbation_state_vector={
+                    "semantic_class": SemanticClass.CLEAN,
+                    "operation": Operation.NONE,
+                    "selection_policy": SelectionPolicy.NONE,
+                    "scope": Scope.NONE,
+                    "edit_budget": 0,
+                },
+                seed=seed,
+                clean_prompt=clean_prompt,
+            ))
+            seen_clean_task_ids.add(task_item.task_id)
+
+        for condition in conditions:
+            new_requests, new_exclusion_records = _build_synthetic_requests(
+                task_item, condition, gold_answer, clean_prompt, is_word, tokenizer, seed)
+            slice_requests.extend(new_requests)
+            slice_exclusion_records.extend(new_exclusion_records)
+
+    return slice_requests, slice_exclusion_records
+
+
 def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
                               is_word, tokenizer, seed,
-                              exclusion_sidecar: Optional[ExclusionSidecar] = None,
-                              ) -> list[GenerationRequest]:
+                              ) -> tuple[list[GenerationRequest], list[dict]]:
     """Build engine-perturbed requests for one item under one condition, across
-    its edit budgets."""
+    its edit budgets. Returns ``(requests, exclusion_records)`` rather than
+    writing exclusions directly — see ``build_requests`` for why."""
     requests: list[GenerationRequest] = []
+    exclusion_records: list[dict] = []
 
     content_text = content_text_of(task_item)
     key_terms = list(getattr(task_item, "key_terms", []))
@@ -309,17 +417,16 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
                     key_terms, scope_spans)
                 effective_gold = gold_answer
         except PerturbationError as exc:
-            # Explicit exclusion logging replaces the prior silent continue
+            # Explicit exclusion recording replaces the prior silent continue
             # (Workstream 3).  Every dropped item is traceable via the sidecar.
-            if exclusion_sidecar is not None:
-                exclusion_sidecar.log(
-                    task_id=task_item.task_id,
-                    condition_name=condition.name,
-                    edit_budget=edit_budget,
-                    failure_stage="perturbation",
-                    failure_reason=str(exc),
-                    item_length=len(content_text),
-                )
+            exclusion_records.append(build_exclusion_record(
+                task_id=task_item.task_id,
+                condition_name=condition.name,
+                edit_budget=edit_budget,
+                failure_stage="perturbation",
+                failure_reason=str(exc),
+                item_length=len(content_text),
+            ))
             continue
 
         perturbed_prompt = clean_prompt.replace(content_text, perturbed_content)
@@ -347,7 +454,7 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
             extra_fields=token_metric_fields,
         ))
 
-    return requests
+    return requests, exclusion_records
 
 
 def _construct_regime_c(task_item, item_seed):
@@ -523,7 +630,7 @@ def run_experiment(
         tokenizer,
         output_directory: Path,
         model_id: str = "dummy",
-        model_revision: str = "dummy-engine-0",
+        model_revision: str = DUMMY_ENGINE_REVISION,
         quantization_method: Precision = Precision.FP16,
         git_commit: str = "unpinned",
         linguistic_pipeline: Optional[object] = None,

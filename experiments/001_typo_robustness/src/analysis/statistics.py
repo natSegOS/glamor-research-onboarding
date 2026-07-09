@@ -183,6 +183,14 @@ class ConfidenceInterval:
     resamples: int
 
 
+# ``ConfidenceInterval.method`` when even the percentile bootstrap fails (a
+# fully degenerate cell — every item has the same outcome); the interval
+# collapses to the point estimate with zero resamples, per the pre-registered
+# contingency in bootstrap_confidence_interval_paired's docstring.
+DEGENERATE_BOOTSTRAP_METHOD_LABEL = "degenerate"
+DEGENERATE_BOOTSTRAP_RESAMPLE_COUNT = 0
+
+
 _PAIRED_STATISTICS = {
     "delta": lambda clean, perturbed: clean.mean() - perturbed.mean(),
     "retention": lambda clean, perturbed: (perturbed.mean() / clean.mean()
@@ -246,10 +254,15 @@ def bootstrap_confidence_interval_paired(
             high = float(result.confidence_interval.high)
             if numpy.isfinite(low) and numpy.isfinite(high):
                 return ConfidenceInterval(point_estimate, low, high, method, resamples)
-        except Exception:
+        except ValueError:
+            # scipy raises ValueError when BCa's acceleration/bias-correction
+            # is undefined for degenerate data (see the docstring's
+            # degenerate-distribution guard) — expected, try the next method.
             continue
 
-    return ConfidenceInterval(point_estimate, point_estimate, point_estimate, "degenerate", 0)
+    return ConfidenceInterval(
+        point_estimate, point_estimate, point_estimate,
+        DEGENERATE_BOOTSTRAP_METHOD_LABEL, DEGENERATE_BOOTSTRAP_RESAMPLE_COUNT)
 
 
 # ---------------------------------------------------------------------------

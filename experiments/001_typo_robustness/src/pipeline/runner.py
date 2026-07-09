@@ -33,6 +33,11 @@ SCHEMA_VERSION = "1.0"
 _ROW_ID_HASH_HEX_LENGTH = 24
 _MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
 
+# DeterministicDummyEngine's revision id — a fixed, recognisable sentinel
+# (never a real HuggingFace revision SHA) so a generation row's provenance
+# makes it obvious the row came from the GPU-free dummy engine, not a model.
+DUMMY_ENGINE_REVISION = "dummy-engine-0"
+
 
 def deterministic_row_id(
         model_revision: str,
@@ -92,7 +97,7 @@ class DeterministicDummyEngine:
     lookup.
     """
 
-    revision = "dummy-engine-0"
+    revision = DUMMY_ENGINE_REVISION
 
     def __init__(
             self,

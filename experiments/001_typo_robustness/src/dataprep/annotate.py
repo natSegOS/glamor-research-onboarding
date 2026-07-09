@@ -629,7 +629,10 @@ def _sha256_of_spacy_model(model_name: str) -> Optional[str]:
         meta = model.meta
         meta_bytes = json.dumps(meta, sort_keys=True, ensure_ascii=False).encode()
         return hashlib.sha256(meta_bytes).hexdigest()
-    except Exception:
+    except (ImportError, OSError):
+        # spaCy absent, or the named model isn't installed — exactly the
+        # "not available" case this function's docstring promises to degrade
+        # gracefully on. Anything else (a real bug) still propagates.
         return None
 
 

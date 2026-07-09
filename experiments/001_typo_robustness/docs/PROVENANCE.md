@@ -278,7 +278,14 @@ causal statement. Design: `01` §1.4, `06` §6.8.
 ## 8. Package and dependency versions
 
 All pins and the reason for each pin are in `requirements.txt` (CPU/analysis
-core) and `requirements-gpu.txt` (GPU/ASR), with version provenance verified
-June 2026. The two-file split exists because the statistics, perturbation, and
-analysis layers run on any machine with NumPy/SciPy, while only the generation
-and ASR steps need the heavy GPU/audio stack.
+core), `requirements-gpu.txt` (GPU/ASR), and `requirements-annotation.txt`
+(spaCy Stage 0 annotation), with version provenance verified June 2026. The
+split exists because the statistics, perturbation, and analysis layers run on
+any machine with NumPy/SciPy, while only the generation and ASR steps need the
+heavy GPU/audio stack; `requirements-annotation.txt` is broken out separately
+from the CPU/analysis core because `spacy-transformers` pins `transformers<4.53.3`,
+which caps `huggingface-hub<1.0` — incompatible with `requirements.txt`'s
+`huggingface-hub>=1.2.0` (needed there for gradio 6.19.0 compatibility). Install
+`requirements-gpu.txt` and `requirements-annotation.txt` together in one `pip`
+invocation (see `colab_driver.ipynb` Cell 2) so the resolver picks a `transformers`
+version satisfying both, rather than as two independent installs.

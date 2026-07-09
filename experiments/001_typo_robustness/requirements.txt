@@ -23,6 +23,19 @@ matplotlib==3.11.0
 # CMU Pronouncing
 pronouncing==0.3.0
 
+# Fast C-optimized OSA/Damerau-Levenshtein-family string distance, used for
+# measured_dl (see src/perturbation/engine.py::damerau_levenshtein_distance) —
+# called on full prompt-length strings, where the pure-Python DP was a real
+# bottleneck.
+rapidfuzz==3.14.5
+
+# Drop-in ProcessPoolExecutor that pickles worker arguments with cloudpickle
+# instead of stdlib pickle — required because reasoning task items carry a
+# closure-valued field (see src/pipeline/experiment.py::build_requests) that
+# stdlib pickle cannot serialize across a process boundary. Used to
+# parallelize request construction (build_requests) across CPU cores.
+loky==3.5.6
+
 # Progress bars
 tqdm==4.68.4
 
@@ -31,4 +44,8 @@ wordfreq==3.1.1
 spacy==3.8.14
 spacy-transformers==1.4.0   # required for en_core_web_trf (GPU-accelerated on Colab)
 click==8.4.2
+
+# Testing
+pytest==9.1.1
+hypothesis==6.156.4   # property-based tests: expected-behavior/edge-case/adversarial spheres
 
