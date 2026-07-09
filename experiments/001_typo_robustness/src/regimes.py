@@ -53,6 +53,7 @@ import hashlib
 import random
 import re
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -63,6 +64,7 @@ from perturbation import (
     damerau_levenshtein_distance,
     perturb,
 )
+from tasks.reasoning import TEMPLATE_EVALUATION_FAILURE_EXCEPTIONS
 
 
 _DEMO_WORDLIST_PATH = (
@@ -86,6 +88,29 @@ def load_wordlist(path: Optional[Path] = None) -> set[str]:
             for line in resolved_path.read_text().splitlines() if line.strip()}
 
 
+# Punctuation stripped from a token's edges before a dictionary lookup, so
+# "France." and "(France)" are recognised as the same word as "France".
+PUNCTUATION_TO_STRIP = ".,;:!?()'\""
+
+
+@dataclass(frozen=True)
+class WordSetPredicate:
+    """A picklable, hashable ``is_word(token) -> bool`` predicate over a fixed
+    vocabulary.
+
+    A plain closure (the prior implementation) can't cross into a worker
+    process via ``pickle`` — only module-level callables can — which is what
+    makes ``build_requests`` (``pipeline/experiment.py``) parallelizable
+    across a ``ProcessPoolExecutor``. Frozen + a ``frozenset`` field also
+    keeps it hashable, which every ``lru_cache``-decorated function in
+    ``perturbation.engine`` that takes ``is_word`` as an argument relies on.
+    """
+    vocabulary: frozenset[str]
+
+    def __call__(self, token: str) -> bool:
+        return token.lower().strip(PUNCTUATION_TO_STRIP) in self.vocabulary
+
+
 def make_is_word(words: Optional[set[str]] = None) -> Callable[[str], bool]:
     """Return an ``is_word(token) -> bool`` predicate.
 
@@ -96,11 +121,7 @@ def make_is_word(words: Optional[set[str]] = None) -> Callable[[str], bool]:
     is decided by a real lexicon (design/04 §4.7).
     """
     vocabulary = words if words is not None else load_wordlist()
-
-    def is_word(token: str) -> bool:
-        return token.lower().strip(".,;:!?()'\"") in vocabulary
-
-    return is_word
+    return WordSetPredicate(frozenset(vocabulary))
 
 
 def derived_seed(base_seed: int, *parts) -> int:
@@ -326,8 +347,8 @@ def make_regime_c_reasoning_operand_swap(
         candidate_parameters[key_to_swap] = candidate_value
         try:
             candidate_gold = reasoning_item.template.answer_function(**candidate_parameters)
-        except Exception:
-            continue
+        except TEMPLATE_EVALUATION_FAILURE_EXCEPTIONS:
+            continue  # this candidate operand value doesn't fit the template
 
         answer_actually_changed = (
             candidate_gold != reasoning_item.gold_answer

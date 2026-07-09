@@ -245,6 +245,16 @@ def deserialize_parameters(params: dict) -> dict:
     return out
 _SAFE_BUILTINS: dict = {"__builtins__": {}, "Fraction": Fraction, "int": int, "float": float}
 
+# Exceptions a template's answer_function(**params) can legitimately raise
+# when evaluated against untrusted, per-item, dataset-derived parameter
+# values (eval() of a parsed arithmetic expression, e.g. division by a
+# parameter that happens to be zero for this item, or a type mismatch
+# between a Fraction and a captured string). Expected, and exactly what
+# "this item doesn't fit the template, skip it" is meant to absorb —
+# anything else (a real bug in this module) still propagates.
+TEMPLATE_EVALUATION_FAILURE_EXCEPTIONS = (
+    TypeError, ValueError, ArithmeticError, NameError, KeyError, AttributeError)
+
 
 def _build_param_type_map(question_annotated: str) -> dict[str, str]:
     """Return {param_name: 'int' | 'str'} from the {param,default} pairs in
@@ -368,7 +378,7 @@ def extract_instance_parameters(
         computed = parsed.answer_function(**extracted)
         if int(float(computed)) != int(float(gold_answer)):
             return None
-    except Exception:  # noqa: BLE001
+    except TEMPLATE_EVALUATION_FAILURE_EXCEPTIONS:
         return None
 
     return extracted
@@ -437,7 +447,7 @@ def parse_gsm_symbolic_template(record: dict) -> Optional["ReasoningTemplate"]:
             # Accept integer-equivalent results (e.g. Fraction(140,1) == 140).
             if int(float(computed)) != int(float(gold_answer)):
                 return None  # annotation mismatch; skip safely
-        except Exception:  # noqa: BLE001
+        except TEMPLATE_EVALUATION_FAILURE_EXCEPTIONS:
             return None  # expression not evaluable with these parameters
 
     # Build question_format: replace {param,value} with {param}.

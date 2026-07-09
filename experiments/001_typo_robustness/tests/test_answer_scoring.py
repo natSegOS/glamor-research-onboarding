@@ -1,9 +1,13 @@
-"""Adversarial and edge-case tests for answer extraction and scoring.
+"""Answer extraction and scoring (src/scoring.py): reasoning/MCQ answer
+extraction rules, the inline (structural) parse-status classifier, tolerance
+vs exact-match dispatch, and per-TaskFamily scoring dispatch.
 
-Covers: multi-delimiter precedence, negative/currency/comma numbers, float
-tolerance boundary, integer exact-match, MCQ letter range, priority ordering
-(explicit > line-leading > standalone), refusal-with-answer, clarification
-override, empty/whitespace input, case-folding, and overall scoring dispatch.
+Each extraction/scoring rule is a fixed, named business rule (hash-delimiter
+precedence, currency stripping, explicit-marker-beats-line-leading, ...) —
+not an algorithmic property that holds over an open-ended input space — so
+the "whole category of cases" here is a parametrized truth table per
+function, covering expected, edge, and adversarial rows together, rather than
+one assertion per test.
 """
 
 from __future__ import annotations
@@ -15,306 +19,195 @@ from enums import ParseStatus, TaskFamily
 
 
 # ---------------------------------------------------------------------------
-# Reasoning answer extraction — happy path
+# Reasoning answer extraction: value, and precedence between rules.
 # ---------------------------------------------------------------------------
 
-def test_reasoning_prefers_hash_delimited_answer():
-    assert scoring.extract_reasoning_answer("blah 5 blah\n#### 19")[0] == 19.0
+REASONING_EXTRACTION_CASES = [
+    # (generation_text, expected_value, case_id)
+    ("blah 5 blah\n#### 19", 19.0, "hash_delimited_preferred"),
+    ("the answer is 7 then 19", 19.0, "falls_back_to_last_number"),
+    ("Total: $1,234", 1234.0, "currency_and_commas"),
+    ("no digits here", None, "no_number_returns_none"),
+    ("#### 5\n#### 19", 19.0, "multiple_hash_delimiters_last_wins"),
+    ("#### -7", -7.0, "negative_number"),
+    ("answer: 3.14", 3.14, "trailing_decimal"),
+    ("#### 0", 0.0, "zero"),
+    ("", None, "empty_string"),
+    ("   \n\t  ", None, "whitespace_only"),
+    ("#### $1,234.50", 1234.50, "hash_with_currency_and_commas"),
+    ("3 cats and 7 dogs", 7.0, "last_number_fallback_among_several"),
+    ("text 12 more\n#### 5", 5.0, "hash_beats_earlier_last_number"),
+]
 
 
-def test_reasoning_falls_back_to_last_number():
-    assert scoring.extract_reasoning_answer("the answer is 7 then 19")[0] == 19.0
+class TestReasoningExtraction:
 
-
-def test_reasoning_handles_currency_and_commas():
-    assert scoring.extract_reasoning_answer("Total: $1,234")[0] == 1234.0
-
-
-def test_reasoning_returns_none_without_number():
-    assert scoring.extract_reasoning_answer("no digits here")[0] is None
-
-
-# ---------------------------------------------------------------------------
-# Reasoning answer extraction — adversarial / edge cases
-# ---------------------------------------------------------------------------
-
-def test_multiple_hash_delimiters_last_wins():
-    """When there are multiple '####' lines, the LAST one is authoritative."""
-    assert scoring.extract_reasoning_answer("#### 5\n#### 19")[0] == 19.0
-
-
-def test_negative_number_extracted():
-    assert scoring.extract_reasoning_answer("#### -7")[0] == -7.0
-
-
-def test_number_with_trailing_decimal():
-    assert scoring.extract_reasoning_answer("answer: 3.14")[0] == 3.14
-
-
-def test_number_zero():
-    assert scoring.extract_reasoning_answer("#### 0")[0] == 0.0
-
-
-def test_empty_string_returns_none():
-    assert scoring.extract_reasoning_answer("")[0] is None
-
-
-def test_whitespace_only_returns_none():
-    assert scoring.extract_reasoning_answer("   \n\t  ")[0] is None
-
-
-def test_hash_delimiter_with_currency_and_commas():
-    assert scoring.extract_reasoning_answer("#### $1,234.50")[0] == 1234.50
-
-
-def test_last_number_fallback_when_no_delimiter():
-    # Among several numbers, fallback picks the LAST one.
-    assert scoring.extract_reasoning_answer("3 cats and 7 dogs")[0] == 7.0
-
-
-def test_hash_takes_precedence_over_last_number():
-    # "#### 5" comes before the "12" but must win because it's hash-delimited.
-    assert scoring.extract_reasoning_answer("text 12 more\n#### 5")[0] == 5.0
+    @pytest.mark.parametrize(
+        "generation_text,expected_value", [(c[0], c[1]) for c in REASONING_EXTRACTION_CASES],
+        ids=[c[2] for c in REASONING_EXTRACTION_CASES])
+    def test_extraction_rules(self, generation_text, expected_value):
+        assert scoring.extract_reasoning_answer(generation_text)[0] == expected_value
 
 
 # ---------------------------------------------------------------------------
-# MCQ extraction — happy path
+# MCQ answer extraction: letter, option-count bounds, and marker precedence.
 # ---------------------------------------------------------------------------
 
-def test_mcq_prefers_explicit_marker():
-    assert scoring.extract_multiple_choice_answer("I think A but Answer: C")[0] == "C"
+MCQ_EXTRACTION_CASES = [
+    # (generation_text, option_count, expected_letter, case_id)
+    ("I think A but Answer: C", None, "C", "explicit_marker_preferred"),
+    ("B) Photosynthesis", None, "B", "line_leading_letter"),
+    ("The answer is J", 4, None, "letter_beyond_option_count_invalid"),
+    ("Answer: J", 10, "J", "letter_at_max_option_count_valid"),
+    ("Answer: A ... Answer: C", None, "C", "last_explicit_marker_wins"),
+    ("ANSWER: B", None, "B", "case_insensitive_marker_upper"),
+    ("answer is c", None, "C", "case_insensitive_marker_lower"),
+    ("no response provided at all", None, None, "no_valid_letter_returns_none"),
+    ("", None, None, "empty_string_returns_none"),
+    ("B) is wrong\nAnswer: D", None, "D", "explicit_beats_line_leading"),
+    ("Answer: K", None, None, "letter_k_always_invalid"),
+    ("Answer: A", 1, "A", "option_count_one_accepts_a"),
+    ("Answer: B", 1, None, "option_count_one_rejects_b"),
+]
 
 
-def test_mcq_line_leading_letter():
-    assert scoring.extract_multiple_choice_answer("B) Photosynthesis")[0] == "B"
+class TestMultipleChoiceExtraction:
 
-
-def test_mcq_respects_option_count():
-    # 'J' is invalid when there are only 4 options.
-    assert scoring.extract_multiple_choice_answer("The answer is J", option_count=4)[0] is None
-
-
-# ---------------------------------------------------------------------------
-# MCQ extraction — adversarial / edge cases
-# ---------------------------------------------------------------------------
-
-def test_mcq_letter_at_max_option_count_is_valid():
-    # J is valid when there are 10 options (the full A–J range).
-    assert scoring.extract_multiple_choice_answer("Answer: J", option_count=10)[0] == "J"
-
-
-def test_mcq_last_explicit_marker_wins():
-    """The LAST explicit marker is returned."""
-    assert scoring.extract_multiple_choice_answer("Answer: A ... Answer: C")[0] == "C"
-
-
-def test_mcq_case_insensitive_marker():
-    assert scoring.extract_multiple_choice_answer("ANSWER: B")[0] == "B"
-    assert scoring.extract_multiple_choice_answer("answer is c")[0] == "C"
-
-
-def test_mcq_no_valid_letter_returns_none():
-    # Must use text with no A-J letters that would accidentally match.
-    # "no response provided" — no a-j uppercase, no "answer <letter>" pattern.
-    assert scoring.extract_multiple_choice_answer("no response provided at all")[0] is None
-
-
-def test_mcq_empty_string_returns_none():
-    assert scoring.extract_multiple_choice_answer("")[0] is None
-
-
-def test_mcq_explicit_beats_line_leading():
-    text = "B) is wrong\nAnswer: D"
-    assert scoring.extract_multiple_choice_answer(text)[0] == "D"
-
-
-def test_mcq_letter_k_always_invalid():
-    # K is never in the A–J alphabet for any option count.
-    assert scoring.extract_multiple_choice_answer("Answer: K")[0] is None
-
-
-def test_mcq_option_count_one_only_accepts_a():
-    assert scoring.extract_multiple_choice_answer("Answer: A", option_count=1)[0] == "A"
-    assert scoring.extract_multiple_choice_answer("Answer: B", option_count=1)[0] is None
+    @pytest.mark.parametrize(
+        "generation_text,option_count,expected_letter",
+        [(c[0], c[1], c[2]) for c in MCQ_EXTRACTION_CASES],
+        ids=[c[3] for c in MCQ_EXTRACTION_CASES])
+    def test_extraction_rules(self, generation_text, option_count, expected_letter):
+        kwargs = {} if option_count is None else {"option_count": option_count}
+        assert scoring.extract_multiple_choice_answer(generation_text, **kwargs)[0] == expected_letter
 
 
 # ---------------------------------------------------------------------------
-# Parse-status taxonomy — inline (structural) classifier
+# Parse-status taxonomy — the inline (structural) classifier.
 #
-# The inline classifier used by the generation runner returns only VALID or
-# UNPARSEABLE.  The full four-way taxonomy (including CLARIFICATION and
-# REFUSAL) is assigned by the formal post-stage classifier; see
-# tests/test_parse_status_linguistic.py.
+# It returns only VALID or UNPARSEABLE. The full four-way taxonomy (adding
+# CLARIFICATION and REFUSAL) is assigned by the post-stage linguistic
+# classifier; see test_linguistic_parse_status.py.
 # ---------------------------------------------------------------------------
 
-def test_unparseable_status_when_no_parseable_answer():
-    result = scoring.score_reasoning("I have no idea", 19)
-    assert result.parse_status == ParseStatus.UNPARSEABLE
-    assert result.is_correct == 0
+INLINE_PARSE_STATUS_CASES = [
+    # (generation_text, gold, expected_status, expected_is_correct, case_id)
+    ("I have no idea", 19, ParseStatus.UNPARSEABLE, 0, "no_parseable_answer"),
+    ("#### 19", 19, ParseStatus.VALID, 1, "answer_found"),
+    ("Could you clarify what you mean?", 19, ParseStatus.UNPARSEABLE, 0,
+     "clarification_surface_form_is_unparseable_not_clarification"),
+    ("I cannot help with that.", 19, ParseStatus.UNPARSEABLE, 0,
+     "refusal_surface_form_is_unparseable_not_refusal"),
+    ("I won't, but if I had to: #### 19", 19, ParseStatus.VALID, 1,
+     "refusal_followed_by_an_answer_is_still_valid"),
+    ("Did you mean 19? The answer might be 19.", 19, ParseStatus.VALID, 1,
+     "classifier_is_purely_structural_ignores_surrounding_text"),
+]
 
 
-def test_valid_status_when_answer_found():
-    result = scoring.score_reasoning("#### 19", 19)
-    assert result.parse_status == ParseStatus.VALID
-    assert result.is_correct == 1
+class TestInlineParseStatusClassifier:
 
-
-def test_inline_clarification_surface_form_is_unparseable():
-    """The inline path assigns UNPARSEABLE (not CLARIFICATION) to interrogative
-    outputs — CLARIFICATION is assigned only by the post-stage linguistic
-    classifier.  is_correct=0 in both cases, so accuracy is unchanged.
-    """
-    result = scoring.score_reasoning("Could you clarify what you mean?", 19)
-    assert result.parse_status == ParseStatus.UNPARSEABLE
-    assert result.is_correct == 0
-
-
-def test_inline_refusal_surface_form_is_unparseable():
-    """The inline path assigns UNPARSEABLE (not REFUSAL) to first-person
-    refusal outputs — the distinction is made by the post-stage linguistic
-    classifier.  is_correct=0 in both cases.
-    """
-    result = scoring.score_reasoning("I cannot help with that.", 19)
-    assert result.parse_status == ParseStatus.UNPARSEABLE
-    assert result.is_correct == 0
-
-
-def test_refusal_with_answer_is_valid():
-    """A refusal surface form followed by a parseable answer is still VALID."""
-    result = scoring.score_reasoning("I won't, but if I had to: #### 19", 19)
-    assert result.parse_status == ParseStatus.VALID
-    assert result.is_correct == 1
-
-
-def test_inline_classifier_ignores_generation_text_when_answer_present():
-    """The inline classifier is pure structural: only parsed_answer matters."""
-    result = scoring.score_reasoning("Did you mean 19? The answer might be 19.", 19)
-    assert result.parse_status == ParseStatus.VALID
-    assert result.is_correct == 1
+    @pytest.mark.parametrize(
+        "generation_text,gold,expected_status,expected_is_correct",
+        [(c[0], c[1], c[2], c[3]) for c in INLINE_PARSE_STATUS_CASES],
+        ids=[c[4] for c in INLINE_PARSE_STATUS_CASES])
+    def test_classification_rules(self, generation_text, gold, expected_status, expected_is_correct):
+        result = scoring.score_reasoning(generation_text, gold)
+        assert result.parse_status == expected_status
+        assert result.is_correct == expected_is_correct
 
 
 # ---------------------------------------------------------------------------
-# Reasoning scoring — tolerance and integer exact-match
+# Reasoning scoring — integer exact-match vs. float tolerance.
 # ---------------------------------------------------------------------------
 
-def test_score_integer_exact_match_not_fuzzy():
-    assert scoring.score_reasoning("#### 18", 19).is_correct == 0
-    assert scoring.score_reasoning("#### 19", 19).is_correct == 1
+REASONING_SCORING_CASES = [
+    # (generation_text, gold, expected_is_correct, case_id)
+    ("#### 18", 19, 0, "integer_mismatch"),
+    ("#### 19", 19, 1, "integer_exact_match"),
+    ("#### 3.1415930", 3.1415927, 1, "float_within_tolerance"),          # 1e-6 apart
+    ("#### 3.142", 3.1415927, 0, "float_outside_tolerance"),
+    ("#### 19.5", 19, 0, "integer_gold_rejects_fractional_match"),
+    ("#### 0", 0, 1, "zero_gold_correct"),
+    ("#### 1", 0, 0, "zero_gold_incorrect"),
+    ("#### -5", -5, 1, "negative_gold_correct"),
+    ("#### 5", -5, 0, "negative_gold_incorrect"),
+]
 
 
-def test_float_gold_uses_tolerance():
-    # Use a non-integer gold so the tolerance path is taken.
-    # 3.1415930 is within 1e-6 of 3.1415927.
-    gold = 3.1415927
-    result = scoring.score_reasoning("#### 3.1415930", gold)
-    assert result.is_correct == 1
+class TestReasoningScoring:
 
-
-def test_float_gold_just_outside_tolerance():
-    # 3.142 is well outside 1e-6 of 3.1415927.
-    gold = 3.1415927
-    result = scoring.score_reasoning("#### 3.142", gold)
-    assert result.is_correct == 0
-
-
-def test_integer_gold_rejects_fractional_match():
-    # 19.5 != 19 for integer gold.
-    assert scoring.score_reasoning("#### 19.5", 19).is_correct == 0
-
-
-def test_gold_zero_is_scoreable():
-    assert scoring.score_reasoning("#### 0", 0).is_correct == 1
-    assert scoring.score_reasoning("#### 1", 0).is_correct == 0
-
-
-def test_negative_gold():
-    assert scoring.score_reasoning("#### -5", -5).is_correct == 1
-    assert scoring.score_reasoning("#### 5", -5).is_correct == 0
+    @pytest.mark.parametrize(
+        "generation_text,gold,expected_is_correct",
+        [(c[0], c[1], c[2]) for c in REASONING_SCORING_CASES],
+        ids=[c[3] for c in REASONING_SCORING_CASES])
+    def test_scoring_rules(self, generation_text, gold, expected_is_correct):
+        assert scoring.score_reasoning(generation_text, gold).is_correct == expected_is_correct
 
 
 # ---------------------------------------------------------------------------
-# MCQ scoring
+# MCQ scoring.
 # ---------------------------------------------------------------------------
 
-def test_mcq_correct_letter():
-    result = scoring.score_multiple_choice("Answer: C", "C")
-    assert result.is_correct == 1
+class TestMultipleChoiceScoring:
 
+    @pytest.mark.parametrize("generation_text,gold,expected_is_correct", [
+        ("Answer: C", "C", 1),
+        ("Answer: A", "C", 0),
+        ("Answer: C", "c", 1),   # gold provided lowercase; extraction always uppercases
+    ], ids=["correct_letter", "wrong_letter", "gold_case_insensitive"])
+    def test_scoring_rules(self, generation_text, gold, expected_is_correct):
+        assert scoring.score_multiple_choice(generation_text, gold).is_correct == expected_is_correct
 
-def test_mcq_wrong_letter():
-    result = scoring.score_multiple_choice("Answer: A", "C")
-    assert result.is_correct == 0
-
-
-def test_mcq_gold_case_insensitive():
-    # Gold provided as lowercase; extraction always uppercases.
-    result = scoring.score_multiple_choice("Answer: C", "c")
-    assert result.is_correct == 1
-
-
-def test_mcq_unparseable():
-    # "no response provided" has no A-J letters that could match; genuinely unparseable.
-    result = scoring.score_multiple_choice("no response provided at all", "C")
-    assert result.parse_status == ParseStatus.UNPARSEABLE
-    assert result.is_correct == 0
+    def test_unparseable_generation_is_incorrect_not_an_error(self):
+        result = scoring.score_multiple_choice("no response provided at all", "C")
+        assert result.parse_status == ParseStatus.UNPARSEABLE
+        assert result.is_correct == 0
 
 
 # ---------------------------------------------------------------------------
-# Scoring dispatch
+# Scoring dispatch: every TaskFamily routes to the right scorer.
 # ---------------------------------------------------------------------------
 
-def test_score_dispatch_reasoning():
-    result = scoring.score("#### 19", 19, TaskFamily.GSM_SYMBOLIC_SYNTHETIC)
-    assert result.is_correct == 1
+class TestScoringDispatch:
 
+    @pytest.mark.parametrize("generation_text,gold,task_family", [
+        ("#### 19", 19, TaskFamily.GSM_SYMBOLIC_SYNTHETIC),
+        ("Answer: C", "C", TaskFamily.MMLU_PRO),
+        ("#### 42", 42, TaskFamily.GSM_SYMBOLIC_OFFICIAL),
+        ("#### 7", 7, TaskFamily.GSM8K),
+        ("Answer: A", "A", TaskFamily.MMLU),
+        ("Answer: B", "B", TaskFamily.MCQ_DEMO),
+    ], ids=lambda value: value.value if isinstance(value, TaskFamily) else None)
+    def test_every_task_family_dispatches_and_scores_correctly(self, generation_text, gold, task_family):
+        assert scoring.score(generation_text, gold, task_family).is_correct == 1
 
-def test_score_dispatch_mcq():
-    result = scoring.score("Answer: C", "C", TaskFamily.MMLU_PRO)
-    assert result.is_correct == 1
-
-
-def test_score_dispatch_reasoning_official():
-    assert scoring.score("#### 42", 42, TaskFamily.GSM_SYMBOLIC_OFFICIAL).is_correct == 1
-
-
-def test_score_dispatch_gsm8k():
-    assert scoring.score("#### 7", 7, TaskFamily.GSM8K).is_correct == 1
-
-
-def test_score_dispatch_mmlu():
-    assert scoring.score("Answer: A", "A", TaskFamily.MMLU).is_correct == 1
-
-
-def test_score_dispatch_mcq_demo():
-    assert scoring.score("Answer: B", "B", TaskFamily.MCQ_DEMO).is_correct == 1
-
-
-def test_score_dispatch_unknown_raises():
-    with pytest.raises((ValueError, KeyError)):
-        scoring.score("#### 1", 1, "unknown_family_xyz")
+    def test_unknown_task_family_raises(self):
+        with pytest.raises((ValueError, KeyError)):
+            scoring.score("#### 1", 1, "unknown_family_xyz")
 
 
 # ---------------------------------------------------------------------------
-# ScoreResult structure
+# ScoreResult structure.
 # ---------------------------------------------------------------------------
 
-def test_score_result_structure_valid():
-    result = scoring.score_reasoning("#### 19", 19)
-    assert result.parse_status == ParseStatus.VALID
-    assert result.is_correct == 1
-    assert result.parsed_answer is not None
+class TestScoreResultStructure:
 
+    def test_valid_result_carries_a_parsed_answer(self):
+        result = scoring.score_reasoning("#### 19", 19)
+        assert result.parse_status == ParseStatus.VALID
+        assert result.is_correct == 1
+        assert result.parsed_answer is not None
 
-def test_score_result_structure_unparseable():
-    result = scoring.score_reasoning("nonsense text", 19)
-    assert result.parse_status == ParseStatus.UNPARSEABLE
-    assert result.is_correct == 0
-    assert result.parsed_answer is None
+    def test_unparseable_result_has_no_parsed_answer(self):
+        result = scoring.score_reasoning("nonsense text", 19)
+        assert result.parse_status == ParseStatus.UNPARSEABLE
+        assert result.is_correct == 0
+        assert result.parsed_answer is None
 
-
-def test_score_result_is_correct_is_binary():
-    """is_correct must be exactly 0 or 1, never a boolean or other value."""
-    for gen, gold in [("#### 5", 5), ("#### 6", 5), ("nonsense", 5)]:
-        r = scoring.score_reasoning(gen, gold)
-        assert r.is_correct in (0, 1)
-        assert type(r.is_correct) is int
+    @pytest.mark.parametrize("generation_text,gold", [
+        ("#### 5", 5), ("#### 6", 5), ("nonsense", 5)])
+    def test_is_correct_is_always_exactly_zero_or_one(self, generation_text, gold):
+        result = scoring.score_reasoning(generation_text, gold)
+        assert result.is_correct in (0, 1)
+        assert type(result.is_correct) is int

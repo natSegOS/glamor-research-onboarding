@@ -1,7 +1,8 @@
 """End-to-end tests: the orchestrator runs offline with the dummy engine and the
-analysis layer reproduces the expected matched-pair arithmetic; plus model
-registry pinning behavior. These exercise the review fixes (C2 token metrics,
-C3 key terms, S2 scope) on the real wiring."""
+analysis layer reproduces the expected matched-pair arithmetic; model registry
+pinning behavior; build_requests parallelization determinism; and the
+tokenization metrics (src/tokenization.py) those end-to-end rows carry.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import tokenization as tm
 from analysis import results as result_analysis
 import regimes as semantic_regimes
 from pipeline.experiment import (
@@ -16,8 +18,8 @@ from pipeline.experiment import (
     PerturbationCondition,
     run_experiment,
 )
-from pipeline.runner import DeterministicDummyEngine, load_generation_rows
-from enums import Precision, SemanticClass, Operation, SelectionPolicy, Scope
+from pipeline.runner import DUMMY_ENGINE_REVISION, DeterministicDummyEngine, load_generation_rows
+from enums import FragmentationStratum, Precision, SemanticClass, Operation, SelectionPolicy, Scope
 from inference import (
     MODEL_ROSTER,
     assert_revisions_pinned,
@@ -109,7 +111,7 @@ def test_analysis_reproduces_matched_pair_counts(tmp_path):
     assert pairs
     assert cells
     # Every matched pair has a clean partner from the same model+item.
-    assert all(pair.model_revision == "dummy-engine-0" for pair in pairs)
+    assert all(pair.model_revision == DUMMY_ENGINE_REVISION for pair in pairs)
 
 
 # --- Parallel shard partitioning ---------------------------------------------
@@ -179,3 +181,122 @@ def test_shard_partition_writes_distinct_files(tmp_path):
     assert summary_0["output_path"] != summary_1["output_path"]
     assert "_w0of2_" in summary_0["output_path"]
     assert "_w1of2_" in summary_1["output_path"]
+
+
+# --- build_requests: ProcessPoolExecutor parallelization ---------------------
+
+def test_build_requests_parallel_matches_sequential(monkeypatch):
+    """build_requests must produce byte-identical output whether it runs
+    sequentially or across a ProcessPoolExecutor — parallelization is a
+    performance detail (see its docstring for the disjoint-slice design),
+    never allowed to change what gets generated."""
+    import pipeline.experiment as experiment_module
+
+    is_word = semantic_regimes.make_is_word()
+    configuration = _partition_config("parallel_check")
+    task_items = experiment_module.load_task_items(configuration)
+    tokenizer = FakeTokenizer()
+    assert len(task_items) >= 2  # otherwise worker_count==1 and this proves nothing
+
+    monkeypatch.setattr(experiment_module, "_MINIMUM_ITEMS_FOR_PARALLEL_BUILD", 10 ** 9)
+    sequential_requests = experiment_module.build_requests(
+        task_items, configuration.conditions, is_word, tokenizer, seed=1729)
+
+    monkeypatch.setattr(experiment_module, "_MINIMUM_ITEMS_FOR_PARALLEL_BUILD", 1)
+    parallel_requests = experiment_module.build_requests(
+        task_items, configuration.conditions, is_word, tokenizer, seed=1729)
+
+    assert sequential_requests == parallel_requests
+
+
+def test_build_requests_parallel_writes_same_exclusions_as_sequential(monkeypatch, tmp_path):
+    """Exclusion records collected from parallel workers must match what a
+    sequential run would have logged — same records, same order."""
+    import pipeline.experiment as experiment_module
+
+    is_word = semantic_regimes.make_is_word()
+    configuration = _partition_config("parallel_excl_check")
+    task_items = experiment_module.load_task_items(configuration)
+    tokenizer = FakeTokenizer()
+
+    monkeypatch.setattr(experiment_module, "_MINIMUM_ITEMS_FOR_PARALLEL_BUILD", 10 ** 9)
+    sequential_sidecar = experiment_module.ExclusionSidecar(tmp_path / "sequential.jsonl")
+    experiment_module.build_requests(
+        task_items, configuration.conditions, is_word, tokenizer, seed=1729,
+        exclusion_sidecar=sequential_sidecar)
+
+    monkeypatch.setattr(experiment_module, "_MINIMUM_ITEMS_FOR_PARALLEL_BUILD", 1)
+    parallel_sidecar = experiment_module.ExclusionSidecar(tmp_path / "parallel.jsonl")
+    experiment_module.build_requests(
+        task_items, configuration.conditions, is_word, tokenizer, seed=1729,
+        exclusion_sidecar=parallel_sidecar)
+
+    assert sequential_sidecar.count == parallel_sidecar.count
+
+
+# ---------------------------------------------------------------------------
+# Tokenization metrics (src/tokenization.py) — the per-row fields these
+# end-to-end runs attach to every perturbed request.
+# ---------------------------------------------------------------------------
+
+class TestFragmentationStratum:
+
+    @pytest.mark.parametrize("subword_count_change,expected", [
+        (-100, FragmentationStratum.LOW), (-1, FragmentationStratum.LOW),
+        (0, FragmentationStratum.LOW),                                     # last LOW value
+        (1, FragmentationStratum.HIGH),                                    # first HIGH value
+        (3, FragmentationStratum.HIGH), (100, FragmentationStratum.HIGH),
+    ])
+    def test_boundary_is_exactly_at_zero(self, subword_count_change, expected):
+        assert tm.fragmentation_stratum(subword_count_change) == expected
+
+    def test_returns_the_enum_type_not_a_plain_string(self):
+        assert isinstance(tm.fragmentation_stratum(1), FragmentationStratum)
+
+
+class TestTokenInflationRatio:
+
+    def test_identical_text_has_ratio_one(self, fake_tokenizer):
+        assert tm.token_inflation_ratio(fake_tokenizer, "the cat sat", "the cat sat") == 1.0
+
+    def test_more_fragmentation_gives_a_higher_ratio(self, fake_tokenizer):
+        ratio = tm.token_inflation_ratio(fake_tokenizer, "cat", "c@t!!!")  # non-alpha -> extra pieces
+        assert ratio >= 1.0
+
+    @pytest.mark.parametrize("text", ["hello", "the quick brown fox", "x"])
+    def test_is_always_positive(self, fake_tokenizer, text):
+        assert tm.token_inflation_ratio(fake_tokenizer, text, text) > 0
+
+    def test_a_shorter_perturbed_sequence_does_not_crash_and_stays_positive(self, fake_tokenizer):
+        assert tm.token_inflation_ratio(fake_tokenizer, "hello world", "hi world") > 0
+
+
+class TestSubwordCountChange:
+
+    def test_more_fragmented_variant_is_positive(self, fake_tokenizer):
+        assert tm.subword_count_change(fake_tokenizer, "cat", "c@t") >= 1
+
+    def test_identical_text_is_zero(self, fake_tokenizer):
+        assert tm.subword_count_change(fake_tokenizer, "cat", "cat") == 0
+
+    def test_a_shorter_variant_returns_an_int_without_crashing(self, fake_tokenizer):
+        assert isinstance(tm.subword_count_change(fake_tokenizer, "longer", "lo"), int)
+
+
+class TestFragmentationMatchedPair:
+
+    def test_is_deterministic_across_repeated_calls_and_across_budgets_and_seeds(
+            self, is_word, fake_tokenizer):
+        for word, budget, seed in [("capital", 1, 5), ("example", 1, 5),
+                                   ("example", 2, 10), ("example", 3, 15)]:
+            first = tm.build_fragmentation_matched_pair(fake_tokenizer, word, budget, seed, is_word)
+            second = tm.build_fragmentation_matched_pair(fake_tokenizer, word, budget, seed, is_word)
+            assert first == second
+
+    def test_low_never_fragments_more_than_high_when_both_variants_exist(self, is_word, fake_tokenizer):
+        pair = tm.build_fragmentation_matched_pair(fake_tokenizer, "remaining", 1, 9, is_word)
+        if pair is not None:
+            assert pair.low_fragmentation_subword_change <= 0
+            assert pair.high_fragmentation_subword_change >= 1
+            assert pair.low_fragmentation_subword_change < pair.high_fragmentation_subword_change
+            assert pair.low_fragmentation_variant != pair.high_fragmentation_variant

@@ -1,359 +1,376 @@
-"""Adversarial, metamorphic, and edge-case tests for the perturbation engine.
+"""The perturbation engine's contract (src/perturbation/engine.py module
+docstring): determinism, budget exactness, identity at k=0, protected spans,
+edit-script reconstruction, and policy fidelity — plus the Damerau-Levenshtein
+(OSA) distance metric these regimes are built on.
 
-Covers: determinism, budget exactness, identity at k=0, protected spans,
-numeric-token protection, edit-script reconstruction, policy fidelity, Damerau-
-Levenshtein metric properties, and whitespace/word-unit operations.
+Each contract clause gets expected-behavior, edge-case, and adversarial-input
+coverage. Hypothesis properties replace what used to be hand-rolled
+``random.Random(seed)`` loops over a handful of iterations — the same
+contract, checked over a far wider sphere of inputs, in far less code.
 """
 
 from __future__ import annotations
 
-import random
 import string
 
 import pytest
+from hypothesis import given, example, settings, strategies as st
+from rapidfuzz.distance import OSA
 
+import regimes
 from enums import Operation, SelectionPolicy, Scope, SemanticClass, Unit
 from perturbation import (
     PerturbationError,
     apply_edit_script,
     damerau_levenshtein_distance,
+    keyboard_neighbors_of,
     perturb,
 )
-from perturbation import keyboard_neighbors_of
 
 
 SAMPLE_TEXT = "The quick brown fox jumps over the lazy dog"
-_ALL_CHAR_OPS = (Operation.SUBSTITUTE, Operation.DELETE, Operation.INSERT, Operation.TRANSPOSE)
+ALL_CHARACTER_OPERATIONS = (
+    Operation.SUBSTITUTE, Operation.DELETE, Operation.INSERT, Operation.TRANSPOSE)
 
-
-def _random_alpha_text(rng: random.Random, min_len: int = 8, max_len: int = 40) -> str:
-    length = rng.randint(min_len, max_len)
-    words = []
-    while sum(len(w) for w in words) < length:
-        wlen = rng.randint(3, 8)
-        words.append("".join(rng.choice(string.ascii_lowercase) for _ in range(wlen)))
-    return " ".join(words)
+# Reusable hypothesis strategies for "a sphere of realistic perturbation inputs".
+_alphabetic_words = st.lists(
+    st.text(alphabet=string.ascii_lowercase, min_size=1, max_size=8),
+    min_size=1, max_size=8,
+).map(" ".join).filter(lambda text: text.strip() != "")
+_character_operations = st.sampled_from(ALL_CHARACTER_OPERATIONS)
+_seeds = st.integers(min_value=0, max_value=2**31 - 1)
 
 
 # ---------------------------------------------------------------------------
-# Clause 1: Determinism
+# Clause 1 — Determinism: same (text, seed) always yields byte-identical output.
 # ---------------------------------------------------------------------------
 
-def test_same_seed_gives_identical_output():
-    for operation in _ALL_CHAR_OPS:
-        first_text, first_edits = perturb(
-            SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 3,
-            SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 42)
-        second_text, second_edits = perturb(
-            SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 3,
-            SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 42)
-        assert first_text == second_text
-        assert [e.to_dict() for e in first_edits] == [e.to_dict() for e in second_edits]
+class TestDeterminismExpectedBehavior:
 
-
-def test_different_seed_usually_differs():
-    outputs = {perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                       SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)[0] for seed in range(8)}
-    assert len(outputs) > 1
-
-
-def test_determinism_across_many_texts_and_seeds():
-    rng = random.Random(99)
-    for seed in range(20):
-        text = _random_alpha_text(rng)
+    @given(text=_alphabetic_words, operation=_character_operations, seed=_seeds)
+    @settings(max_examples=200)
+    def test_same_inputs_yield_identical_output_and_edit_script(self, text, operation, seed):
         try:
-            a, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
-            b, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
-            assert a == b
+            first_text, first_edits = perturb(
+                text, operation, Unit.CHAR, Scope.ANYWHERE, 2,
+                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
+            second_text, second_edits = perturb(
+                text, operation, Unit.CHAR, Scope.ANYWHERE, 2,
+                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
         except PerturbationError:
-            pass  # impossible budgets are fine
+            return  # an impossible budget for this text is fine either way
+        assert first_text == second_text
+        assert [edit.to_dict() for edit in first_edits] == [edit.to_dict() for edit in second_edits]
+
+    def test_different_seeds_usually_produce_different_output(self):
+        outputs = {
+            perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
+                    SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)[0]
+            for seed in range(8)
+        }
+        assert len(outputs) > 1
 
 
 # ---------------------------------------------------------------------------
-# Clause 2: Budget exactness
+# Clause 2 — Budget exactness: exactly edit_budget edits, or PerturbationError.
+# Clause 3 — Identity at k=0: an edit budget of zero returns the input unchanged.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("operation", list(_ALL_CHAR_OPS))
-@pytest.mark.parametrize("edit_budget", [1, 2, 4])
-def test_edit_budget_is_respected(operation, edit_budget):
-    _, edits = perturb(
-        SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, edit_budget,
-        SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 7)
-    assert len(edits) == edit_budget
+class TestBudgetExpectedBehavior:
 
+    @pytest.mark.parametrize("operation", list(ALL_CHARACTER_OPERATIONS))
+    @pytest.mark.parametrize("edit_budget", [1, 2, 4])
+    def test_exactly_edit_budget_edits_are_applied(self, operation, edit_budget):
+        _, edits = perturb(
+            SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, edit_budget,
+            SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 7)
+        assert len(edits) == edit_budget
 
-def test_impossible_budget_raises():
-    with pytest.raises(PerturbationError):
-        perturb("ab", Operation.DELETE, Unit.CHAR, Scope.ANYWHERE, 50,
-                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
-
-
-def test_budget_exhaustion_on_single_char():
-    with pytest.raises(PerturbationError):
-        perturb("a", Operation.DELETE, Unit.CHAR, Scope.ANYWHERE, 2,
-                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
-
-
-def test_budget_zero_emits_no_edits():
-    for operation in _ALL_CHAR_OPS:
-        _, edits = perturb(SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 0,
-                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
-        assert len(edits) == 0
-
-
-# ---------------------------------------------------------------------------
-# Clause 3: Identity at k=0
-# ---------------------------------------------------------------------------
-
-def test_zero_budget_is_identity():
-    perturbed, edits = perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 0,
-                               SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
-    assert perturbed == SAMPLE_TEXT
-    assert edits == []
-
-
-def test_zero_budget_identity_all_operations():
-    for operation in _ALL_CHAR_OPS:
-        perturbed, edits = perturb(SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 0,
-                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed=42)
+    @pytest.mark.parametrize("operation", list(ALL_CHARACTER_OPERATIONS))
+    def test_zero_budget_is_identity_for_every_operation(self, operation):
+        perturbed, edits = perturb(
+            SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 0,
+            SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed=42)
         assert perturbed == SAMPLE_TEXT
         assert edits == []
 
 
-# ---------------------------------------------------------------------------
-# Clause 4: Protected spans
-# ---------------------------------------------------------------------------
+class TestBudgetEdgeCases:
 
-def test_protected_span_is_never_edited():
-    start = SAMPLE_TEXT.index("brown")
-    protected = [(start, start + len("brown"))]
-    for seed in range(40):
-        perturbed, _ = perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 3,
-                               SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed,
-                               protected_spans=protected)
-        assert "brown" in perturbed
+    def test_budget_exceeding_eligible_positions_raises(self):
+        with pytest.raises(PerturbationError):
+            perturb("ab", Operation.DELETE, Unit.CHAR, Scope.ANYWHERE, 50,
+                    SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
 
-
-def test_multiple_protected_spans():
-    text = "alpha beta gamma delta"
-    start_alpha = text.index("alpha")
-    start_delta = text.index("delta")
-    protected = [(start_alpha, start_alpha + 5), (start_delta, start_delta + 5)]
-    for seed in range(30):
-        try:
-            perturbed, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed,
-                                   protected_spans=protected)
-            assert "alpha" in perturbed
-            assert "delta" in perturbed
-        except PerturbationError:
-            pass  # impossible if only "beta gamma" eligible
+    def test_budget_exhausted_by_a_single_character_raises(self):
+        with pytest.raises(PerturbationError):
+            perturb("a", Operation.DELETE, Unit.CHAR, Scope.ANYWHERE, 2,
+                    SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
 
 
-def test_numeric_tokens_protected_by_default():
-    text = "Add 12 and 7 to get the sum"
-    successful_runs = 0
-    for seed in range(40):
-        try:
-            perturbed, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
-        except PerturbationError:
-            continue
-        assert "12" in perturbed and "7" in perturbed
-        successful_runs += 1
-    assert successful_runs > 30
+class TestBudgetAdversarialInputs:
 
+    def test_negative_edit_budget_raises_rather_than_misbehaving(self):
+        with pytest.raises(PerturbationError):
+            perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, -1,
+                    SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
 
-def test_multiple_numeric_tokens_all_protected():
-    text = "If 100 cats each eat 25 fish"
-    for seed in range(25):
-        try:
-            perturbed, _ = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 3,
-                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
-        except PerturbationError:
-            continue
-        assert "100" in perturbed and "25" in perturbed
+    def test_empty_text_with_nonzero_budget_raises(self):
+        with pytest.raises(PerturbationError):
+            perturb("", Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 1,
+                    SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 1)
 
 
 # ---------------------------------------------------------------------------
-# Clause 5: Reconstruction — metamorphic property
+# Clause 4 — Protected spans survive index-shifting under insertion/deletion.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("operation", list(_ALL_CHAR_OPS))
-def test_edit_script_reconstructs_output(operation):
-    for seed in range(20):
-        perturbed, edits = perturb(SAMPLE_TEXT, operation, Unit.CHAR, Scope.ANYWHERE, 3,
-                                   SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
-        assert apply_edit_script(SAMPLE_TEXT, edits) == perturbed
+class TestProtectedSpansExpectedBehavior:
 
-
-def test_edit_script_reconstructs_from_dicts():
-    perturbed, edits = perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
-                               SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 3)
-    as_dicts = [e.to_dict() for e in edits]
-    assert apply_edit_script(SAMPLE_TEXT, as_dicts) == perturbed
-
-
-def test_reconstruction_holds_over_fuzzed_texts():
-    rng = random.Random(7)
-    for seed in range(25):
-        text = _random_alpha_text(rng)
-        for operation in _ALL_CHAR_OPS:
+    @pytest.mark.parametrize("text,protected_words", [
+        ("The quick brown fox jumps over the lazy dog", ["brown"]),
+        ("alpha beta gamma delta", ["alpha", "delta"]),
+    ])
+    def test_explicitly_protected_words_are_never_edited(self, text, protected_words):
+        protected_spans = [
+            (text.index(word), text.index(word) + len(word)) for word in protected_words]
+        successful_runs = 0
+        for seed in range(40):
             try:
-                perturbed, edits = perturb(text, operation, Unit.CHAR, Scope.ANYWHERE, 2,
-                                           SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
-                assert apply_edit_script(text, edits) == perturbed
+                perturbed, _ = perturb(
+                    text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
+                    SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed,
+                    protected_spans=protected_spans)
             except PerturbationError:
-                pass
+                continue  # impossible if protecting every eligible word
+            successful_runs += 1
+            for word in protected_words:
+                assert word in perturbed
+        assert successful_runs > 0
 
-
-def test_reconstruction_empty_edit_list():
-    assert apply_edit_script(SAMPLE_TEXT, []) == SAMPLE_TEXT
+    @pytest.mark.parametrize("text,numbers", [
+        ("Add 12 and 7 to get the sum", ["12", "7"]),
+        ("If 100 cats each eat 25 fish", ["100", "25"]),
+    ])
+    def test_numeric_tokens_are_protected_by_default(self, text, numbers):
+        successful_runs = 0
+        for seed in range(40):
+            try:
+                perturbed, _ = perturb(
+                    text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 2,
+                    SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
+            except PerturbationError:
+                continue
+            successful_runs += 1
+            for number in numbers:
+                assert number in perturbed
+        assert successful_runs > 30
 
 
 # ---------------------------------------------------------------------------
-# Clause 6: Policy fidelity
+# Clause 5 — Reconstructibility: apply_edit_script(original, script) == perturbed.
 # ---------------------------------------------------------------------------
 
-def test_keyboard_neighbor_substitution_uses_adjacent_keys():
-    perturbed, edits = perturb("the quick brown fox", Operation.SUBSTITUTE, Unit.CHAR,
-                               Scope.ANYWHERE, 1, SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, 5)
-    edit = edits[0]
-    assert edit.after in keyboard_neighbors_of(edit.before)
+class TestReconstructionExpectedBehavior:
 
-
-def test_keyboard_neighbor_always_adjacent_over_many_seeds():
-    """Every keyboard-neighbor substitution must produce an actual neighbor."""
-    for seed in range(30):
+    @given(text=_alphabetic_words, operation=_character_operations, seed=_seeds)
+    @settings(max_examples=200)
+    def test_edit_script_reconstructs_the_perturbed_text(self, text, operation, seed):
         try:
-            _, edits = perturb(SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR,
-                               Scope.ANYWHERE, 1, SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
-            for edit in edits:
-                assert edit.after in keyboard_neighbors_of(edit.before), (
-                    f"seed={seed}: '{edit.before}' -> '{edit.after}' not a neighbor")
+            perturbed, edits = perturb(
+                text, operation, Unit.CHAR, Scope.ANYWHERE, 2,
+                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
         except PerturbationError:
-            pass
+            return
+        assert apply_edit_script(text, edits) == perturbed
+        # A JSON-round-tripped script (dicts, not Edit objects) must replay identically.
+        assert apply_edit_script(text, [edit.to_dict() for edit in edits]) == perturbed
 
 
-def test_keyboard_neighbors_of_covers_qwerty():
-    """Spot-check some known QWERTY neighborhoods."""
-    # 'a' neighbors on a standard QWERTY: q, w, s, z (and possibly x)
-    a_neighbors = keyboard_neighbors_of("a")
-    assert len(a_neighbors) >= 2
-    assert all(len(c) == 1 for c in a_neighbors)
+class TestReconstructionEdgeCases:
 
-    # Every letter of the alphabet must have at least one neighbor.
-    for ch in string.ascii_lowercase:
-        neighbors = keyboard_neighbors_of(ch)
-        assert len(neighbors) >= 1, f"'{ch}' has no keyboard neighbors"
-        for n in neighbors:
-            assert n != ch, f"'{ch}' is its own neighbor"
-
-
-def test_informative_word_edits_only_key_terms():
-    text = "Buy 5 boxes with cats inside"
-    perturbed, edits = perturb(text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANSWER_CRITICAL, 1,
-                               SelectionPolicy.INFORMATIVE_WORD, SemanticClass.A, 9,
-                               key_terms=["cats"])
-    assert edits[0].word_before == "cats"
-
-
-def test_real_word_policy_requires_is_word():
-    with pytest.raises(PerturbationError):
-        perturb("the cat sat", Operation.SUBSTITUTE, Unit.WORD, Scope.ANYWHERE, 1,
-                SelectionPolicy.REAL_WORD, SemanticClass.B, 1)
-
-
-def test_real_word_policy_produces_valid_word(small_vocabulary_is_word):
-    perturbed, edits = perturb("the cat sat", Operation.SUBSTITUTE, Unit.WORD, Scope.ANYWHERE, 1,
-                               SelectionPolicy.REAL_WORD, SemanticClass.B, 3,
-                               is_word=small_vocabulary_is_word)
-    edit = edits[0]
-    assert small_vocabulary_is_word(edit.word_after)
-    assert edit.word_after != edit.word_before
-
-
-def test_real_word_substitution_changes_text():
-    """The resulting text must actually differ from the original."""
-    def is_word(w):
-        return w.lower() in {"cat", "bat", "the", "sat", "cot"}
-    _, edits = perturb("the cat sat", Operation.SUBSTITUTE, Unit.WORD, Scope.ANYWHERE, 1,
-                       SelectionPolicy.REAL_WORD, SemanticClass.B, 1, is_word=is_word)
-    assert edits[0].word_before != edits[0].word_after
+    def test_empty_edit_script_is_identity(self):
+        assert apply_edit_script(SAMPLE_TEXT, []) == SAMPLE_TEXT
 
 
 # ---------------------------------------------------------------------------
-# Damerau-Levenshtein — metric properties
+# Clause 6 — Policy fidelity: each selection policy only ever produces the
+# kind of candidate it promises.
 # ---------------------------------------------------------------------------
 
-def test_damerau_levenshtein_basic_cases():
-    assert damerau_levenshtein_distance("cat", "cat") == 0
-    assert damerau_levenshtein_distance("cat", "cot") == 1     # substitution
-    assert damerau_levenshtein_distance("cat", "ct") == 1      # deletion
-    assert damerau_levenshtein_distance("cat", "cast") == 1    # insertion
-    assert damerau_levenshtein_distance("cat", "act") == 1     # transposition
-    assert damerau_levenshtein_distance("abc", "xyz") == 3
+class TestPolicyFidelityExpectedBehavior:
+
+    @given(seed=_seeds)
+    @settings(max_examples=100)
+    def test_keyboard_neighbor_substitutions_are_always_qwerty_adjacent(self, seed):
+        try:
+            _, edits = perturb(
+                SAMPLE_TEXT, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANYWHERE, 1,
+                SelectionPolicy.KEYBOARD_NEIGHBOR, SemanticClass.A, seed)
+        except PerturbationError:
+            return
+        for edit in edits:
+            assert edit.after in keyboard_neighbors_of(edit.before)
+
+    def test_keyboard_neighbors_cover_every_qwerty_letter(self):
+        for letter in string.ascii_lowercase:
+            neighbors = keyboard_neighbors_of(letter)
+            assert len(neighbors) >= 1, f"'{letter}' has no keyboard neighbors"
+            assert letter not in neighbors, f"'{letter}' is its own neighbor"
+
+    def test_informative_word_policy_edits_only_the_supplied_key_terms(self):
+        text = "Buy 5 boxes with cats inside"
+        _, edits = perturb(
+            text, Operation.SUBSTITUTE, Unit.CHAR, Scope.ANSWER_CRITICAL, 1,
+            SelectionPolicy.INFORMATIVE_WORD, SemanticClass.A, 9, key_terms=["cats"])
+        assert edits[0].word_before == "cats"
+
+    @given(seed=_seeds)
+    @settings(max_examples=50)
+    def test_real_word_policy_always_produces_a_distinct_valid_word(self, seed):
+        # Constructed inline (not via a pytest fixture): hypothesis reruns
+        # this test body per generated example without resetting
+        # function-scoped fixtures, and this predicate is stateless/pure
+        # enough that constructing it fresh here is both correct and cheap.
+        is_word = regimes.make_is_word(
+            {"cat", "cot", "cab", "car", "bat", "bad", "bag", "the", "france", "finance"})
+        try:
+            _, edits = perturb(
+                "the cat sat", Operation.SUBSTITUTE, Unit.WORD, Scope.ANYWHERE, 1,
+                SelectionPolicy.REAL_WORD, SemanticClass.B, seed, is_word=is_word)
+        except PerturbationError:
+            return
+        edit = edits[0]
+        assert is_word(edit.word_after)
+        assert edit.word_after != edit.word_before
 
 
-def test_damerau_levenshtein_identity():
-    rng = random.Random(42)
-    for seed in range(30):
-        text = _random_alpha_text(rng, 3, 15)
-        assert damerau_levenshtein_distance(text, text) == 0
+class TestPolicyFidelityAdversarialInputs:
+
+    def test_real_word_policy_without_is_word_raises(self):
+        with pytest.raises(PerturbationError):
+            perturb("the cat sat", Operation.SUBSTITUTE, Unit.WORD, Scope.ANYWHERE, 1,
+                    SelectionPolicy.REAL_WORD, SemanticClass.B, 1)
+
+    def test_exception_from_a_caller_supplied_is_word_propagates(self):
+        # A buggy or malicious is_word predicate must surface its own error,
+        # never be silently absorbed by the engine — the same "easy to catch"
+        # standard the rest of the codebase was audited against.
+        def broken_is_word(_token):
+            raise RuntimeError("is_word blew up")
+
+        with pytest.raises(RuntimeError, match="is_word blew up"):
+            perturb("the cat sat", Operation.SUBSTITUTE, Unit.WORD, Scope.ANYWHERE, 1,
+                    SelectionPolicy.REAL_WORD, SemanticClass.B, 1, is_word=broken_is_word)
 
 
-def test_damerau_levenshtein_symmetry():
-    rng = random.Random(17)
-    for seed in range(30):
-        a = _random_alpha_text(rng, 3, 12)
-        b = _random_alpha_text(rng, 3, 12)
-        assert damerau_levenshtein_distance(a, b) == damerau_levenshtein_distance(b, a)
+# ---------------------------------------------------------------------------
+# Damerau-Levenshtein (OSA) distance — the metric regimes and measured_dl
+# are built on. damerau_levenshtein_distance now delegates to rapidfuzz for
+# speed; every property and equivalence check below applies equally to
+# either implementation, which is the point.
+# ---------------------------------------------------------------------------
+
+class TestDistanceExpectedBehavior:
+
+    def test_basic_single_edit_cases(self):
+        assert damerau_levenshtein_distance("cat", "cat") == 0
+        assert damerau_levenshtein_distance("cat", "cot") == 1       # substitution
+        assert damerau_levenshtein_distance("cat", "ct") == 1        # deletion
+        assert damerau_levenshtein_distance("cat", "cast") == 1      # insertion
+        assert damerau_levenshtein_distance("ab", "ba") == 1         # adjacent transposition
+        assert damerau_levenshtein_distance("ac", "ca") == 1         # not double-counted as 2
+        assert damerau_levenshtein_distance("abc", "xyz") == 3
+
+    @given(first_string=st.text(max_size=25), second_string=st.text(max_size=25),
+           third_string=st.text(max_size=25))
+    @settings(max_examples=300)
+    def test_metric_properties_hold_across_a_random_string_sphere(
+            self, first_string, second_string, third_string):
+        # Non-negativity and identity.
+        assert damerau_levenshtein_distance(first_string, first_string) == 0
+        distance_ab = damerau_levenshtein_distance(first_string, second_string)
+        assert distance_ab >= 0
+        # Symmetry.
+        assert distance_ab == damerau_levenshtein_distance(second_string, first_string)
+        # Bounded by the longer string's length.
+        assert distance_ab <= max(len(first_string), len(second_string))
+        # Triangle inequality.
+        distance_ac = damerau_levenshtein_distance(first_string, third_string)
+        distance_cb = damerau_levenshtein_distance(third_string, second_string)
+        assert distance_ab <= distance_ac + distance_cb
 
 
-def test_damerau_levenshtein_triangle_inequality():
-    rng = random.Random(5)
-    for _ in range(20):
-        a = _random_alpha_text(rng, 3, 8)
-        b = _random_alpha_text(rng, 3, 8)
-        c = _random_alpha_text(rng, 3, 8)
-        assert (damerau_levenshtein_distance(a, c)
-                <= damerau_levenshtein_distance(a, b) + damerau_levenshtein_distance(b, c))
+class TestDistanceEdgeCases:
+
+    def test_empty_strings(self):
+        assert damerau_levenshtein_distance("", "") == 0
+        assert damerau_levenshtein_distance("", "abc") == 3
+        assert damerau_levenshtein_distance("abc", "") == 3
 
 
-def test_damerau_levenshtein_single_substitution():
-    assert damerau_levenshtein_distance("abc", "aXc") == 1
+def _reference_osa_distance(first_string: str, second_string: str) -> int:
+    """Pure-Python Optimal String Alignment distance — the metric
+    ``damerau_levenshtein_distance`` has always actually computed (not true,
+    unrestricted Damerau-Levenshtein; see the test below). Kept as a
+    dependency-free oracle so a future change to the production
+    implementation (currently ``rapidfuzz``) is provably still computing the
+    same metric, not silently drifting to a different one.
+    """
+    first_length, second_length = len(first_string), len(second_string)
+    two_rows_back = [0] * (second_length + 1)
+    previous_row = list(range(second_length + 1))
+    current_row = [0] * (second_length + 1)
+
+    for i in range(1, first_length + 1):
+        current_row[0] = i
+        first_character = first_string[i - 1]
+        for j in range(1, second_length + 1):
+            second_character = second_string[j - 1]
+            substitution_cost = 0 if first_character == second_character else 1
+            best_distance = min(
+                previous_row[j] + 1,
+                current_row[j - 1] + 1,
+                previous_row[j - 1] + substitution_cost,
+            )
+            is_adjacent_transposition = (
+                i > 1 and j > 1
+                and first_character == second_string[j - 2]
+                and first_string[i - 2] == second_character
+            )
+            if is_adjacent_transposition:
+                best_distance = min(best_distance, two_rows_back[j - 2] + 1)
+            current_row[j] = best_distance
+        two_rows_back, previous_row, current_row = previous_row, current_row, two_rows_back
+
+    return previous_row[second_length]
 
 
-def test_damerau_levenshtein_single_deletion():
-    assert damerau_levenshtein_distance("abc", "ac") == 1
+class TestDistanceAdversarialInputs:
+
+    @given(first_string=st.text(max_size=30), second_string=st.text(max_size=30))
+    @example(first_string="", second_string="")
+    @example(first_string="ac", second_string="ca")            # adjacent transposition
+    @example(first_string="CA", second_string="ABC")           # OSA != true DL here
+    @example(first_string="café", second_string="cafe")        # unicode
+    @example(first_string="a" * 30, second_string="a" * 30)    # identical, long
+    @example(first_string="a" * 30, second_string="b" * 30)    # maximally different
+    @settings(max_examples=500)
+    def test_matches_reference_oracle_across_random_and_pinned_inputs(
+            self, first_string, second_string):
+        assert (OSA.distance(first_string, second_string)
+                == _reference_osa_distance(first_string, second_string)
+                == damerau_levenshtein_distance(first_string, second_string))
 
 
-def test_damerau_levenshtein_single_insertion():
-    assert damerau_levenshtein_distance("ac", "abc") == 1
+# ---------------------------------------------------------------------------
+# Regression guard: the Regime-B neighbor-generation functions that returned
+# unbounded, multi-gigabyte caches and SIGKILL-ed a real pilot run partway
+# through (src/perturbation/engine.py) must never be cached again.
+# ---------------------------------------------------------------------------
 
+def test_large_neighbor_generators_are_never_cached():
+    from perturbation import engine as perturbation_engine
 
-def test_damerau_levenshtein_single_transposition():
-    assert damerau_levenshtein_distance("ab", "ba") == 1
-
-
-def test_damerau_levenshtein_empty_strings():
-    assert damerau_levenshtein_distance("", "") == 0
-    assert damerau_levenshtein_distance("", "abc") == 3
-    assert damerau_levenshtein_distance("abc", "") == 3
-
-
-def test_damerau_levenshtein_transposition_not_counted_as_two():
-    # Pure Levenshtein would count "ca" from "ac" as 2 (del + ins), but
-    # Damerau-Levenshtein counts it as 1 transposition.
-    assert damerau_levenshtein_distance("ac", "ca") == 1
-
-
-def test_damerau_levenshtein_distance_bounded_by_length():
-    rng = random.Random(3)
-    for _ in range(20):
-        a = _random_alpha_text(rng, 2, 10)
-        b = _random_alpha_text(rng, 2, 10)
-        dist = damerau_levenshtein_distance(a, b)
-        assert dist <= max(len(a), len(b))
+    assert not hasattr(perturbation_engine._damerau_levenshtein_one_neighbors, "cache_info")
+    assert not hasattr(perturbation_engine._damerau_levenshtein_band_neighbors, "cache_info")

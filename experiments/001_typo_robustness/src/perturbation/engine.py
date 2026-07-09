@@ -42,11 +42,21 @@ from dataclasses import dataclass, asdict
 from functools import lru_cache
 from typing import Callable, Optional, Sequence
 
+from rapidfuzz.distance.OSA import distance as osa_distance
+
 from enums import EnglishDiscourseParticle, Operation, SelectionPolicy, Scope, Unit, SemanticClass
 from perturbation.keyboard import keyboard_neighbors_of
 
 
 LOWERCASE_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+
+# Upper bound on entries retained by the small-output neighbor-lookup caches
+# below (each entry is a short tuple/frozenset of real words, not the large
+# intermediate candidate sets — see the module-level note above
+# _damerau_levenshtein_one_neighbors for why those are never cached). No real
+# run comes anywhere near this many distinct source words; it exists purely
+# as a bound so an unbounded cache can never again grow silently.
+MAX_CACHED_NEIGHBOR_LOOKUPS = 100_000
 
 
 # The four primitive Damerau-Levenshtein operations (insert, delete, substitute,
@@ -133,7 +143,7 @@ def _load_phoneme_index() -> bool:
     return _phoneme_index_available
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=MAX_CACHED_NEIGHBOR_LOOKUPS)
 def _cmu_homophone_neighbors(
         word: str,
         is_word: Optional[Callable[[str], bool]]) -> frozenset[str]:
@@ -206,50 +216,27 @@ class Edit:
 
 
 def damerau_levenshtein_distance(first_string: str, second_string: str) -> int:
-    """The Damerau-Levenshtein distance: minimum number of insertions,
-    deletions, substitutions, and adjacent transpositions to turn one string
-    into the other (Damerau, 1964).
+    """Optimal String Alignment (OSA) distance: minimum insertions, deletions,
+    substitutions, and adjacent transpositions to turn one string into the
+    other, where a substring may not be edited more than once.
 
-    Row ``i`` of the classic DP matrix only ever reads rows ``i-1`` and
-    ``i-2`` (the latter for the transposition check), so this keeps three
-    rolling rows instead of the full ``(first_length+1) x (second_length+1)``
-    matrix — identical algorithm and result, O(second_length) memory instead
-    of O(first_length * second_length). This is called on full prompt-length
-    strings (not single words), where that difference is significant.
+    This is the restricted variant, not true unrestricted Damerau-Levenshtein
+    (which permits a substring to be edited more than once, and can differ —
+    e.g. "CA"->"ABC" is 3 under OSA, 2 under true DL). The name is kept as
+    ``damerau_levenshtein_distance`` because that's the metric this codebase
+    has always actually computed and every caller (`measured_dl`, regime
+    metadata, the real-word DL band) already depends on that exact semantics;
+    changing the name would be pure churn.
+
+    Delegates to ``rapidfuzz.distance.OSA`` (C-optimized) rather than a
+    pure-Python DP: this is called on full prompt-length strings (not single
+    words), and rapidfuzz is materially faster there. Proven byte-identical
+    to the original pure-Python rolling-DP implementation across a large
+    random string sphere in
+    ``tests/test_perturbation_engine.py::test_osa_distance_matches_reference_across_random_string_sphere``,
+    which also keeps that original implementation as a dependency-free oracle.
     """
-    first_length, second_length = len(first_string), len(second_string)
-
-    two_rows_back = [0] * (second_length + 1)
-    previous_row = list(range(second_length + 1))
-    current_row = [0] * (second_length + 1)
-
-    for i in range(1, first_length + 1):
-        current_row[0] = i
-        first_character = first_string[i - 1]
-
-        for j in range(1, second_length + 1):
-            second_character = second_string[j - 1]
-            substitution_cost = 0 if first_character == second_character else 1
-
-            best_distance = min(
-                previous_row[j] + 1,                        # deletion
-                current_row[j - 1] + 1,                      # insertion
-                previous_row[j - 1] + substitution_cost,     # substitution
-            )
-
-            is_adjacent_transposition = (
-                i > 1 and j > 1
-                and first_character == second_string[j - 2]
-                and first_string[i - 2] == second_character
-            )
-            if is_adjacent_transposition:
-                best_distance = min(best_distance, two_rows_back[j - 2] + 1)
-
-            current_row[j] = best_distance
-
-        two_rows_back, previous_row, current_row = previous_row, current_row, two_rows_back
-
-    return previous_row[second_length]
+    return osa_distance(first_string, second_string)
 
 
 # ---------------------------------------------------------------------------
@@ -678,15 +665,18 @@ def _apply_filler_word_insertion(character_cells, random_generator, is_eligible)
                 word_index=word_index, word_before=word_before, word_after=filler_token)
 
 
-@lru_cache(maxsize=None)
 def _damerau_levenshtein_one_neighbors(word: str) -> frozenset[str]:
     """Return every Damerau-Levenshtein-distance-1 letter variant of ``word``
     (substitution, deletion, insertion, adjacent transposition). Used by the
     real-word policy to find valid-word neighbors.
 
-    Cached: distance-2 neighborhoods (below) expand every distance-1 variant
-    through this same function again, and the same word recurs across many
-    items, conditions, and rejection-sampling attempts within a run.
+    Deliberately uncached: this (and the distance-2 expansion below) can
+    return tens of thousands of strings for one word, and an unbounded cache
+    of those sets across every distinct word in a run has exhausted host
+    memory in practice. ``_valid_real_word_neighbors`` below is the layer
+    that's actually worth caching — it's called once per distinct source word
+    and returns a small, bounded result, which already prevents this
+    (expensive but transient) generation from re-running for a repeated word.
     """
     substitutions = {
         word[:i] + (replacement.upper() if word[i].isupper() else replacement) + word[i + 1:]
@@ -708,7 +698,6 @@ def _damerau_levenshtein_one_neighbors(word: str) -> frozenset[str]:
     return frozenset(substitutions | deletions | insertions | transpositions) - {word}
 
 
-@lru_cache(maxsize=None)
 def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> frozenset[str]:
     """Return all string variants of ``word`` within Damerau-Levenshtein distance
     ``max_distance``.
@@ -717,6 +706,11 @@ def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> fro
     ``_damerau_levenshtein_one_neighbors``.  For ``max_distance == 2`` the
     result is the complete DL ≤ 2 neighbourhood, computed by expanding every
     level-1 variant by one additional DL-1 step.  The original word is excluded.
+
+    Deliberately uncached — see ``_damerau_levenshtein_one_neighbors`` above;
+    at ``max_distance == 2`` this can hold on the order of 10^5 strings, and
+    ``_valid_real_word_neighbors`` already caches the small result derived
+    from it.
     """
     level_one_neighbors = _damerau_levenshtein_one_neighbors(word)
     if max_distance < 2:
@@ -726,7 +720,7 @@ def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> fro
     return level_two_neighbors - {word}
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=MAX_CACHED_NEIGHBOR_LOOKUPS)
 def _valid_real_word_neighbors(
         word: str,
         max_word_distance: int,
