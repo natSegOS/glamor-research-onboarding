@@ -178,13 +178,11 @@ def main() -> None:
                decision.agrees_with_claimed_regime() is False or decision.parse_failed]
     unchecked = len(rows) - len(decisions)  # skipped (Regime C MCQ)
 
-    # Write flagged pairs.
     arguments.output_flagged.parent.mkdir(parents=True, exist_ok=True)
     with arguments.output_flagged.open("w") as fh:
         for decision in flagged:
             fh.write(json.dumps(decision.to_dict()) + "\n")
 
-    # Print summary.
     agreement_rate = len(agreed) / len(decisions) * 100 if decisions else float("nan")
     parse_failed_count = sum(1 for decision in decisions if decision.parse_failed)
 
