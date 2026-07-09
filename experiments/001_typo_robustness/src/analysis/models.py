@@ -16,18 +16,9 @@ Both require statsmodels (not in the minimal requirements). The module degrades
 gracefully: if statsmodels is absent, all fitting functions raise ImportError
 with a helpful message rather than crashing at import time.
 
-Convergence fallback ladder actually implemented here (see
-``ConvergenceMethod`` for how this differs from design/06 §6.6's
-pre-registered *structural* contingency, which this function does not
-implement):
-  1. Statsmodels' own default quasi-Newton cascade (bfgs -> lbfgs -> cg) over
-     the maximal model.
-  2. A derivative-free fallback optimizer (Nelder-Mead) over the same model.
-  3. A GLM approximation that treats item/model as fixed factors (use when
-     random-effects convergence fails outright with only ~5 model levels) —
-     this step is what design/06 §6.6 step 3 describes.
-The fallback is triggered automatically; the ``method`` field in the result
-records which step succeeded.
+See ``ConvergenceMethod`` for the fallback ladder this actually implements
+and how it differs from design/06 §6.6's pre-registered structural
+contingency.
 """
 
 from __future__ import annotations
@@ -148,13 +139,8 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
     # treated as "try the next method."
     statistical_fit_failure_exceptions = (ValueError, RuntimeError, np.linalg.LinAlgError)
 
-    # Convergence fallback ladder — see ConvergenceMethod's docstring for what
-    # each rung actually is and how it differs from design/06 §6.6's
-    # pre-registered structural contingency. The outer label is our result
-    # tag (ConvergenceMethod); fit_kwargs["method"] (when present) is
-    # statsmodels' own solver name for that rung.
-    # Failure reasons accumulate here so a totally-non-converged result still
-    # tells the caller why each rung was skipped, instead of just "GLM ran".
+    # fit_failure_reasons accumulates across rungs so a totally-non-converged
+    # result still says why each rung was skipped, not just "GLM ran".
     fit_failure_reasons: list[str] = []
     for method_name, fit_kwargs in [
         # method omitted -> statsmodels' own default cascade (bfgs, lbfgs, cg).

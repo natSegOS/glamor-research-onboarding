@@ -85,7 +85,6 @@ def main() -> None:
     dummy_engine = DeterministicDummyEngine()
     dummy_tokenizer = dummy_engine  # has no tokenizer; tokenization fields will be zeros
 
-    # Set up exclusion sidecar alongside the output file.
     output_path = Path(arguments.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     exclusion_path = output_path.with_name(
