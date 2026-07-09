@@ -131,7 +131,15 @@ def _run_statistical_models(rows, output_directory: Path) -> None:
         print(f"  Mixed-effects model failed: {error}", file=sys.stderr)
 
     # Mediation (design/06 §6.8): Regime A perturbed rows + their clean counterparts.
-    regime_a_data = data[data["r_semantic_class"] == SemanticClass.A]
+    # Clean rows are always tagged SemanticClass.CLEAN, never A, so selecting on
+    # r_semantic_class alone would silently drop every clean row, leaving
+    # is_perturbed constant within the fitted data and the mediator regression
+    # singular. Pull in the matching clean row for every Regime-A item instead.
+    regime_a_task_ids = data.loc[data["r_semantic_class"] == SemanticClass.A, "task_id"]
+    regime_a_data = data[
+        (data["r_semantic_class"] == SemanticClass.A)
+        | ((data["is_perturbed"] == 0) & data["task_id"].isin(regime_a_task_ids))
+    ]
     if len(regime_a_data) >= _MINIMUM_ROWS_FOR_MEDIATION_MODEL:
         print("  Fitting mediation model (Regime A)...")
         try:

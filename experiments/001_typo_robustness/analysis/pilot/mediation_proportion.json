@@ -1,0 +1,13 @@
+{
+  "total_effect": -0.023923005349374665,
+  "direct_effect": 0.09217117757098058,
+  "indirect_effect": -0.11609418292035524,
+  "proportion_mediated": 4.852826023524251,
+  "treatment_on_mediator_coef": 1.025566063492194,
+  "mediator_on_outcome_coef": -0.11320010192716258,
+  "n_observations": 4736,
+  "bootstrap_ci_proportion": [
+    -14.522375886242466,
+    25.39773640176411
+  ]
+}
