@@ -73,12 +73,12 @@ class TestResultDataclasses:
 
     def test_mixed_effects_result_carries_its_fields(self):
         result = MixedEffectsLogisticResult(
-            converged=True, method=ConvergenceMethod.LAPLACE, log_likelihood=-42.3,
+            converged=True, method=ConvergenceMethod.QUASI_NEWTON_CASCADE, log_likelihood=-42.3,
             n_observations=100, n_items=50, n_models=3,
             fixed_effects={"is_perturbed": {"coef": -0.5, "or": 0.6, "p": 0.02}},
             random_effects_variance={"item_intercept": 0.1}, model_summary="summary text")
         assert result.converged is True
-        assert result.method == ConvergenceMethod.LAPLACE
+        assert result.method == ConvergenceMethod.QUASI_NEWTON_CASCADE
         assert result.n_observations == 100
         assert "is_perturbed" in result.fixed_effects
 
