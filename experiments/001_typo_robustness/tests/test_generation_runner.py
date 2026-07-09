@@ -10,7 +10,8 @@ import json
 
 import pytest
 
-from enums import SemanticClass, Operation, SelectionPolicy, Scope, TaskFamily
+from enums import FinishReason, SemanticClass, Operation, SelectionPolicy, Scope, TaskFamily
+from inference.engines import StreamedGeneration
 from pipeline.runner import (
     DeterministicDummyEngine,
     GenerationRequest,
@@ -19,6 +20,12 @@ from pipeline.runner import (
     load_generation_rows,
     run_shard,
 )
+
+
+def _streamed(text, index, finish_reason=FinishReason.STOPPED):
+    return StreamedGeneration(
+        prompt_index=index, text=text, output_token_count=len(text.split()),
+        finish_reason=finish_reason, request_wall_seconds=0.0)
 
 
 def _make_request(task_id, is_clean=True, edit_budget=0,
@@ -91,9 +98,21 @@ class TestRunShardSchemaAndIdempotence:
 
         required_fields = {"row_id", "model_revision", "task_id", "is_clean",
                            "expected_answer", "parsed_answer", "is_correct",
-                           "parse_status", "decoding", "r_edit_budget", "schema"}
+                           "parse_status", "decoding", "r_edit_budget", "schema",
+                           "output_token_count", "finish_reason",
+                           "request_wall_seconds"}
         for row in load_generation_rows([output]):
             assert required_fields <= set(row)
+
+    def test_completed_shard_records_throughput_statistics(self, tmp_path):
+        manifest = ShardManifest(tmp_path / "manifest.json")
+        run_shard("shard1", [_make_request("t1"), _make_request("t2")],
+                  DeterministicDummyEngine(), tmp_path / "out.jsonl", manifest,
+                  model_id="m", model_revision="rev1")
+        statistics = ShardManifest(tmp_path / "manifest.json").shard_statistics["shard1"]
+        assert statistics["rows"] == 2
+        assert statistics["output_tokens"] > 0
+        assert {"wall_seconds", "output_tokens_per_second", "rows_per_hour"} <= set(statistics)
 
     @pytest.mark.parametrize("request_count", [1, 3, 5])
     def test_row_count_equals_request_count(self, tmp_path, request_count):
@@ -153,7 +172,7 @@ class _ChatTemplateEngine:
     def generate_streaming(self, prompts, max_new_tokens):
         assert all(prompt.startswith("<|user|>") for prompt in prompts)
         for index, _prompt in enumerate(prompts):
-            yield index, "#### 0"
+            yield _streamed("#### 0", index)
 
 
 def test_runner_applies_the_engines_chat_template(tmp_path):
@@ -188,7 +207,7 @@ class _CrashAfterNEngine:
         for index, _prompt in enumerate(prompts):
             if index == self.crash_after:
                 raise RuntimeError("simulated engine death")
-            yield index, "#### 0"
+            yield _streamed("#### 0", index)
 
 
 class TestCrashRecovery:

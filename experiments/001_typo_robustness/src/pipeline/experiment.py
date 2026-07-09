@@ -42,13 +42,13 @@ from loky import ProcessPoolExecutor
 
 from enums import (
     SemanticClass, Operation, SelectionPolicy, Scope,
-    ConditionSource, Precision, ShardType,
+    ConditionSource, FragmentationStratum, Precision, ShardType,
     REASONING_FAMILIES, TaskFamily,
 )
 
 from inference.engines import apply_chat_template
 import regimes
-from perturbation import PerturbationError
+from perturbation import Edit, PerturbationError
 from pipeline.runner import (
     DUMMY_ENGINE_REVISION,
     GenerationRequest,
@@ -132,6 +132,12 @@ class ExperimentConfiguration:
     max_new_tokens_reasoning: int = 512
     max_new_tokens_multiple_choice: int = 256
     is_confirmatory: bool = False
+    # The pre-registered primary severity per task type (design/06 §6.3; the
+    # k=2/k=4 amendment is logged in design/00 §0.5). Consumed by the Stage-1
+    # gates computation, not by generation — the sweep runs every budget in
+    # ``conditions``.
+    primary_edit_budget_reasoning: int = 2
+    primary_edit_budget_mcq: int = 4
 
     def __post_init__(self):
         if self.datasets is not None:
@@ -392,6 +398,10 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
     """Build engine-perturbed requests for one item under one condition, across
     its edit budgets. Returns ``(requests, exclusion_records)`` rather than
     writing exclusions directly — see ``build_requests`` for why."""
+    if condition.selection_policy == SelectionPolicy.FRAGMENTATION_MATCHED:
+        return _build_fragmentation_matched_requests(
+            task_item, condition, gold_answer, clean_prompt, is_word, tokenizer, seed)
+
     requests: list[GenerationRequest] = []
     exclusion_records: list[dict] = []
 
@@ -453,6 +463,111 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
             edit_script=edits,
             extra_fields=token_metric_fields,
         ))
+
+    return requests, exclusion_records
+
+
+def _sort_for_prefix_locality(
+        requests: Sequence[GenerationRequest]) -> list[GenerationRequest]:
+    """Order requests so each item's clean+perturbed family stays contiguous
+    (shared-prefix families hit the prefix cache back to back) and families are
+    sorted by clean-prompt length so similarly-sized requests batch together
+    (design/07 §7.8). Row IDs are order-independent, so this is purely a
+    scheduling optimization."""
+    families: dict[str, list[GenerationRequest]] = {}
+    for request in requests:
+        families.setdefault(request.task_id, []).append(request)
+    return [
+        request
+        for task_id in sorted(
+            families, key=lambda task_id: (len(families[task_id][0].clean_prompt
+                                               or families[task_id][0].prompt), task_id))
+        for request in families[task_id]
+    ]
+
+
+def _build_fragmentation_matched_requests(
+        task_item, condition, gold_answer, clean_prompt, is_word, tokenizer, seed,
+        ) -> tuple[list[GenerationRequest], list[dict]]:
+    """Method A counterfactual requests (design/02 §2.5, design/06 §6.8): per
+    edit budget, TWO Regime-A variants of the same target word — one Low and
+    one High fragmentation — differing only in their tokenization consequence.
+    The stratum is part of the perturbation state vector so the two variants
+    get distinct row IDs."""
+    requests: list[GenerationRequest] = []
+    exclusion_records: list[dict] = []
+
+    content_text = content_text_of(task_item)
+    target_word = tokenization.select_counterfactual_target_word(content_text, is_word)
+
+    def exclusion(edit_budget: int, failure_reason: str) -> dict:
+        return build_exclusion_record(
+            task_id=task_item.task_id,
+            condition_name=condition.name,
+            edit_budget=edit_budget,
+            failure_stage="perturbation",
+            failure_reason=failure_reason,
+            item_length=len(content_text),
+            word_before=target_word or "",
+        )
+
+    if target_word is None:
+        return [], [exclusion(edit_budget, "no eligible counterfactual target word")
+                    for edit_budget in condition.edit_budgets]
+
+    for edit_budget in condition.edit_budgets:
+        item_seed = regimes.derived_seed(
+            seed, condition.name, task_item.task_id, edit_budget)
+
+        pair = tokenization.build_fragmentation_matched_pair(
+            tokenizer, target_word, edit_budget, item_seed, is_word)
+        if pair is None:
+            exclusion_records.append(exclusion(
+                edit_budget, f"no Low/High fragmentation pair for word {target_word!r}"))
+            continue
+
+        stratum_variants = (
+            (FragmentationStratum.LOW, pair.low_fragmentation_variant,
+             pair.low_fragmentation_subword_change),
+            (FragmentationStratum.HIGH, pair.high_fragmentation_variant,
+             pair.high_fragmentation_subword_change),
+        )
+        for stratum, variant, subword_change in stratum_variants:
+            perturbed_content, character_index = tokenization.apply_counterfactual_variant(
+                content_text, target_word, variant)
+            requests.append(GenerationRequest(
+                task_id=task_item.task_id,
+                task_family=task_item.task_family,
+                prompt=clean_prompt.replace(content_text, perturbed_content),
+                gold_answer=gold_answer,
+                is_clean=False,
+                perturbation_state_vector={
+                    "semantic_class": SemanticClass.A,
+                    "operation": condition.operation,
+                    "selection_policy": SelectionPolicy.FRAGMENTATION_MATCHED,
+                    "scope": condition.scope,
+                    "edit_budget": edit_budget,
+                    "fragmentation_stratum": stratum,
+                },
+                seed=item_seed,
+                clean_prompt=clean_prompt,
+                edit_script=[Edit(
+                    operation=Operation.WORD_SUBSTITUTE, index=character_index,
+                    before=target_word, after=variant,
+                    word_before=target_word, word_after=variant)],
+                extra_fields={
+                    "token_inflation_ratio": tokenization.token_inflation_ratio(
+                        tokenizer, content_text, perturbed_content),
+                    # Only the target word changed, so whole-text DL equals the
+                    # builder-verified word-level DL — exactly the budget.
+                    "measured_dl": edit_budget,
+                    "subword_count_change": subword_change,
+                    "fragmentation_stratum": stratum,
+                    "word_length_before": len(target_word),
+                    "edited_word": variant,
+                    "counterfactual_target_word": target_word,
+                },
+            ))
 
     return requests, exclusion_records
 
@@ -688,8 +803,10 @@ def run_experiment(
                 request.is_clean), 16) % worker_count == worker_index
         ]
 
-    reasoning_requests = [request for request in requests if request.task_family in REASONING_FAMILIES]
-    other_requests = [request for request in requests if request.task_family not in REASONING_FAMILIES]
+    reasoning_requests = _sort_for_prefix_locality(
+        [request for request in requests if request.task_family in REASONING_FAMILIES])
+    other_requests = _sort_for_prefix_locality(
+        [request for request in requests if request.task_family not in REASONING_FAMILIES])
 
     manifest = ShardManifest(
         output_directory / f"{configuration.run_id}{worker_suffix}_manifest.json")

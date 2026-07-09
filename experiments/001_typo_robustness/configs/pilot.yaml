@@ -33,6 +33,12 @@ is_confirmatory: false
 max_new_tokens_reasoning: 512
 max_new_tokens_multiple_choice: 256
 
+# Primary severity per task type (design/06 §6.3 contingency, applied from the
+# first pilot's p_d estimates; amendment logged in design/00 §0.5). One-line
+# change if a rerun revises the decision. Feeds the Stage-1 gates computation.
+primary_edit_budget_reasoning: 2
+primary_edit_budget_mcq: 4
+
 # Perturbation conditions. The pilot spans the primary regimes (A and B) and the
 # operations/scopes/severities the main study will use, at low replication.
 conditions:
@@ -77,6 +83,17 @@ conditions:
     edit_budgets: [1, 2]
     source: synthetic
 
+  # Method A counterfactual (design/02 §2.5, design/06 §6.8): paired Low/High
+  # fragmentation variants of the same word at the same budget — the primary
+  # mediation contrast. Two perturbed requests per item x budget.
+  - name: regime_a_fragmentation_matched
+    semantic_class: A
+    operation: substitute
+    selection_policy: fragmentation_matched
+    scope: anywhere
+    edit_budgets: [1, 2]
+    source: synthetic
+
   # Regime B lever (a): config-only — higher word counts, same DL band.
   - name: regime_b_real_word
     semantic_class: B
@@ -94,7 +111,7 @@ conditions:
   #                    recomputed via the template answer function.
   # The operation/scope/selection_policy fields are unused for Regime C; the
   # dispatch is determined solely by item type inside experiment._construct_regime_c.
-  - name: regime_c_semantic_preserving
+  - name: regime_c_meaning_changing
     semantic_class: C
     operation: substitute
     selection_policy: keyboard_neighbor

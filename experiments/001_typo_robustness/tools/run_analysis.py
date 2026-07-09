@@ -40,16 +40,24 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--generations", required=True, nargs="+", type=Path)
     parser.add_argument("--output-directory", required=True, type=Path)
+    parser.add_argument(
+        "--config", type=Path, default=None,
+        help="the experiment config the rows came from; supplies the primary "
+             "edit budgets for the Stage-1 gates (defaults otherwise)")
     return parser.parse_args()
 
 
-def _build_model_dataframe(rows):
-    """Convert raw generation rows to a pandas DataFrame for the mixed-effects models.
+# An unperturbed prompt inflates nothing, so the clean-row token-inflation
+# ratio is definitionally 1.0. Coding it 0.0 (the pre-pilot-rerun bug)
+# manufactured a spurious ~1.0 treatment-on-mediator jump that dominated the
+# mediation estimate.
+_CLEAN_TOKEN_INFLATION_RATIO = 1.0
 
-    Clean rows contribute is_perturbed=0 and token_inflation_ratio=0.0.
-    Perturbed rows contribute is_perturbed=1 and token_inflation_ratio from the
-    r_token_inflation_ratio field written by the runner.
-    """
+
+def _build_model_dataframe(rows):
+    """Convert raw generation rows to a pandas DataFrame for the mixed-effects
+    models. token_inflation_ratio has no r_ prefix — the runner writes it as an
+    extra_field, not a perturbation-state-vector entry."""
     import pandas as pd  # type: ignore[import]
 
     records = []
@@ -65,14 +73,10 @@ def _build_model_dataframe(rows):
             "is_perturbed": 0 if is_clean else 1,
             "task_id": task_id,
             "model_revision": model_revision,
-            # Primary mediator: token-inflation ratio (no r_ prefix — written as
-            # extra_field by the runner, not as a perturbation state vector entry).
-            "token_inflation_ratio": 0.0 if is_clean else float(
-                row.get("token_inflation_ratio", 0.0) or 0.0),
-            # Supplementary mediator (Workstream 9).
+            "token_inflation_ratio": _CLEAN_TOKEN_INFLATION_RATIO if is_clean else float(
+                row.get("token_inflation_ratio") or _CLEAN_TOKEN_INFLATION_RATIO),
             "subword_count_change": 0.0 if is_clean else float(
                 row.get("subword_count_change", 0.0) or 0.0),
-            # Covariate for word-length confound control (Workstream 3).
             "word_length_before": int(row.get("word_length_before", 0) or 0),
             "r_semantic_class": row.get("r_semantic_class", SemanticClass.CLEAN),
             "r_edit_budget": row.get("r_edit_budget", 0),
@@ -140,36 +144,55 @@ def _run_statistical_models(rows, output_directory: Path) -> None:
         (data["r_semantic_class"] == SemanticClass.A)
         | ((data["is_perturbed"] == 0) & data["task_id"].isin(regime_a_task_ids))
     ]
-    if len(regime_a_data) >= _MINIMUM_ROWS_FOR_MEDIATION_MODEL:
-        print("  Fitting mediation model (Regime A)...")
+
+    # One fit per task family: families can degrade in opposite directions
+    # (pilot: GSM8K positive, GSM-Symbolic ~zero/negative), and pooling them
+    # cancels the total effect and destabilizes the proportion. The pooled fit
+    # is kept as a labeled supplementary, not the headline.
+    mediation_fits = {
+        f"task_family:{task_family}": family_data
+        for task_family, family_data in regime_a_data.groupby("task_family")
+    }
+    mediation_fits["pooled_all_families_supplementary"] = regime_a_data
+
+    mediation_report = {}
+    for fit_label, fit_data in mediation_fits.items():
+        if len(fit_data) < _MINIMUM_ROWS_FOR_MEDIATION_MODEL:
+            mediation_report[fit_label] = {
+                "skipped": f"{len(fit_data)} rows "
+                           f"(need >= {_MINIMUM_ROWS_FOR_MEDIATION_MODEL})"}
+            continue
+        print(f"  Fitting mediation model (Regime A, {fit_label})...")
         try:
-            mediation_result = compute_mediation_proportion(regime_a_data)
-            mediation_path = output_directory / "mediation_proportion.json"
-            mediation_path.write_text(
-                json.dumps({
-                    "total_effect": mediation_result.total_effect,
-                    "direct_effect": mediation_result.direct_effect,
-                    "indirect_effect": mediation_result.indirect_effect,
-                    "proportion_mediated": mediation_result.proportion_mediated,
-                    "treatment_on_mediator_coef": mediation_result.treatment_on_mediator_coef,
-                    "mediator_on_outcome_coef": mediation_result.mediator_on_outcome_coef,
-                    "n_observations": mediation_result.n_observations,
-                    "bootstrap_ci_proportion": (
-                        list(mediation_result.bootstrap_ci_proportion)
-                        if mediation_result.bootstrap_ci_proportion else None),
-                }, indent=2),
-                encoding="utf-8",
-            )
-            proportion = mediation_result.proportion_mediated
-            proportion_str = (f"{proportion:.3f}" if proportion is not None
-                              else "indeterminate (total effect ≈ 0)")
-            print(f"  Mediation result: {mediation_path}  "
-                  f"(proportion_mediated={proportion_str})")
+            mediation_report[fit_label] = _mediation_result_as_dict(
+                compute_mediation_proportion(fit_data))
         except Exception as error:
-            print(f"  Mediation model failed: {error}", file=sys.stderr)
-    else:
-        print(f"  Mediation skipped: {len(regime_a_data)} Regime A rows "
-              f"(need ≥ {_MINIMUM_ROWS_FOR_MEDIATION_MODEL}).", file=sys.stderr)
+            print(f"  Mediation model failed ({fit_label}): {error}", file=sys.stderr)
+            mediation_report[fit_label] = {"failed": str(error)}
+
+    mediation_path = output_directory / "mediation_proportion.json"
+    mediation_path.write_text(
+        json.dumps(mediation_report, indent=2), encoding="utf-8")
+    print(f"  Mediation results: {mediation_path}")
+
+
+def _mediation_result_as_dict(result) -> dict:
+    as_list = lambda interval: list(interval) if interval else None
+    return {
+        "total_effect": result.total_effect,
+        "direct_effect": result.direct_effect,
+        "indirect_effect": result.indirect_effect,
+        "bootstrap_ci_indirect": as_list(result.bootstrap_ci_indirect),
+        "bootstrap_ci_total": as_list(result.bootstrap_ci_total),
+        "proportion_mediated": result.proportion_mediated,
+        "proportion_mediated_reason": result.proportion_mediated_reason,
+        "bootstrap_ci_proportion": as_list(result.bootstrap_ci_proportion),
+        "treatment_on_mediator_coef": result.treatment_on_mediator_coef,
+        "mediator_on_outcome_coef": result.mediator_on_outcome_coef,
+        "supplementary_indirect_effect": result.supplementary_indirect_effect,
+        "supplementary_proportion_mediated": result.supplementary_proportion_mediated,
+        "n_observations": result.n_observations,
+    }
 
 
 def main():
@@ -182,6 +205,34 @@ def main():
 
     cell_table_path = result_analysis.write_cell_table(
         cell_summaries, arguments.output_directory / "cell_table.csv")
+
+    from analysis.gates import compute_stage_gates
+    from pipeline.experiment import ExperimentConfiguration
+
+    budget_source = (ExperimentConfiguration.from_yaml(arguments.config)
+                     if arguments.config else ExperimentConfiguration)
+    gates = compute_stage_gates(
+        rows,
+        budget_source.primary_edit_budget_reasoning,
+        budget_source.primary_edit_budget_mcq)
+    gates_path = arguments.output_directory / "gates.json"
+    gates_path.write_text(json.dumps(gates, indent=2, default=str), encoding="utf-8")
+    print(f"Stage-1 gates:    {gates_path}")
+    for family, block in gates["per_task_family"].items():
+        print(f"  {family}: A0={block['clean_accuracy']}, "
+              f"p_d={block.get('discordant_rate')} "
+              f"({block.get('discordant_rate_bucket', 'no primary rows')})")
+    print(f"  reasoning format compliance: {gates['reasoning_format_compliance']} "
+          f"(target >= {gates['reasoning_format_compliance_target']})")
+
+    fragmentation_contrast = result_analysis.summarize_fragmentation_contrast(rows)
+    if fragmentation_contrast:
+        contrast_path = arguments.output_directory / "method_a_fragmentation_contrast.json"
+        contrast_path.write_text(
+            json.dumps(fragmentation_contrast, indent=2, default=str), encoding="utf-8")
+        print(f"Method A contrast: {contrast_path} ({len(fragmentation_contrast)} groups)")
+    else:
+        print("Method A contrast skipped: no fragmentation_matched rows.", file=sys.stderr)
 
     _run_statistical_models(rows, arguments.output_directory)
 

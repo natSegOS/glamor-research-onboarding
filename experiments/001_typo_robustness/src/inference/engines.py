@@ -13,11 +13,30 @@ inconsistently on raw strings.
 
 from __future__ import annotations
 
+import time
+
+from dataclasses import dataclass
 from typing import Iterator, Optional, Sequence
 
 
 from enums import Precision
 from inference.roster import ModelSpecification
+
+
+@dataclass(frozen=True)
+class StreamedGeneration:
+    """One finished generation from ``generate_streaming``.
+
+    ``request_wall_seconds`` is submit-to-finish wall time for this request.
+    Under continuous batching that includes scheduler queue time, so it is an
+    honest per-request latency, not a decode cost — throughput comes from the
+    shard-level totals the runner records.
+    """
+    prompt_index: int
+    text: str
+    output_token_count: int
+    finish_reason: str
+    request_wall_seconds: float
 
 
 # All current precisions (FP16, AWQ, GPTQ) use float16 as the compute dtype.
@@ -29,6 +48,22 @@ _VLLM_COMPUTE_DTYPE = "float16"
 
 _GREEDY_TEMPERATURE = 0.0
 _GREEDY_TOP_P       = 1.0
+
+# vLLM 0.10's prefix-prefill Triton kernel fails to compile at scale on
+# pre-Ampere GPUs (Turing/T4 = compute capability 7.5) — a GPU-architecture
+# property, not a model property, so it is detected here at engine init rather
+# than configured per roster entry.
+_MINIMUM_COMPUTE_CAPABILITY_FOR_PREFIX_CACHING = (8, 0)
+
+# Modest concurrency cap for pre-Ampere (16 GB T4-class) GPUs to avoid KV-cache
+# OOM (design/07 §7.3); newer GPUs keep vLLM's default unless the roster entry
+# sets max_num_seqs explicitly.
+_PRE_AMPERE_MAX_NUM_SEQS = 128
+
+
+def _gpu_compute_capability() -> tuple[int, int]:
+    import torch
+    return torch.cuda.get_device_capability()
 
 
 def apply_chat_template(
@@ -76,14 +111,22 @@ class VllmEngine:
     ):
         from vllm import LLM, SamplingParams
 
+        gpu_supports_prefix_caching = (
+            _gpu_compute_capability()
+            >= _MINIMUM_COMPUTE_CAPABILITY_FOR_PREFIX_CACHING)
         engine_arguments = dict(
             model=specification.huggingface_identifier,
             revision=specification.revision if specification.revision_is_pinned else None,
             dtype=_VLLM_COMPUTE_DTYPE,
             gpu_memory_utilization=specification.gpu_memory_utilization,
-            enable_prefix_caching=specification.enable_prefix_caching,
+            enable_prefix_caching=(
+                specification.enable_prefix_caching and gpu_supports_prefix_caching),
             seed=seed,
         )
+        max_num_seqs = specification.max_num_seqs or (
+            None if gpu_supports_prefix_caching else _PRE_AMPERE_MAX_NUM_SEQS)
+        if max_num_seqs:
+            engine_arguments["max_num_seqs"] = max_num_seqs
         if specification.precision in (Precision.AWQ, Precision.GPTQ):
             engine_arguments["quantization"] = specification.precision
         if max_model_length:
@@ -129,8 +172,8 @@ class VllmEngine:
 
     def generate_streaming(
             self, prompts: Sequence[str], max_new_tokens: int,
-    ) -> Iterator[tuple[int, str]]:
-        """Generate greedily, yielding ``(index, generated_text)`` the instant
+    ) -> Iterator[StreamedGeneration]:
+        """Generate greedily, yielding a ``StreamedGeneration`` the instant
         each prompt's decoding finishes — not only once every prompt in
         ``prompts`` has, and not in submission order.
 
@@ -144,25 +187,33 @@ class VllmEngine:
         immediately, so a crash loses only requests that were still in flight,
         not an entire submitted batch (design/07 §7.6).
 
-        ``index`` is the prompt's position in the input ``prompts`` sequence,
-        letting the caller map each finished generation back to the request it
-        came from.
+        ``prompt_index`` is the prompt's position in the input ``prompts``
+        sequence, letting the caller map each finished generation back to the
+        request it came from.
         """
         sampling_params = self._greedy_sampling_params(max_new_tokens)
         llm_engine = self._language_model.llm_engine
 
         index_by_request_id: dict[str, int] = {}
+        submit_time_by_request_id: dict[str, float] = {}
         for index, prompt in enumerate(prompts):
             request_id = str(self._next_request_id)
             self._next_request_id += 1
             index_by_request_id[request_id] = index
+            submit_time_by_request_id[request_id] = time.perf_counter()
             llm_engine.add_request(request_id, prompt, sampling_params)
 
-        remaining = len(index_by_request_id)
-        while remaining > 0:
+        while index_by_request_id:
             for output in llm_engine.step():
                 if not output.finished:
                     continue
-                index = index_by_request_id.pop(output.request_id)
-                yield index, output.outputs[0].text
-                remaining -= 1
+                completion = output.outputs[0]
+                yield StreamedGeneration(
+                    prompt_index=index_by_request_id.pop(output.request_id),
+                    text=completion.text,
+                    output_token_count=len(completion.token_ids),
+                    finish_reason=str(completion.finish_reason),
+                    request_wall_seconds=(
+                        time.perf_counter()
+                        - submit_time_by_request_id.pop(output.request_id)),
+                )

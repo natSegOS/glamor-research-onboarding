@@ -258,6 +258,209 @@ class TestAuditExclusionGate:
         assert summary["n_audit_excluded"] == 1
         assert summary["n"] == 0
 
+
+# ---------------------------------------------------------------------------
+# Pairing never crosses models that share an unpinned (PIN_ME) revision.
+# ---------------------------------------------------------------------------
+
+class TestJoinNeverCrossesModels:
+
+    def test_two_unpinned_models_pair_with_their_own_clean_rows(self):
+        def rows_for(model_id, clean_correct):
+            clean_row, perturbed_row = _clean_and_perturbed_rows()
+            for row in (clean_row, perturbed_row):
+                row["model_id"] = model_id
+                row["model_revision"] = "PIN_ME"
+            clean_row["is_correct"] = clean_correct
+            return [clean_row, perturbed_row]
+
+        pairs = join_matched_pairs(
+            rows_for("model_a", clean_correct=1) + rows_for("model_b", clean_correct=0))
+        clean_correct_by_cell = {pair.cell_key[0]: pair.clean_is_correct for pair in pairs}
+        assert len(pairs) == 2
+        assert clean_correct_by_cell == {"model_a": 1, "model_b": 0}
+
+
+# ---------------------------------------------------------------------------
+# Mediator coding: the excess parameterization and the proportion guard.
+# ---------------------------------------------------------------------------
+
+class TestMediatorExcessCoding:
+
+    @_SKIP_NO_STATSMODELS
+    def test_mixed_model_reports_the_excess_mediator_not_the_raw_ratio(self):
+        result = fit_crossed_mixed_effects_logistic(_make_dataframe())
+        assert "token_inflation_ratio" not in result.fixed_effects
+        if result.converged:
+            assert "token_inflation_excess" in result.fixed_effects
+
+    @_SKIP_NO_STATSMODELS
+    def test_treatment_on_mediator_reflects_excess_not_unit_offset(self):
+        # _make_dataframe draws perturbed ratios around 1.1 and clean around
+        # 1.0, so alpha must land near 0.1 — a value near 1.1 would mean the
+        # mediator regressed on the raw ratio against a zero clean baseline
+        # (the pre-rerun coding bug).
+        result = compute_mediation_proportion(_make_dataframe())
+        assert abs(result.treatment_on_mediator_coef) < 0.5
+
+    def test_clean_rows_carry_unit_token_inflation_ratio(self):
+        pytest.importorskip("pandas")
+        run_analysis = _import_run_analysis_tool()
+        frame = run_analysis._build_model_dataframe([
+            {"is_clean": True, "is_correct": 1, "task_id": "t0",
+             "model_revision": "PIN_ME"},
+            {"is_clean": False, "is_correct": 0, "task_id": "t0",
+             "model_revision": "PIN_ME", "token_inflation_ratio": 1.25},
+        ])
+        assert frame.loc[frame["is_perturbed"] == 0, "token_inflation_ratio"].item() == 1.0
+        assert frame.loc[frame["is_perturbed"] == 1, "token_inflation_ratio"].item() == 1.25
+
+
+class TestProportionMediatedGuard:
+
+    def test_numerically_zero_total_is_withheld(self):
+        from analysis.models import (
+            _guarded_proportion_mediated, PROPORTION_WITHHELD_TOTAL_NUMERICALLY_ZERO)
+        proportion, reason = _guarded_proportion_mediated(0.1, 0.0, (-0.2, -0.1))
+        assert proportion is None
+        assert reason == PROPORTION_WITHHELD_TOTAL_NUMERICALLY_ZERO
+
+    def test_missing_bootstrap_interval_is_withheld(self):
+        from analysis.models import (
+            _guarded_proportion_mediated, PROPORTION_WITHHELD_NO_BOOTSTRAP)
+        proportion, reason = _guarded_proportion_mediated(0.1, -0.2, None)
+        assert proportion is None
+        assert reason == PROPORTION_WITHHELD_NO_BOOTSTRAP
+
+    def test_interval_straddling_zero_is_withheld(self):
+        from analysis.models import (
+            _guarded_proportion_mediated, PROPORTION_WITHHELD_TOTAL_CI_INCLUDES_ZERO)
+        proportion, reason = _guarded_proportion_mediated(0.1, -0.2, (-0.4, 0.1))
+        assert proportion is None
+        assert reason == PROPORTION_WITHHELD_TOTAL_CI_INCLUDES_ZERO
+
+    def test_interval_excluding_zero_reports_the_ratio(self):
+        from analysis.models import _guarded_proportion_mediated
+        proportion, reason = _guarded_proportion_mediated(0.1, -0.2, (-0.3, -0.1))
+        assert proportion == pytest.approx(-0.5)
+        assert reason is None
+
+
+# ---------------------------------------------------------------------------
+# Stage-1 gates.
+# ---------------------------------------------------------------------------
+
+class TestStageGates:
+
+    @staticmethod
+    def _primary_condition_rows(family, budget, clean_correct, perturbed_correct):
+        shared = {
+            "model_id": "m1", "model_revision": "rev1", "task_family": family,
+            "r_semantic_class": "A", "r_operation": "substitute",
+            "r_selection_policy": "keyboard_neighbor", "r_scope": "anywhere",
+        }
+        rows = []
+        for i, (clean, perturbed) in enumerate(zip(clean_correct, perturbed_correct)):
+            rows.append({**shared, "task_id": f"t{i}", "is_clean": True,
+                         "is_correct": clean, "extraction_tier": "hash_delimited",
+                         "finish_reason": "stop", "output_token_count": 100 + i})
+            rows.append({**shared, "task_id": f"t{i}", "is_clean": False,
+                         "is_correct": perturbed, "r_edit_budget": budget,
+                         "extraction_tier": "hash_delimited", "finish_reason": "stop",
+                         "output_token_count": 100 + i})
+        return rows
+
+    def test_discordant_rate_and_bucket_at_the_primary_budget(self):
+        from analysis.gates import compute_stage_gates
+        rows = self._primary_condition_rows(
+            "gsm8k", budget=2,
+            clean_correct=[1] * 10, perturbed_correct=[0, 0] + [1] * 8)
+        block = compute_stage_gates(rows, 2, 4)["per_task_family"]["gsm8k"]
+        assert block["clean_accuracy"] == 1.0
+        assert block["discordant_rate"] == pytest.approx(0.2)
+        assert block["discordant_rate_bucket"] == "raise_n_or_relax_mde"
+        assert block["implied_n_at_5pp_mde"] > 0
+
+    def test_rows_at_a_non_primary_budget_are_ignored(self):
+        from analysis.gates import compute_stage_gates
+        rows = self._primary_condition_rows(
+            "gsm8k", budget=1,
+            clean_correct=[1] * 4, perturbed_correct=[0] * 4)
+        block = compute_stage_gates(rows, 2, 4)["per_task_family"]["gsm8k"]
+        assert block["primary_condition_pairs"] == 0
+        assert "discordant_rate" not in block
+
+    def test_format_compliance_and_truncation_and_p99(self):
+        from analysis.gates import compute_stage_gates
+        rows = self._primary_condition_rows(
+            "gsm8k", budget=2, clean_correct=[1, 1], perturbed_correct=[1, 0])
+        rows[0]["extraction_tier"] = "last_number_fallback"
+        rows[1]["finish_reason"] = "length"
+        gates = compute_stage_gates(rows, 2, 4)
+        assert gates["reasoning_format_compliance"] == pytest.approx(3 / 4)
+        assert gates["truncation_rate"] == pytest.approx(1 / 4)
+        assert gates["p99_clean_correct_output_tokens"] == 101
+
+
+# ---------------------------------------------------------------------------
+# Method A: the paired Low/High fragmentation contrast.
+# ---------------------------------------------------------------------------
+
+def _counterfactual_rows(task_id, clean_correct, low_correct, high_correct):
+    shared = {
+        "model_id": "m1", "model_revision": "rev1", "task_id": task_id,
+        "task_family": "gsm8k", "r_edit_budget": 1,
+        "r_selection_policy": "fragmentation_matched",
+    }
+    return [
+        {**shared, "is_clean": True, "is_correct": clean_correct},
+        {**shared, "is_clean": False, "is_correct": low_correct,
+         "r_fragmentation_stratum": "Low"},
+        {**shared, "is_clean": False, "is_correct": high_correct,
+         "r_fragmentation_stratum": "High"},
+    ]
+
+
+class TestFragmentationContrast:
+
+    def test_delta_is_the_high_minus_low_failure_gap(self):
+        from analysis.results import summarize_fragmentation_contrast
+        rows = []
+        for i in range(6):                       # High breaks on 4 of 6 items
+            rows += _counterfactual_rows(f"t{i}", clean_correct=1,
+                                         low_correct=1, high_correct=int(i >= 4))
+        summary = summarize_fragmentation_contrast(rows, resamples=100)[0]
+        assert summary["n"] == 6
+        assert summary["delta"] == pytest.approx(4 / 6)
+        assert summary["broke"] == 4
+
+    def test_items_with_a_wrong_clean_answer_are_excluded(self):
+        from analysis.results import summarize_fragmentation_contrast
+        rows = (_counterfactual_rows("t0", clean_correct=0, low_correct=1, high_correct=0)
+                + _counterfactual_rows("t1", clean_correct=1, low_correct=1, high_correct=0)
+                + _counterfactual_rows("t2", clean_correct=1, low_correct=1, high_correct=1))
+        summary = summarize_fragmentation_contrast(rows, resamples=100)[0]
+        assert summary["n"] == 2
+
+    def test_an_item_missing_one_stratum_contributes_no_pair(self):
+        from analysis.results import summarize_fragmentation_contrast
+        rows = _counterfactual_rows("t0", clean_correct=1, low_correct=1, high_correct=0)
+        rows = [row for row in rows
+                if row.get("r_fragmentation_stratum") != "High"]
+        assert summarize_fragmentation_contrast(rows, resamples=100) == []
+
+
+def _import_run_analysis_tool():
+    import importlib.util
+    from pathlib import Path
+
+    tool_path = Path(__file__).resolve().parent.parent / "tools" / "run_analysis.py"
+    spec = importlib.util.spec_from_file_location("run_analysis", tool_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
     def test_confirmed_items_are_kept_only_excluded_ones_drop(self):
         pairs = [_make_pair(f"t{i}", 1, 0) for i in range(4)]
         audit_outcomes = {"t0": _make_audit_outcome("t0", excluded=True),

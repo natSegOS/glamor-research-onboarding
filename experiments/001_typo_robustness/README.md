@@ -1,42 +1,49 @@
-# Experiment 001 - Typo/ASR Robustness of Instruction LLMs
+# Experiment 001 - Typo Robustness of Instruction LLMs
 
-Implementation of the design suite in `design/` (12 documents; start at `design/00_README_index.md`). Working title: *When Voice Meets Text: Tokenization-Mediated LLM Robustness to ASR Transcription Errors and Typographical Noise.*
+Implementation of the design suite in `design/` (12 documents; start at `design/00_README_index.md`).
+
+**ASR arm: deferred** (design/00 §0.5, 2026-07-09). The TTS+Whisper pipeline was judged too unrealistic; a replacement approach is pending from the PI. Everything below is the keyboard-typo arm, which stands alone.
 
 ## What this is
 
-A matched-pair robustness study with two perturbation sources: controlled keyboard-adjacency typos and realistic ASR transcription errors, built around a tokenization-fragmetation **mediation** analysis (primary contribution), a quantization x noise interaction (secondary), and a three-regime selective-invariance audit (framing). Every numeric and procedural choice is justified in the design docs; the code is the executable form of that spec.
-
-## Layout
-
-```
-001_typo_robustness/
-
-```
+A matched-pair robustness study of controlled keyboard-adjacency typos, built around a tokenization-fragmentation **mediation** analysis (primary contribution: Method A fragmentation-matched counterfactual + Method B product-of-coefficients, design/06 §6.8), a quantization x noise interaction (secondary), and a three-regime selective-invariance audit (framing). Every numeric and procedural choice is justified in the design docs; the code is the executable form of that spec.
 
 ## Quickstart (no GPU needed)
 
 ```bash
-python3 tools/run_tests.py  # 78 tests, offline-safe
-python3 src/run_experiment.py configs/pilot.yaml --engine dummy  # full loop, fake engine
+python3 -m pytest tests/ -q       # full offline suite, no network or GPU
 ```
 
-The dummy run exercises everything except the model: item generation, regime construction, request building, idempotent sharding, scoring, the cell table, and the CCF-vs-k figure. On GPU, swap `--engine vllm`
+The suite exercises everything except a real model: item generation, regime construction (A/B/C + the fragmentation-matched counterfactual), request building, idempotent sharding, inline scoring, the cell table, gates, and figures — via the deterministic dummy engine.
 
 ## GPU runs (USC cluster / Colab)
 
-Open `colab_driver.ipynb`. Order matters: tests -> ASR pre-processing (once, casched, CPU-fine) -> main sweep -> pull results. Re-running any cell resumes rather than recomputes (manifest + per-row deterministic IDs).
+Open `colab_driver.ipynb` and run the cells top to bottom: clone/install -> HF auth (gated Llama) -> build items -> build dictionary -> generate -> analyze + download. Re-running any cell resumes rather than recomputes (manifest + per-row deterministic IDs). The equivalent CLI:
 
-**Proxy workflow** Send Zizhao the experiment folder + this command `python3 src/run_experiment.py configs/main.yaml --engine vllm` and get back `results/`. Shards are idempotent, so partial runs transfer safely.
+```bash
+python3 tools/run_generation.py --config configs/pilot.yaml --model llama_1b --output-directory results/pilot
+python3 tools/run_analysis.py --generations results/pilot/pilot_generations.jsonl \
+    --output-directory analysis/pilot --config configs/pilot.yaml
+```
+
+`analysis/pilot/gates.json` is the Stage-1 pass/fail readout: per-family `p_d` at the primary k with the implied per-cell N, clean accuracy A0, reasoning format compliance (target >= 0.95), truncation rate, and the p99 clean-correct output length that freezes `max_new_tokens`.
+
+Before committing cluster time, size the run with a real throughput number:
+
+```bash
+python3 tools/benchmark_throughput.py --config configs/pilot.yaml --model llama_1b --limit 200
+```
+
+**Proxy workflow** Send Zizhao the experiment folder + this command `python3 tools/run_generation.py --config configs/main.yaml --model <roster_key> --output-directory results/main` and get back `results/`. Shards are idempotent, so partial runs transfer safely.
 
 ## Before any confirmatory run (pre-registration gates)
 
-1. Pin every `revision: PINE_ME` in `configs/` to an HF commit hash, and pin package versions
-2. Run the pilot; record discorant rate `p_d`, throughput, and clean accuracy against the Stage-1 gates. `stats.mcnemar_sample_size` turns the measured `p_d` into the confirmed per-cell N.
-3. Swap the demo wordlist (`data/wordlist_demo.txt`, smoke tests only) for the pinned full dictionary, and the demo MCQ items for the MMLU-Pro subsample.
-4. Human audit (385/regime, kappa >= 0.60 gate) via `src/audit.py`.
-5. Lock the OSF pre-registration then touch the held-out set.
+1. Pin every `PIN_ME` revision in `src/inference/roster.py` to an HF commit hash (`inference.roster.resolve_current_revision`), and pin package versions. Non-confirmatory runs resolve and stamp the current SHA automatically; confirmatory runs refuse to start unpinned.
+2. Run the pilot; read `analysis/pilot/gates.json` against the Stage-1 gates (design/06 §6.3, design/11 §11.2). The primary severity is `primary_edit_budget_reasoning` / `primary_edit_budget_mcq` in the config (currently k=2 / k=4 per the 2026-07-09 amendment).
+3. Human audit (385/regime, kappa >= 0.60 gate) via `src/analysis/audit.py`.
+4. Lock the OSF pre-registration, then touch the held-out set.
 
 ## Dependencies
 
-Core: `numpy scipy pyyaml` (analysis), `matplotlib` (figures, optional).
-GPU side: `vllm transformers accelerate`. ASR arm: `openai-whisper edge-tts soundfile`. Tests run with zero non-core dependencies via `tools/run_tests.py`
+Core: `numpy scipy pyyaml` (analysis), `matplotlib` (figures, optional), `statsmodels pandas` (mixed-effects + mediation).
+GPU side: `requirements-gpu.txt` (vLLM stack). Tests run offline with the core dependencies only.
