@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from dataclasses import replace
 from pathlib import Path
 
 from pipeline import (
@@ -37,7 +38,8 @@ from pipeline import (
     run_experiment,
 )
 from inference import VllmEngine
-from inference import assert_revisions_pinned, get_model_specification
+from inference import (
+    assert_revisions_pinned, get_model_specification, resolve_current_revision)
 from regimes import make_is_word
 
 # Default dictionary — built from SCOWL size-60 by tools/build_dictionary.py.
@@ -137,6 +139,19 @@ def main():
     # (non-reproducible) model revision.
     if configuration.is_confirmatory:
         assert_revisions_pinned([specification])
+    elif not specification.revision_is_pinned:
+        # Non-confirmatory runs may proceed unpinned, but stamping the resolved
+        # SHA on every row keeps even the pilot reproducible.
+        try:
+            specification = replace(
+                specification,
+                revision=resolve_current_revision(specification.huggingface_identifier))
+            print(f"[run_generation] resolved unpinned revision to "
+                  f"{specification.revision}")
+        except Exception as error:  # noqa: BLE001 — offline/no-auth is survivable here
+            print(f"[run_generation] WARNING: could not resolve current revision "
+                  f"({error}); rows will carry the PIN_ME placeholder",
+                  file=sys.stderr)
 
     dictionary_path = arguments.dictionary or _DEFAULT_DICTIONARY
     is_word = make_is_word(_load_dictionary(dictionary_path))

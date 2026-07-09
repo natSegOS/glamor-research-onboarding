@@ -7,6 +7,7 @@ __pycache__/
 *.py[cod]
 
 .DS_Store
+*.mcp.json
 
 ## Hugging Face
 .cache/

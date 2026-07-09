@@ -33,13 +33,20 @@ REVISION_PLACEHOLDER = "PIN_ME"
 
 @dataclass(frozen=True)
 class ModelSpecification:
-    """Everything the inference engines need to load a model reproducibly."""
+    """Everything the inference engines need to load a model reproducibly.
+
+    ``enable_prefix_caching`` is the per-model intent; the engine additionally
+    disables it at runtime on GPUs whose architecture cannot compile vLLM's
+    prefix-prefill kernel (see VllmEngine). ``max_num_seqs`` of None leaves
+    concurrency to vLLM's default (the engine caps it on T4-class GPUs).
+    """
     roster_key: str
     huggingface_identifier: str
     revision: str                          # pinned commit SHA, or REVISION_PLACEHOLDER
     precision: Precision = Precision.FP16
     gpu_memory_utilization: float = 0.85
     enable_prefix_caching: bool = True
+    max_num_seqs: int | None = None
 
     @property
     def revision_is_pinned(self) -> bool:
@@ -51,16 +58,11 @@ class ModelSpecification:
 # appears once here; MODEL_ROSTER below indexes this tuple by that key, so the
 # key can never drift out of sync with its dict entry.
 _MODEL_SPECIFICATIONS: tuple[ModelSpecification, ...] = (
-    # Colab pilot (T4 GPU, ungated, fp16). Qwen2.5-1.5B fits a T4 comfortably
-    # and needs no HF gating approval — use for the pilot; swap to a main-study
-    # model for the confirmatory run.
-    #
-    # enable_prefix_caching=False: vLLM's prefix-prefill Triton kernel fails to
-    # compile at scale on the T4's Turing architecture. Main-study models on
-    # newer GPUs (design/07 §7.2) aren't known to hit this.
+    # Ungated fallback pilot model (any GPU, fp16): fits a T4 comfortably and
+    # needs no HF gating approval. The spec'd pilot model is llama_1b
+    # (design/11 §11.2); this entry remains for runs without gated access.
     ModelSpecification(
-        "qwen_1b5_pilot", "Qwen/Qwen2.5-1.5B-Instruct", REVISION_PLACEHOLDER, Precision.FP16,
-        enable_prefix_caching=False),
+        "qwen_1b5_pilot", "Qwen/Qwen2.5-1.5B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
 
     # Main study models (gated; pin revisions before a confirmatory run).
     ModelSpecification(
@@ -109,7 +111,11 @@ def resolve_current_revision(huggingface_identifier: str) -> str:
     this to fill in the PIN_ME placeholders at pre-registration time. Requires
     network access and (for gated models) authentication."""
     from huggingface_hub import HfApi
-    return HfApi().model_info(huggingface_identifier).sha
+    revision_sha = HfApi().model_info(huggingface_identifier).sha
+    if revision_sha is None:
+        raise RuntimeError(
+            f"HuggingFace returned no commit SHA for {huggingface_identifier!r}")
+    return revision_sha
 
 
 def assert_revisions_pinned(specifications) -> None:

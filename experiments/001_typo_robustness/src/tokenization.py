@@ -21,6 +21,7 @@ a deterministic fake.
 from __future__ import annotations
 
 import random
+import re
 
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -28,6 +29,9 @@ from typing import Callable, Optional
 from enums import FragmentationStratum, Operation, SelectionPolicy, Scope
 from perturbation import PerturbationError, damerau_levenshtein_distance
 from regimes import derived_seed, make_regime_a_nonword_typo
+
+
+_COUNTERFACTUAL_MINIMUM_WORD_LENGTH = 4
 
 
 def count_tokens(tokenizer, text: str) -> int:
@@ -143,3 +147,27 @@ def build_fragmentation_matched_pair(
         low_fragmentation_subword_change=subword_change_by_variant[chosen_low],
         high_fragmentation_subword_change=subword_change_by_variant[chosen_high],
     )
+
+
+def select_counterfactual_target_word(
+        content_text: str, is_word: Callable[[str], bool]) -> Optional[str]:
+    """The counterfactual's target word: the longest real word of at least
+    the minimum length (first occurrence wins ties). The longest word has the
+    richest keyboard-plausible variant space, maximizing the chance both
+    fragmentation strata are populated. Deterministic — no seed."""
+    eligible_words = [
+        word for word in re.findall(r"[A-Za-z]+", content_text)
+        if len(word) >= _COUNTERFACTUAL_MINIMUM_WORD_LENGTH and is_word(word)]
+    return max(eligible_words, key=len) if eligible_words else None
+
+
+def apply_counterfactual_variant(
+        content_text: str, word: str, variant: str) -> tuple[str, int]:
+    """Replace the first whole-word occurrence of ``word`` with ``variant``.
+    Returns the perturbed text and the character index of the replacement."""
+    match = re.search(rf"\b{re.escape(word)}\b", content_text)
+    if match is None:
+        raise PerturbationError(
+            f"counterfactual target word {word!r} not found as a whole word")
+    return (content_text[:match.start()] + variant + content_text[match.end():],
+            match.start())

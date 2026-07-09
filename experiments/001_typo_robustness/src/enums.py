@@ -45,6 +45,9 @@ class SelectionPolicy(_StrEnum):
     # Intent is preserved definitionally (particles carry no propositional content);
     # no rejection sampling needed (Workstream 3). Novel versus prior work.
     FILLER_WORD = "filler_word"
+    # Method A counterfactual (design/02 §2.5, design/06 §6.8): paired Low/High
+    # fragmentation variants of the same word at the same edit budget.
+    FRAGMENTATION_MATCHED = "fragmentation_matched"
     NONE = "none"                             # sentinel for clean rows
 
 
@@ -169,6 +172,14 @@ class FragmentationStratum(_StrEnum):
 # ---------------------------------------------------------------------------
 # Pipeline / inference vocabulary
 # ---------------------------------------------------------------------------
+
+class FinishReason(_StrEnum):
+    """vLLM completion finish_reason values the pipeline distinguishes.
+    TRUNCATED ("length") means the max_new_tokens budget cut the generation
+    off — the truncation-rate gate counts these rows."""
+    STOPPED = "stop"
+    TRUNCATED = "length"
+
 
 class ConditionSource(_StrEnum):
     """How a perturbation condition's samples are produced."""

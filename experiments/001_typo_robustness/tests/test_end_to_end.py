@@ -114,6 +114,25 @@ def test_analysis_reproduces_matched_pair_counts(tmp_path):
     assert all(pair.model_revision == DUMMY_ENGINE_REVISION for pair in pairs)
 
 
+def test_prefix_locality_sort_keeps_families_adjacent_and_length_ordered():
+    from enums import TaskFamily
+    from pipeline.experiment import _sort_for_prefix_locality
+    from pipeline.runner import GenerationRequest
+
+    def request(task_id, is_clean, prompt_length):
+        return GenerationRequest(
+            task_id=task_id, task_family=TaskFamily.GSM_SYMBOLIC_SYNTHETIC,
+            prompt="x" * prompt_length, gold_answer=0, is_clean=is_clean,
+            perturbation_state_vector={}, seed=1,
+            clean_prompt="x" * prompt_length)
+
+    shuffled = [request("long", True, 90), request("short", True, 10),
+                request("long", False, 91), request("short", False, 11)]
+    ordered = _sort_for_prefix_locality(shuffled)
+    assert [(r.task_id, r.is_clean) for r in ordered] == [
+        ("short", True), ("short", False), ("long", True), ("long", False)]
+
+
 # --- Parallel shard partitioning ---------------------------------------------
 
 def _partition_config(run_id):
@@ -300,3 +319,58 @@ class TestFragmentationMatchedPair:
             assert pair.high_fragmentation_subword_change >= 1
             assert pair.low_fragmentation_subword_change < pair.high_fragmentation_subword_change
             assert pair.low_fragmentation_variant != pair.high_fragmentation_variant
+
+
+class TestCounterfactualTargetWord:
+
+    def test_picks_the_longest_eligible_real_word(self, small_vocabulary_is_word):
+        assert tm.select_counterfactual_target_word(
+            "the cat drove to france for finance", small_vocabulary_is_word) == "finance"
+
+    def test_returns_none_when_no_word_is_eligible(self):
+        never_a_word = lambda token: False
+        assert tm.select_counterfactual_target_word("some words here", never_a_word) is None
+
+    def test_variant_application_replaces_only_the_first_whole_word(self):
+        perturbed, index = tm.apply_counterfactual_variant(
+            "count the cat and the cat again", "cat", "caat")
+        assert perturbed == "count the caat and the cat again"
+        assert index == 10
+
+
+class _RareLetterTokenizer:
+    """Fragments a word by its rare-letter count, so keyboard substitutions can
+    move a variant between strata — FakeTokenizer's length-only rule cannot
+    (substitutions never change length, so High variants would never exist)."""
+
+    def encode(self, text):
+        return [word
+                for word in text.split()
+                for _ in range(1 + sum(ch in "qxzjkw" for ch in word.lower()))]
+
+
+def test_fragmentation_matched_condition_emits_low_high_pairs(tmp_path):
+    configuration = ExperimentConfiguration(
+        run_id="e2e_counterfactual",
+        seed=1729,
+        datasets=[{"key": "gsm_symbolic_synthetic", "item_count": 6}],
+        conditions=[PerturbationCondition(
+            "frag_matched", SemanticClass.A, Operation.SUBSTITUTE,
+            SelectionPolicy.FRAGMENTATION_MATCHED, Scope.ANYWHERE, [1])],
+    )
+    is_word = semantic_regimes.make_is_word()
+    summary = run_experiment(configuration, _correct_clean_engine(), is_word,
+                             _RareLetterTokenizer(), tmp_path)
+
+    rows = load_generation_rows([Path(summary["output_path"])])
+    counterfactual_rows = [row for row in rows if not row["is_clean"]]
+    assert counterfactual_rows, "no counterfactual pair was constructible"
+
+    strata_by_item = {}
+    for row in counterfactual_rows:
+        strata_by_item.setdefault(row["task_id"], set()).add(row["r_fragmentation_stratum"])
+        assert row["counterfactual_target_word"]
+        assert row["r_selection_policy"] == SelectionPolicy.FRAGMENTATION_MATCHED
+
+    assert all(strata == {"Low", "High"} for strata in strata_by_item.values())
+    assert len({row["row_id"] for row in counterfactual_rows}) == len(counterfactual_rows)

@@ -24,14 +24,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator, Optional, Sequence
 
-from enums import Decoding, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES
+from enums import (
+    Decoding, FinishReason, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES)
+from inference.engines import StreamedGeneration
 import scoring
 
 
-SCHEMA_VERSION = "1.0"
+# 1.1: generation_elapsed_seconds (cumulative time-since-shard-start, a timing
+# bug) replaced by request_wall_seconds; output_token_count and finish_reason
+# added; per-shard throughput statistics recorded in the manifest.
+SCHEMA_VERSION = "1.1"
 
 _ROW_ID_HASH_HEX_LENGTH = 24
 _MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
+_MANIFEST_SHARD_STATISTICS_KEY = "shard_statistics"
 
 # DeterministicDummyEngine's revision id — a fixed, recognisable sentinel
 # (never a real HuggingFace revision SHA) so a generation row's provenance
@@ -118,46 +124,65 @@ class DeterministicDummyEngine:
             self,
             prompts: Sequence[str],
             max_new_tokens: int,
-    ) -> Iterator[tuple[int, str]]:
-        """Mirrors ``VllmEngine.generate_streaming``'s ``(index, text)`` yield
-        contract so ``run_shard`` can drive either engine identically. Nothing
-        here is actually concurrent (there is no GPU to schedule), so this
-        just yields every result in order — sufficient for exercising
+    ) -> Iterator[StreamedGeneration]:
+        """Mirrors ``VllmEngine.generate_streaming``'s ``StreamedGeneration``
+        yield contract so ``run_shard`` can drive either engine identically.
+        Nothing here is actually concurrent (there is no GPU to schedule), so
+        this just yields every result in order — sufficient for exercising
         ``run_shard``'s incremental-write and resume behaviour in tests.
+        Token counts are whitespace-word counts, good enough for tests.
         """
         for index, prompt in enumerate(prompts):
-            yield index, self.answer_function(prompt)
+            text = self.answer_function(prompt)
+            yield StreamedGeneration(
+                prompt_index=index,
+                text=text,
+                output_token_count=len(text.split()),
+                finish_reason=FinishReason.STOPPED,
+                request_wall_seconds=0.0,
+            )
 
 
 class ShardManifest:
-    """A per-run record of which shards have completed.
+    """A per-run record of which shards have completed, plus each completed
+    shard's throughput statistics.
 
     A resumed run loads this file and skips every shard already listed,
     so progress is never lost across session restarts (design/07 §7.7).
+    The statistics (wall seconds, output tokens, tokens/sec) are what the
+    main-study compute budget is sized from (design/07 §7.5) — the per-row
+    request_wall_seconds includes scheduler queue time and must not be summed.
     """
 
     def __init__(self, manifest_path: Path) -> None:
 
         self.manifest_path = Path(manifest_path)
         self.completed_shard_ids: set[str] = set()
+        self.shard_statistics: dict[str, dict] = {}
 
         if self.manifest_path.exists():
             stored_data = json.loads(self.manifest_path.read_text())
             self.completed_shard_ids = set(
                 stored_data.get(_MANIFEST_COMPLETED_SHARDS_KEY, []))
+            self.shard_statistics = stored_data.get(
+                _MANIFEST_SHARD_STATISTICS_KEY, {})
 
     def is_shard_complete(self, shard_id: str) -> bool:
         return shard_id in self.completed_shard_ids
 
-    def mark_shard_complete(self, shard_id: str) -> None:
+    def mark_shard_complete(
+            self, shard_id: str, statistics: Optional[dict] = None) -> None:
 
         self.completed_shard_ids.add(shard_id)
+        if statistics is not None:
+            self.shard_statistics[shard_id] = statistics
         self.manifest_path.write_text(
             json.dumps(
                 {
                     "schema": SCHEMA_VERSION,
                     _MANIFEST_COMPLETED_SHARDS_KEY: sorted(
                         self.completed_shard_ids),
+                    _MANIFEST_SHARD_STATISTICS_KEY: self.shard_statistics,
                 },
                 indent=1,
             )
@@ -277,13 +302,15 @@ def run_shard(
     ]
 
     new_rows_written = 0
-    batch_start_time = time.perf_counter()
+    total_output_tokens = 0
+    shard_start_time = time.perf_counter()
 
     with output_path.open("a") as output_file:
-        for index, generated_text in engine.generate_streaming(  # type: ignore[union-attr]
+        for generation in engine.generate_streaming(  # type: ignore[union-attr]
                 chat_templated_prompts, max_new_tokens):
-            row_id, request = pending_requests[index]
-            generation_elapsed_seconds = time.perf_counter() - batch_start_time
+            row_id, request = pending_requests[generation.prompt_index]
+            generated_text = generation.text
+            total_output_tokens += generation.output_token_count
 
             row = {
                 "schema": SCHEMA_VERSION,
@@ -311,8 +338,9 @@ def run_shard(
                 "decoding": decoding,
                 "max_new_tokens": max_new_tokens,
                 "model_output": generated_text,
-                "generation_elapsed_seconds": round(
-                    generation_elapsed_seconds, 3),
+                "output_token_count": generation.output_token_count,
+                "finish_reason": generation.finish_reason,
+                "request_wall_seconds": round(generation.request_wall_seconds, 3),
                 **{
                     f"r_{key}": value
                     for key, value in
@@ -353,7 +381,16 @@ def run_shard(
             if progress_callback is not None:
                 progress_callback(1)
 
-    manifest.mark_shard_complete(shard_id)
+    shard_wall_seconds = time.perf_counter() - shard_start_time
+    manifest.mark_shard_complete(shard_id, statistics={
+        "rows": new_rows_written,
+        "wall_seconds": round(shard_wall_seconds, 1),
+        "output_tokens": total_output_tokens,
+        "output_tokens_per_second": round(
+            total_output_tokens / shard_wall_seconds, 1) if shard_wall_seconds else 0.0,
+        "rows_per_hour": round(
+            new_rows_written / shard_wall_seconds * 3600, 1) if shard_wall_seconds else 0.0,
+    })
     return new_rows_written
 
 

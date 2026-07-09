@@ -25,14 +25,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
-from enums import ParseStatus
+from enums import FragmentationStratum, ParseStatus, SelectionPolicy
 from analysis import statistics
 
 
 # The dimensions that define a reporting cell (design/06 §6.10). All are
 # r_-prefixed perturbation-state fields written by the runner, plus the model
-# and task family.
+# and task family. model_id is included alongside model_revision because
+# unpinned runs share the PIN_ME revision placeholder — keying on revision
+# alone would merge every unpinned model into one cell.
 CELL_DIMENSION_KEYS = (
+    "model_id",
     "model_revision",
     "task_family",
     "r_semantic_class",
@@ -65,23 +68,19 @@ def _cell_key(perturbed_row: dict) -> tuple:
 def join_matched_pairs(rows: Sequence[dict]) -> list[MatchedPair]:
     """Join clean and perturbed rows into matched pairs.
 
-    Clean rows are indexed by (model_revision, task_id). Each perturbed row is
-    matched to the clean row for the SAME model and item, so the pairing is
-    exact and never crosses models or items (design/06 §6.2).
+    Clean rows are indexed by (model_id, model_revision, task_id). Each
+    perturbed row is matched to the clean row for the SAME model and item, so
+    the pairing is exact and never crosses models or items (design/06 §6.2).
     """
-    clean_by_model_and_task: dict = {}
-    perturbed_rows: list = []
+    def model_and_task(row: dict) -> tuple:
+        return (row.get("model_id"), row["model_revision"], row["task_id"])
 
-    for row in rows:
-        if row.get("is_clean"):
-            clean_by_model_and_task[(row["model_revision"], row["task_id"])] = row
-        else:
-            perturbed_rows.append(row)
+    clean_by_model_and_task = {
+        model_and_task(row): row for row in rows if row.get("is_clean")}
 
     matched_pairs: list[MatchedPair] = []
-    for perturbed_row in perturbed_rows:
-        clean_row = clean_by_model_and_task.get(
-            (perturbed_row["model_revision"], perturbed_row["task_id"]))
+    for perturbed_row in (row for row in rows if not row.get("is_clean")):
+        clean_row = clean_by_model_and_task.get(model_and_task(perturbed_row))
         if clean_row is None:
             continue                          # no clean partner; cannot pair
 
@@ -149,7 +148,7 @@ def summarize_all_cells(matched_pairs: Sequence[MatchedPair],
         clean_correctness = [pair.clean_is_correct for pair in pairs]
         perturbed_correctness = [pair.perturbed_is_correct for pair in pairs]
 
-        summary = dict(zip(CELL_DIMENSION_KEYS, cell_key))
+        summary: dict = dict(zip(CELL_DIMENSION_KEYS, cell_key))
         summary.update(statistics.summarize_cell(
             clean_correctness, perturbed_correctness, seed=seed, resamples=resamples))
         summary["answer_flip_rate"] = (
@@ -184,6 +183,62 @@ def summarize_all_cells(matched_pairs: Sequence[MatchedPair],
 
         summaries.append(summary)
 
+    return summaries
+
+
+# The dimensions of one Method A contrast group (all Low/High pairs of one
+# model x family x budget).
+FRAGMENTATION_CONTRAST_KEYS = (
+    "model_id", "model_revision", "task_family", "r_edit_budget")
+
+
+def summarize_fragmentation_contrast(rows: Sequence[dict],
+                                     seed: int = 1729,
+                                     resamples: int = statistics.DEFAULT_BOOTSTRAP_RESAMPLES,
+                                     ) -> list[dict]:
+    """Method A: the paired Low-vs-High fragmentation contrast (design/06 §6.8).
+
+    Pairs the two fragmentation_matched variants of each item x budget,
+    restricted to items whose CLEAN generation was correct (the contrast is
+    clean-conditioned by construction). The Low variant plays the "clean" arm
+    and High the "perturbed" arm of the standard paired machinery, so
+    ``delta`` in each summary is ΔCCF_frag = P(High wrong) − P(Low wrong): a
+    positive, significant value means more fragmentation causes more failure
+    with meaning, word, position, and edit count held fixed.
+    """
+    clean_correct_items = {
+        (row.get("model_id"), row["model_revision"], row["task_id"])
+        for row in rows if row.get("is_clean") and row.get("is_correct")}
+
+    counterfactual_rows = [
+        row for row in rows
+        if not row.get("is_clean")
+        and row.get("r_selection_policy") == SelectionPolicy.FRAGMENTATION_MATCHED
+        and (row.get("model_id"), row["model_revision"], row["task_id"])
+        in clean_correct_items]
+
+    correctness_by_pair: dict = defaultdict(dict)
+    for row in counterfactual_rows:
+        group_key = tuple(row.get(key) for key in FRAGMENTATION_CONTRAST_KEYS)
+        correctness_by_pair[(group_key, row["task_id"])][
+            row.get("r_fragmentation_stratum")] = int(row["is_correct"])
+
+    contrast_arms_by_group: dict = defaultdict(lambda: ([], []))
+    for (group_key, _task_id), correctness_by_stratum in sorted(
+            correctness_by_pair.items(), key=lambda entry: tuple(map(str, entry[0]))):
+        if {FragmentationStratum.LOW, FragmentationStratum.HIGH} <= set(correctness_by_stratum):
+            low_arm, high_arm = contrast_arms_by_group[group_key]
+            low_arm.append(correctness_by_stratum[FragmentationStratum.LOW])
+            high_arm.append(correctness_by_stratum[FragmentationStratum.HIGH])
+
+    summaries = []
+    for group_key in sorted(contrast_arms_by_group,
+                            key=lambda key: tuple(str(part) for part in key)):
+        low_arm, high_arm = contrast_arms_by_group[group_key]
+        summary: dict = dict(zip(FRAGMENTATION_CONTRAST_KEYS, group_key))
+        summary.update(statistics.summarize_cell(
+            low_arm, high_arm, seed=seed, resamples=resamples))
+        summaries.append(summary)
     return summaries
 
 

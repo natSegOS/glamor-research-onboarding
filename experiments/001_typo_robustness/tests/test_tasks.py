@@ -65,6 +65,27 @@ class TestSyntheticReasoningGenerator:
             assert item.task_family == TaskFamily.GSM_SYMBOLIC_SYNTHETIC
 
 
+class TestReasoningInstructionExemplar:
+
+    def test_instruction_embeds_the_format_exemplar(self):
+        assert tasks_reasoning.REASONING_FORMAT_EXEMPLAR in tasks_reasoning.REASONING_INSTRUCTION
+
+    def test_exemplar_final_line_parses_under_the_frozen_scorer(self):
+        import scoring
+        from enums import ExtractionTier
+        answer, tier = scoring.extract_reasoning_answer(
+            tasks_reasoning.REASONING_FORMAT_EXEMPLAR)
+        assert tier == ExtractionTier.HASH_DELIMITED
+        assert answer == 14
+
+    def test_exemplar_precedes_the_question_in_the_full_prompt(self):
+        item = tasks_reasoning.generate_synthetic_reasoning_items(1, seed=4)[0]
+        exemplar_end = item.full_prompt.index(
+            tasks_reasoning.REASONING_FORMAT_EXEMPLAR) + len(
+            tasks_reasoning.REASONING_FORMAT_EXEMPLAR)
+        assert exemplar_end <= item.full_prompt.index(item.question_text)
+
+
 class TestReasoningScopeSpans:
 
     def test_instruction_and_content_spans_slice_out_the_right_text(self):

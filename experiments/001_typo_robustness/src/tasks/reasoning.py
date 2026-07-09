@@ -62,9 +62,29 @@ SYNTHETIC_NAMES = (
 )
 
 
+# One hand-written exemplar demonstrating the '#### <number>' final line. The
+# pilot showed small instruct models ignore a bare zero-shot format instruction
+# (0/100 clean GSM-Symbolic generations emitted '####'), pushing half of all
+# scoring onto the last-number fallback tier. Hand-written — never taken from
+# any evaluation dataset — so it cannot leak an item. Frozen at
+# pre-registration; part of the fixed prompt scaffold, never perturbed.
+REASONING_FORMAT_EXEMPLAR = (
+    "Problem: A box holds 4 red pens and 3 blue pens. Tom buys 2 boxes. "
+    "How many pens does Tom have?\n"
+    "Solution: Each box holds 4 + 3 = 7 pens. Two boxes hold 2 * 7 = 14 pens.\n"
+    "#### 14"
+)
+
 REASONING_INSTRUCTION = (
-    "Solve the following problem. Show your reasoning, then give the final "
-    "numeric answer on a new line in the form '#### <number>'."
+    "Solve the following math problem. Reason step by step, then end your "
+    "response with the final numeric answer on its own line in exactly the "
+    "form '#### <number>'.\n"
+    "\n"
+    "Here is an example of the required format:\n"
+    "\n"
+    f"{REASONING_FORMAT_EXEMPLAR}\n"
+    "\n"
+    "Now solve this problem:"
 )
 
 # ---------------------------------------------------------------------------
