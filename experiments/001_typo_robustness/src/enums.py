@@ -228,12 +228,21 @@ class SampleSizeMethod(_StrEnum):
 
 
 class ConvergenceMethod(_StrEnum):
-    """Which step of the mixed-effects convergence fallback ladder succeeded
-    (design/06 §6.6). Distinct from the ``method=`` kwarg passed to
-    statsmodels' own ``.fit()`` (e.g. "lbfgs" for the variational step) — this
-    is our result label, not the solver name."""
-    LAPLACE = "laplace"
-    VARIATIONAL = "variational"
+    """Which step of the mixed-effects convergence fallback ladder succeeded.
+
+    design/06 §6.6 pre-registers a *structural* contingency for a
+    non-converging maximal model (drop random-slope correlations, then the
+    by-model random slope, then treat ``model`` as a fixed effect) —
+    ``fit_crossed_mixed_effects_logistic`` does not implement that ladder.
+    What it actually tries, in order, is: statsmodels' own default
+    quasi-Newton cascade over the same maximal model, a derivative-free
+    fallback optimizer over the same model, and then a GLM approximation
+    that treats item/model as fixed factors (this last step is the one
+    design/06 §6.6 step 3 describes). These three names label that, not a
+    choice between "Laplace" and "variational Bayes" approximations —
+    statsmodels' ``MixedLM`` does not offer that choice."""
+    QUASI_NEWTON_CASCADE = "quasi_newton_cascade"
+    NELDER_MEAD_FALLBACK = "nelder_mead_fallback"
     GLM_APPROXIMATION = "glm_approximation"
 
 

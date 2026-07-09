@@ -16,11 +16,16 @@ Both require statsmodels (not in the minimal requirements). The module degrades
 gracefully: if statsmodels is absent, all fitting functions raise ImportError
 with a helpful message rather than crashing at import time.
 
-Convergence fallback ladder (pre-registered, design/06 §6.6):
-  1. Laplace approximation (default; fast, good for large n).
-  2. Variational Bayes approximation (statsmodels fallback).
-  3. GLM fixed-effects approximation (treats model/item as fixed factors;
-     use when random-effects convergence fails with only ~5 levels).
+Convergence fallback ladder actually implemented here (see
+``ConvergenceMethod`` for how this differs from design/06 §6.6's
+pre-registered *structural* contingency, which this function does not
+implement):
+  1. Statsmodels' own default quasi-Newton cascade (bfgs -> lbfgs -> cg) over
+     the maximal model.
+  2. A derivative-free fallback optimizer (Nelder-Mead) over the same model.
+  3. A GLM approximation that treats item/model as fixed factors (use when
+     random-effects convergence fails outright with only ~5 model levels) —
+     this step is what design/06 §6.6 step 3 describes.
 The fallback is triggered automatically; the ``method`` field in the result
 records which step succeeded.
 """
@@ -91,7 +96,8 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
     Random-effects specification (Baayen, Davidson & Bates 2008):
       (1 + is_perturbed | task_id) + (1 + is_perturbed | model_revision)
 
-    Convergence fallback ladder: Laplace → variational Bayes → GLM approximation.
+    Convergence fallback ladder: statsmodels' default quasi-Newton cascade →
+    Nelder-Mead → GLM approximation (see ``ConvergenceMethod``).
     """
     try:
         import statsmodels.formula.api as smf
@@ -142,14 +148,18 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
     # treated as "try the next method."
     statistical_fit_failure_exceptions = (ValueError, RuntimeError, np.linalg.LinAlgError)
 
-    # Convergence fallback ladder. The outer label is our result tag
-    # (ConvergenceMethod); fit_kwargs["method"] is statsmodels' own solver name.
+    # Convergence fallback ladder — see ConvergenceMethod's docstring for what
+    # each rung actually is and how it differs from design/06 §6.6's
+    # pre-registered structural contingency. The outer label is our result
+    # tag (ConvergenceMethod); fit_kwargs["method"] (when present) is
+    # statsmodels' own solver name for that rung.
     # Failure reasons accumulate here so a totally-non-converged result still
     # tells the caller why each rung was skipped, instead of just "GLM ran".
     fit_failure_reasons: list[str] = []
     for method_name, fit_kwargs in [
-        (ConvergenceMethod.LAPLACE, {"method": "laplace", "maxiter": 200}),
-        (ConvergenceMethod.VARIATIONAL, {"method": "lbfgs", "maxiter": 400}),
+        # method omitted -> statsmodels' own default cascade (bfgs, lbfgs, cg).
+        (ConvergenceMethod.QUASI_NEWTON_CASCADE, {"maxiter": 200}),
+        (ConvergenceMethod.NELDER_MEAD_FALLBACK, {"method": "nm", "maxiter": 400}),
     ]:
         try:
             model = smf.mixedlm(
@@ -298,18 +308,21 @@ def compute_mediation_proportion(data) -> MediationResult:
 
     n_obs = len(data)
 
+    # method omitted throughout this function -> statsmodels' own default
+    # quasi-Newton cascade (bfgs, then lbfgs, then cg; see
+    # ConvergenceMethod.QUASI_NEWTON_CASCADE).
     # Step 1: mediator model.
     mediator_model = smf.mixedlm(
         "token_inflation_ratio ~ is_perturbed",
         data=data, groups=data["task_id"])
-    mediator_result = mediator_model.fit(reml=False, method="laplace", maxiter=200)
+    mediator_result = mediator_model.fit(reml=False, maxiter=200)
     alpha = float(mediator_result.params.get("is_perturbed", float("nan")))
 
     # Step 2: outcome model.
     outcome_model = smf.mixedlm(
         "is_correct ~ is_perturbed + token_inflation_ratio",
         data=data, groups=data["task_id"])
-    outcome_result = outcome_model.fit(reml=False, method="laplace", maxiter=200)
+    outcome_result = outcome_model.fit(reml=False, maxiter=200)
     beta = float(outcome_result.params.get("token_inflation_ratio", float("nan")))
     gamma = float(outcome_result.params.get("is_perturbed", float("nan")))
 
@@ -327,13 +340,13 @@ def compute_mediation_proportion(data) -> MediationResult:
             supp_med_model = smf.mixedlm(
                 "subword_count_change ~ is_perturbed",
                 data=data, groups=data["task_id"])
-            supp_med_result = supp_med_model.fit(reml=False, method="laplace", maxiter=200)
+            supp_med_result = supp_med_model.fit(reml=False, maxiter=200)
             alpha_s = float(supp_med_result.params.get("is_perturbed", float("nan")))
 
             supp_out_model = smf.mixedlm(
                 "is_correct ~ is_perturbed + subword_count_change",
                 data=data, groups=data["task_id"])
-            supp_out_result = supp_out_model.fit(reml=False, method="laplace", maxiter=200)
+            supp_out_result = supp_out_model.fit(reml=False, maxiter=200)
             beta_s = float(supp_out_result.params.get("subword_count_change", float("nan")))
             gamma_s = float(supp_out_result.params.get("is_perturbed", float("nan")))
 
@@ -384,13 +397,13 @@ def _bootstrap_proportion_mediated(data, n_resamples: int = 500, seed: int = 172
             med_result = smf.mixedlm(
                 "token_inflation_ratio ~ is_perturbed",
                 data=sample, groups=sample["task_id"]).fit(
-                reml=False, method="laplace", maxiter=100)
+                reml=False, maxiter=100)
             alpha_b = float(med_result.params.get("is_perturbed", float("nan")))
 
             out_result = smf.mixedlm(
                 "is_correct ~ is_perturbed + token_inflation_ratio",
                 data=sample, groups=sample["task_id"]).fit(
-                reml=False, method="laplace", maxiter=100)
+                reml=False, maxiter=100)
             beta_b = float(out_result.params.get("token_inflation_ratio", float("nan")))
             gamma_b = float(out_result.params.get("is_perturbed", float("nan")))
 

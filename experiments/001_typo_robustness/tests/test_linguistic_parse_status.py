@@ -705,12 +705,17 @@ class TestComputeKeyTermSet:
         assert "not" in compute_key_term_set("is not true", _key_term_pipeline_for(tokens))
 
     def test_totality_quantifier_is_included(self):
+        # A totality-quantifier DET is tier-2 (TF-IDF-ranked), not tier-1
+        # (structurally guaranteed document order is reserved for named
+        # entities, numerals, and negation — see is_structurally_guaranteed
+        # in compute_key_term_set) — so only inclusion, not position, is
+        # guaranteed here.
         tokens = [
             _KeyTermStubToken("each", pos_="DET", pron_type=["Tot"]),
             _KeyTermStubToken("student", pos_="NOUN"),
         ]
         key_terms = compute_key_term_set("each student", _key_term_pipeline_for(tokens))
-        assert key_terms == ["each", "student"]
+        assert set(key_terms) == {"each", "student"}
 
     def test_entity_member_verb_is_included(self):
         # A token with pos_=VERB that happens to be inside a named entity
