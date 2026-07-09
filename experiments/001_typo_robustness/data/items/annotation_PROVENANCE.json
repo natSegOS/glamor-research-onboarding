@@ -35,7 +35,7 @@
       "input_path": "data/items/gsm_symbolic.jsonl",
       "annotated_count": 100,
       "skipped_count": 0,
-      "violation_count": 54,
+      "violation_count": 4,
       "rule_version": "structural_filter_with_tfidf_ranked_candidates",
       "model_name": "en_core_web_trf"
     },
