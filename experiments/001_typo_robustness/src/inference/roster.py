@@ -54,8 +54,23 @@ _MODEL_SPECIFICATIONS: tuple[ModelSpecification, ...] = (
     # Colab pilot (T4 GPU, ungated, fp16). Qwen2.5-1.5B fits a T4 comfortably
     # and needs no HF gating approval — use for the pilot; swap to a main-study
     # model for the confirmatory run.
+    #
+    # enable_prefix_caching=False: a real pilot run crashed vLLM 0.10.0's
+    # prefix-prefill attention kernel (vllm/attention/ops/prefix_prefill.py,
+    # context_attention_fwd) with "RuntimeError: PassManager::run failed" — a
+    # Triton kernel compilation failure specific to the T4's Turing
+    # architecture (Volta/Turing GPUs fall back to the XFormers attention
+    # backend, since FlashAttention-2 isn't supported there; the crash
+    # appeared once several thousand concurrent requests with shared
+    # instruction-prefix prompts triggered a prefix-cache hit — a small
+    # 2-request repro with the same shared prefix did not reproduce it).
+    # Disabling prefix caching avoids that code path entirely, at the cost of
+    # the throughput prefix caching would otherwise give. Scoped to this
+    # entry only: main-study models targeting newer GPUs (design/07 §7.2)
+    # are not known to hit this and keep prefix caching enabled.
     ModelSpecification(
-        "qwen_1b5_pilot", "Qwen/Qwen2.5-1.5B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
+        "qwen_1b5_pilot", "Qwen/Qwen2.5-1.5B-Instruct", REVISION_PLACEHOLDER, Precision.FP16,
+        enable_prefix_caching=False),
 
     # Main study models (gated; pin revisions before a confirmatory run).
     ModelSpecification(
