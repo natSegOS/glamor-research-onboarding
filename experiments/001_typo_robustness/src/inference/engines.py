@@ -162,11 +162,13 @@ class VllmEngine:
         )
 
     def apply_chat_template(
-            self, user_message: str, system_message: Optional[str] = None) -> str:
+            self, user_message: str, system_message: Optional[str] = None,
+            exemplar_turns: Sequence[tuple[str, str]] = ()) -> str:
         """Wrap a user message (and optionally a system message) in the model's
         own chat template (design/05 §5.7). See the module-level
         ``apply_chat_template`` for the shared implementation."""
-        return apply_chat_template(self.tokenizer, user_message, system_message)
+        return apply_chat_template(
+            self.tokenizer, user_message, system_message, exemplar_turns)
 
     def generate(self, prompts: Sequence[str], max_new_tokens: int) -> list[str]:
         """Generate greedily for a batch of ALREADY CHAT-TEMPLATED prompts.
