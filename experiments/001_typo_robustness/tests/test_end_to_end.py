@@ -114,6 +114,33 @@ def test_analysis_reproduces_matched_pair_counts(tmp_path):
     assert all(pair.model_revision == DUMMY_ENGINE_REVISION for pair in pairs)
 
 
+def test_content_scope_perturbs_questions_shorter_than_the_instruction(tmp_path):
+    # Scope spans arrive in full-prompt coordinates but the regime builders
+    # perturb content_text only; without translation any question shorter than
+    # the (exemplar-bearing) instruction has no eligible position and half of
+    # every dataset lands in exclusions — the second Llama pilot's regression.
+    configuration = ExperimentConfiguration(
+        run_id="e2e_content_scope",
+        seed=1729,
+        datasets=[{"key": "gsm_symbolic_synthetic", "item_count": 8}],
+        conditions=[PerturbationCondition(
+            "kbd_A_content", SemanticClass.A, Operation.SUBSTITUTE,
+            SelectionPolicy.KEYBOARD_NEIGHBOR, Scope.CONTENT, [1])],
+    )
+    from pipeline.experiment import load_task_items
+    items = load_task_items(configuration)
+    assert all(len(item.question_text) < len(item.instruction) for item in items), (
+        "fixture assumption: questions shorter than the exemplar-bearing instruction")
+
+    summary = run_experiment(configuration, _correct_clean_engine(),
+                             semantic_regimes.make_is_word(), FakeTokenizer(), tmp_path)
+    perturbed_rows = [row for row in load_generation_rows([Path(summary["output_path"])])
+                      if not row["is_clean"]]
+    assert len(perturbed_rows) >= 6
+    for row in perturbed_rows:
+        assert row["perturbed_prompt"] != row["clean_prompt"]
+
+
 def test_prefix_locality_sort_keeps_families_adjacent_and_length_ordered():
     from enums import TaskFamily
     from pipeline.experiment import _sort_for_prefix_locality

@@ -407,7 +407,7 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
 
     content_text = content_text_of(task_item)
     key_terms = list(getattr(task_item, "key_terms", []))
-    scope_spans = getattr(task_item, "scope_spans", None)
+    scope_spans = _content_relative_scope_spans(task_item)
 
     for edit_budget in condition.edit_budgets:
         item_seed = regimes.derived_seed(
@@ -465,6 +465,30 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
         ))
 
     return requests, exclusion_records
+
+
+def _content_relative_scope_spans(task_item) -> Optional[dict]:
+    """Translate the task loader's full-prompt scope spans into content_text
+    coordinates. The regime builders perturb content_text, not the full
+    prompt, so full-prompt offsets would point past the end of any question
+    shorter than the instruction — exactly what happened when the reasoning
+    instruction grew a worked exemplar and content-scope perturbation started
+    excluding half of every dataset. Spans are clamped; the instruction span
+    collapses to empty (instructions are never perturbed in this design).
+    """
+    full_prompt_spans = getattr(task_item, "scope_spans", None)
+    if not full_prompt_spans or str(Scope.CONTENT) not in full_prompt_spans:
+        return full_prompt_spans
+    content_span = full_prompt_spans[str(Scope.CONTENT)]
+
+    content_start, content_end = content_span
+    content_length = content_end - content_start
+
+    def clamp(index: int) -> int:
+        return min(max(index - content_start, 0), content_length)
+
+    return {name: (clamp(start), clamp(end))
+            for name, (start, end) in full_prompt_spans.items()}
 
 
 def _sort_for_prefix_locality(
