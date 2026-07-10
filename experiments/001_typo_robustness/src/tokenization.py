@@ -95,7 +95,11 @@ def build_fragmentation_matched_pair(
         edit_budget: int,
         seed: int,
         is_word: Callable[[str], bool],
-        candidate_count: int = 48,
+        # 96 (not 48): under a 128k-vocabulary tokenizer most single typos do
+        # not add subword pieces, so High variants are rare — the wider search
+        # nearly doubles pair yield, and the early stratum exit keeps the
+        # common case cheap.
+        candidate_count: int = 96,
 ) -> Optional[FragmentationMatchedPair]:
     """Build the fragmentation-matched counterfactual for one word (design/02
     §2.5, design/06 §6.8).
