@@ -62,29 +62,77 @@ SYNTHETIC_NAMES = (
 )
 
 
-# One hand-written exemplar demonstrating the '#### <number>' final line. The
-# pilot showed small instruct models ignore a bare zero-shot format instruction
-# (0/100 clean GSM-Symbolic generations emitted '####'), pushing half of all
-# scoring onto the last-number fallback tier. Hand-written — never taken from
-# any evaluation dataset — so it cannot leak an item. Frozen at
+# Chat-form few-shot exemplars demonstrating the '#### <number>' final line.
+# Prompt-iteration history on Llama-3.2-1B-Instruct (100 clean items/family):
+# a bare zero-shot instruction yielded 0/100 compliant GSM-Symbolic
+# generations; one exemplar inlined into the instruction text reached 0.65
+# pooled compliance; inlining more exemplars made it WORSE (0.555 at 3-shot).
+# The same exemplars presented as prior user/assistant chat turns — so the
+# model sees assistant messages that literally end in '#### <number>' —
+# reached 0.905 (3-shot), and 0.99 pooled with all eight turns plus the
+# post-question reminder below. Rich multi-step solutions matter: terse
+# one-line solutions pushed clean accuracy down ~8pp by teaching the model to
+# skip its own reasoning.
+# All problems and solutions are hand-written — never taken from any
+# evaluation dataset — so they cannot leak an item. Frozen at
 # pre-registration; part of the fixed prompt scaffold, never perturbed.
-REASONING_FORMAT_EXEMPLAR = (
-    "Problem: A box holds 4 red pens and 3 blue pens. Tom buys 2 boxes. "
-    "How many pens does Tom have?\n"
-    "Solution: Each box holds 4 + 3 = 7 pens. Two boxes hold 2 * 7 = 14 pens.\n"
-    "#### 14"
-)
-
 REASONING_INSTRUCTION = (
     "Solve the following math problem. Reason step by step, then end your "
     "response with the final numeric answer on its own line in exactly the "
-    "form '#### <number>'.\n"
-    "\n"
-    "Here is an example of the required format:\n"
-    "\n"
-    f"{REASONING_FORMAT_EXEMPLAR}\n"
-    "\n"
-    "Now solve this problem:"
+    "form '#### <number>'."
+)
+
+# Appended after the question (recency position) — measured +11pp compliance
+# on its own, and +3.5pp on top of the 8-shot chat exemplars.
+REASONING_INSTRUCTION_REMINDER = (
+    "Remember: the last line of your response must be exactly '#### <number>'."
+)
+
+REASONING_CHAT_EXEMPLARS: tuple[tuple[str, str], ...] = (
+    ("A box holds 4 red pens and 3 blue pens. Tom buys 2 boxes. "
+     "How many pens does Tom have?",
+     "Each box holds 4 + 3 = 7 pens.\n"
+     "Tom buys 2 boxes, so he has 2 * 7 = 14 pens.\n#### 14"),
+    ("Rosa earns $1,200 each month and spends $450 on rent and $260 on "
+     "groceries. How many dollars does she have left each month?",
+     "Rosa spends 450 + 260 = 710 dollars in total.\n"
+     "She has 1200 - 710 = 490 dollars left.\n#### 490"),
+    ("A rope is 7.5 meters long. Mia cuts off one piece that is 2.25 meters "
+     "long and another that is 1.5 meters long. How many meters of rope "
+     "remain?",
+     "Mia cuts off 2.25 + 1.5 = 3.75 meters in total.\n"
+     "The rope has 7.5 - 3.75 = 3.75 meters remaining.\n#### 3.75"),
+    ("A factory makes 150 toys per hour and runs 16 hours a day. "
+     "How many toys does it make in 5 days?",
+     "In one day the factory makes 150 * 16 = 2400 toys.\n"
+     "In 5 days it makes 5 * 2400 = 12000 toys.\n#### 12000"),
+    ("A tank holds 60 liters of water and is currently 2/3 full. "
+     "How many liters must be added to fill it completely?",
+     "The tank currently holds 2/3 * 60 = 40 liters.\n"
+     "It needs 60 - 40 = 20 more liters.\n#### 20"),
+    ("Nina is 4 years older than twice her brother's age. Her brother is 9 "
+     "years old. How old is Nina?",
+     "Twice her brother's age is 2 * 9 = 18.\n"
+     "Nina is 18 + 4 = 22 years old.\n#### 22"),
+    ("Sam has 5 marbles and Lee has 3 times as many marbles as Sam. "
+     "How many marbles do they have together?",
+     "Lee has 3 * 5 = 15 marbles.\n"
+     "Together they have 5 + 15 = 20 marbles.\n#### 20"),
+    ("A movie ticket costs $12 and popcorn costs $5. A group of 4 friends "
+     "each buys one ticket and they share 2 popcorns. What is the total cost "
+     "in dollars?",
+     "The tickets cost 4 * 12 = 48 dollars.\n"
+     "The popcorn costs 2 * 5 = 10 dollars.\n"
+     "The total is 48 + 10 = 58 dollars.\n#### 58"),
+)
+
+# The (user, assistant) message pairs inserted before the real question at
+# chat-template time (pipeline.runner / inference.engines). Each user turn
+# repeats the instruction exactly as the final turn does, so every turn is
+# self-contained and identically scaffolded.
+REASONING_CHAT_EXEMPLAR_TURNS: tuple[tuple[str, str], ...] = tuple(
+    (build_full_prompt(REASONING_INSTRUCTION, exemplar_problem), exemplar_solution)
+    for exemplar_problem, exemplar_solution in REASONING_CHAT_EXEMPLARS
 )
 
 # ---------------------------------------------------------------------------
@@ -525,7 +573,8 @@ class ReasoningItem:
 
     @property
     def full_prompt(self) -> str:
-        return build_full_prompt(self.instruction, self.question_text)
+        return build_full_prompt(
+            self.instruction, self.question_text, REASONING_INSTRUCTION_REMINDER)
 
     @property
     def scope_spans(self) -> dict:

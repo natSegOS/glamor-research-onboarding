@@ -53,6 +53,7 @@ from pipeline.runner import (
     DUMMY_ENGINE_REVISION,
     GenerationRequest,
     ShardManifest,
+    chat_exemplar_turns_for_family,
     deterministic_row_id,
     run_shard,
 )
@@ -768,7 +769,9 @@ def required_context_length(
             completion_budget = (
                 max_new_tokens_reasoning if request.task_family in REASONING_FAMILIES
                 else max_new_tokens_multiple_choice)
-            templated_prompt = apply_chat_template(tokenizer, request.prompt)
+            templated_prompt = apply_chat_template(
+                tokenizer, request.prompt,
+                exemplar_turns=chat_exemplar_turns_for_family(request.task_family))
             prompt_tokens = len(tokenizer.encode(templated_prompt, add_special_tokens=False))
             longest_needed = max(longest_needed, prompt_tokens + completion_budget)
             progress.advance()

@@ -25,8 +25,10 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional, Sequence
 
 from enums import (
-    Decoding, FinishReason, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES)
+    Decoding, FinishReason, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES,
+    REASONING_FAMILIES)
 from inference.engines import StreamedGeneration
+from tasks.reasoning import REASONING_CHAT_EXEMPLAR_TURNS
 import scoring
 
 
@@ -221,13 +223,25 @@ def _existing_row_ids(output_path: Path) -> set[str]:
     return already_written_ids
 
 
-def _apply_chat_template_if_available(engine: object, prompt: str) -> str:
+def chat_exemplar_turns_for_family(task_family) -> tuple:
+    """The fixed few-shot (user, assistant) chat turns for a task family:
+    the reasoning exemplars for reasoning families, none for MCQ (whose
+    compliance needs no exemplars and is not gate-checked)."""
+
+    return (REASONING_CHAT_EXEMPLAR_TURNS
+            if task_family in REASONING_FAMILIES else ())
+
+
+def _apply_chat_template_if_available(
+        engine: object, prompt: str,
+        exemplar_turns: Sequence[tuple[str, str]] = ()) -> str:
     """Apply the engine's chat template if it exposes one; return the prompt
     unchanged for engines that do not (e.g. DeterministicDummyEngine).
     """
 
     if hasattr(engine, "apply_chat_template"):
-        return engine.apply_chat_template(prompt)  # type: ignore[union-attr]
+        return engine.apply_chat_template(  # type: ignore[union-attr]
+            prompt, exemplar_turns=exemplar_turns)
     return prompt
 
 
@@ -306,7 +320,9 @@ def run_shard(
         return 0
 
     chat_templated_prompts = [
-        _apply_chat_template_if_available(engine, request.prompt)
+        _apply_chat_template_if_available(
+            engine, request.prompt,
+            chat_exemplar_turns_for_family(request.task_family))
         for _row_id, request in pending_requests
     ]
 

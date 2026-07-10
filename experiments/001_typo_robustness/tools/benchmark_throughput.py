@@ -25,6 +25,7 @@ from inference import VllmEngine, get_model_specification
 from pipeline import (
     ExperimentConfiguration,
     build_requests,
+    chat_exemplar_turns_for_family,
     load_task_items,
     required_context_length,
 )
@@ -53,7 +54,12 @@ def parse_arguments():
 
 
 def _timed_generation(engine, requests, max_new_tokens) -> dict:
-    prompts = [engine.apply_chat_template(request.prompt) for request in requests]
+    prompts = [
+        engine.apply_chat_template(
+            request.prompt,
+            exemplar_turns=chat_exemplar_turns_for_family(request.task_family))
+        for request in requests
+    ]
     start_time = time.perf_counter()
     output_tokens = sum(
         generation.output_token_count

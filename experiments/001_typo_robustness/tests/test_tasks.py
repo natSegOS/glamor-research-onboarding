@@ -65,25 +65,33 @@ class TestSyntheticReasoningGenerator:
             assert item.task_family == TaskFamily.GSM_SYMBOLIC_SYNTHETIC
 
 
-class TestReasoningInstructionExemplar:
+class TestReasoningChatExemplars:
 
-    def test_instruction_embeds_the_format_exemplar(self):
-        assert tasks_reasoning.REASONING_FORMAT_EXEMPLAR in tasks_reasoning.REASONING_INSTRUCTION
-
-    def test_exemplar_final_line_parses_under_the_frozen_scorer(self):
+    def test_every_exemplar_solution_parses_under_the_frozen_scorer(self):
         import scoring
         from enums import ExtractionTier
-        answer, tier = scoring.extract_reasoning_answer(
-            tasks_reasoning.REASONING_FORMAT_EXEMPLAR)
-        assert tier == ExtractionTier.HASH_DELIMITED
-        assert answer == 14
+        for _problem, solution in tasks_reasoning.REASONING_CHAT_EXEMPLARS:
+            answer, tier = scoring.extract_reasoning_answer(solution)
+            assert tier == ExtractionTier.HASH_DELIMITED
+            assert answer is not None
 
-    def test_exemplar_precedes_the_question_in_the_full_prompt(self):
+    def test_every_exemplar_turn_repeats_the_instruction_scaffold(self):
+        for user_message, _assistant_message in (
+                tasks_reasoning.REASONING_CHAT_EXEMPLAR_TURNS):
+            assert user_message.startswith(tasks_reasoning.REASONING_INSTRUCTION)
+
+    def test_exemplar_problems_never_appear_in_the_item_prompt(self):
         item = tasks_reasoning.generate_synthetic_reasoning_items(1, seed=4)[0]
-        exemplar_end = item.full_prompt.index(
-            tasks_reasoning.REASONING_FORMAT_EXEMPLAR) + len(
-            tasks_reasoning.REASONING_FORMAT_EXEMPLAR)
-        assert exemplar_end <= item.full_prompt.index(item.question_text)
+        for problem, _solution in tasks_reasoning.REASONING_CHAT_EXEMPLARS:
+            assert problem not in item.full_prompt
+
+    def test_full_prompt_ends_with_the_reminder_after_the_question(self):
+        item = tasks_reasoning.generate_synthetic_reasoning_items(1, seed=4)[0]
+        assert item.full_prompt.endswith(
+            tasks_reasoning.REASONING_INSTRUCTION_REMINDER)
+        assert (item.full_prompt.index(item.question_text)
+                < item.full_prompt.rindex(
+                    tasks_reasoning.REASONING_INSTRUCTION_REMINDER))
 
 
 class TestReasoningScopeSpans:

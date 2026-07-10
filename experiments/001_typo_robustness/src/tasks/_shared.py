@@ -51,17 +51,25 @@ def content_text_of(task_item) -> str:
     return getattr(task_item, "content_text", None) or task_item.question_text
 
 
-def build_full_prompt(instruction: str, content: str) -> str:
+def build_full_prompt(instruction: str, content: str, suffix: str = "") -> str:
     """Assemble the full prompt string from an instruction block and a content block.
 
     The instruction comes first, separated from the content by
     INSTRUCTION_CONTENT_SEPARATOR (a double newline).  The result is the string
     that gets fed to the language model.
 
+    ``suffix``, when given, is appended after the content with the same
+    separator. It sits outside both scope spans (the instruction span covers
+    only ``instruction``, the content span only ``content``), so it is part of
+    the fixed prompt scaffold and never perturbed.
+
     Both ReasoningItem and MultipleChoiceItem use this function so the separator
     and ordering are guaranteed to be identical across task types.
     """
-    return f"{instruction}{INSTRUCTION_CONTENT_SEPARATOR}{content}"
+    prompt = f"{instruction}{INSTRUCTION_CONTENT_SEPARATOR}{content}"
+    if suffix:
+        return f"{prompt}{INSTRUCTION_CONTENT_SEPARATOR}{suffix}"
+    return prompt
 
 
 def build_instruction_and_content_scope_spans(instruction: str, content: str) -> dict:

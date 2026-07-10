@@ -184,8 +184,11 @@ class TestRunShardSchemaAndIdempotence:
 class _ChatTemplateEngine:
     revision = "chat-test"
 
-    def apply_chat_template(self, user_message):
-        return f"<|user|>{user_message}<|assistant|>"
+    def apply_chat_template(self, user_message, exemplar_turns=()):
+        exemplar_text = "".join(
+            f"<|user|>{user}<|assistant|>{assistant}"
+            for user, assistant in exemplar_turns)
+        return f"{exemplar_text}<|user|>{user_message}<|assistant|>"
 
     def generate_streaming(self, prompts, max_new_tokens):
         assert all(prompt.startswith("<|user|>") for prompt in prompts)

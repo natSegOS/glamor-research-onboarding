@@ -67,7 +67,8 @@ def _gpu_compute_capability() -> tuple[int, int]:
 
 
 def apply_chat_template(
-        tokenizer, user_message: str, system_message: Optional[str] = None) -> str:
+        tokenizer, user_message: str, system_message: Optional[str] = None,
+        exemplar_turns: Sequence[tuple[str, str]] = ()) -> str:
     """Wrap a user message (and optionally a system message) in a tokenizer's
     own chat template (design/05 §5.7).
 
@@ -79,6 +80,13 @@ def apply_chat_template(
     ``system_message`` is included only when the tokenizer's chat template
     declares a "system" role slot; otherwise it is prepended to the user turn
     with a blank line so the instruction is never silently dropped.
+
+    ``exemplar_turns`` are fixed few-shot (user, assistant) message pairs
+    inserted before the final user turn (design/05 §5.7: identical across all
+    conditions and models, never perturbed). Chat-form exemplars — where the
+    model sees assistant turns that literally end in the required format —
+    measured far stronger format compliance on small instruct models than the
+    same exemplars inlined into the instruction text.
     """
     messages = []
     template_str = getattr(tokenizer, "chat_template", "") or ""
@@ -88,6 +96,9 @@ def apply_chat_template(
             messages.append({"role": "system", "content": system_message})
         else:
             user_message = f"{system_message}\n\n{user_message}"
+    for exemplar_user_message, exemplar_assistant_message in exemplar_turns:
+        messages.append({"role": "user", "content": exemplar_user_message})
+        messages.append({"role": "assistant", "content": exemplar_assistant_message})
     messages.append({"role": "user", "content": user_message})
     return tokenizer.apply_chat_template(
         messages,
