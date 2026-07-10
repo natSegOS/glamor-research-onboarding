@@ -1,0 +1,44 @@
+{
+  "per_task_family": {
+    "gsm8k": {
+      "clean_accuracy": 0.35,
+      "primary_edit_budget": 2,
+      "primary_condition_pairs": 100,
+      "discordant_rate": 0.23,
+      "delta": -0.010000000000000009,
+      "discordant_rate_bucket": "raise_n_or_relax_mde",
+      "implied_n_at_5pp_mde": 720
+    },
+    "gsm_symbolic_official": {
+      "clean_accuracy": 0.21,
+      "primary_edit_budget": 2,
+      "primary_condition_pairs": 100,
+      "discordant_rate": 0.1,
+      "delta": 0.03999999999999998,
+      "discordant_rate_bucket": "n600_confirmed",
+      "implied_n_at_5pp_mde": 312
+    },
+    "mmlu": {
+      "clean_accuracy": 0.43,
+      "primary_edit_budget": 4,
+      "primary_condition_pairs": 100,
+      "discordant_rate": 0.18,
+      "delta": 0.03999999999999998,
+      "discordant_rate_bucket": "n600_confirmed",
+      "implied_n_at_5pp_mde": 563
+    },
+    "mmlu_pro": {
+      "clean_accuracy": 0.26,
+      "primary_edit_budget": 4,
+      "primary_condition_pairs": 100,
+      "discordant_rate": 0.09,
+      "delta": 0.010000000000000009,
+      "discordant_rate_bucket": "n600_confirmed",
+      "implied_n_at_5pp_mde": 281
+    }
+  },
+  "reasoning_format_compliance": 0.6085758039816233,
+  "reasoning_format_compliance_target": 0.95,
+  "truncation_rate": 0.043523938165991295,
+  "p99_clean_correct_output_tokens": 289
+}
