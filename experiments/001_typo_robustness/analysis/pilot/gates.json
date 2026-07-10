@@ -1,22 +1,22 @@
 {
   "per_task_family": {
     "gsm8k": {
-      "clean_accuracy": 0.35,
+      "clean_accuracy": 0.31,
       "primary_edit_budget": 2,
       "primary_condition_pairs": 100,
-      "discordant_rate": 0.23,
-      "delta": -0.010000000000000009,
-      "discordant_rate_bucket": "raise_n_or_relax_mde",
-      "implied_n_at_5pp_mde": 720
+      "discordant_rate": 0.13,
+      "delta": 0.010000000000000009,
+      "discordant_rate_bucket": "n600_confirmed",
+      "implied_n_at_5pp_mde": 406
     },
     "gsm_symbolic_official": {
-      "clean_accuracy": 0.21,
+      "clean_accuracy": 0.19,
       "primary_edit_budget": 2,
       "primary_condition_pairs": 100,
-      "discordant_rate": 0.1,
-      "delta": 0.03999999999999998,
+      "discordant_rate": 0.11,
+      "delta": 0.07,
       "discordant_rate_bucket": "n600_confirmed",
-      "implied_n_at_5pp_mde": 312
+      "implied_n_at_5pp_mde": 343
     },
     "mmlu": {
       "clean_accuracy": 0.43,
@@ -28,17 +28,17 @@
       "implied_n_at_5pp_mde": 563
     },
     "mmlu_pro": {
-      "clean_accuracy": 0.26,
+      "clean_accuracy": 0.25,
       "primary_edit_budget": 4,
       "primary_condition_pairs": 100,
-      "discordant_rate": 0.09,
-      "delta": 0.010000000000000009,
+      "discordant_rate": 0.08,
+      "delta": 0.0,
       "discordant_rate_bucket": "n600_confirmed",
-      "implied_n_at_5pp_mde": 281
+      "implied_n_at_5pp_mde": 249
     }
   },
-  "reasoning_format_compliance": 0.6085758039816233,
+  "reasoning_format_compliance": 0.9825314128102973,
   "reasoning_format_compliance_target": 0.95,
-  "truncation_rate": 0.043523938165991295,
-  "p99_clean_correct_output_tokens": 289
+  "truncation_rate": 0.03577333533744176,
+  "p99_clean_correct_output_tokens": 217
 }
