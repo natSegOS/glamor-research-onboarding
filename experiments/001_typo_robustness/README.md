@@ -4,6 +4,8 @@ Implementation of the design suite in `design/` (12 documents; start at `design/
 
 **ASR arm: deferred** (design/00 §0.5, 2026-07-09). The TTS+Whisper pipeline was judged too unrealistic; a replacement approach is pending from the PI. Everything below is the keyboard-typo arm, which stands alone.
 
+**Status (2026-07-10):** Stage-1 pilot complete on Llama-3.2-1B (results in `results/pilot/`, gate readout in `analysis/pilot/gates.json`, interactive report in `results/pilot/report.html`). Engineering is done; before the confirmatory main run: a few-shot prompting iteration (format compliance 0.61 vs 0.95 gate — the one failure) + ~30-min re-pilot, PI decisions on the low-A₀ anchor / GSM8K N=720 / Method A yield, then the Stage-2 human audit and the Stage-3 OSF pre-registration lock. Full detail: design/00 §0.5, 2026-07-10 entry.
+
 ## What this is
 
 A matched-pair robustness study of controlled keyboard-adjacency typos, built around a tokenization-fragmentation **mediation** analysis (primary contribution: Method A fragmentation-matched counterfactual + Method B product-of-coefficients, design/06 §6.8), a quantization x noise interaction (secondary), and a three-regime selective-invariance audit (framing). Every numeric and procedural choice is justified in the design docs; the code is the executable form of that spec.
