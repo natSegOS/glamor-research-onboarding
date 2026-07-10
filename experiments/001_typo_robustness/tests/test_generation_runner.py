@@ -104,6 +104,24 @@ class TestRunShardSchemaAndIdempotence:
         for row in load_generation_rows([output]):
             assert required_fields <= set(row)
 
+    def test_fresh_flag_deletes_only_this_runs_outputs(self, tmp_path):
+        import importlib.util
+        from pathlib import Path as FilePath
+        tool_path = FilePath(__file__).resolve().parent.parent / "tools" / "run_generation.py"
+        spec = importlib.util.spec_from_file_location("run_generation", tool_path)
+        assert spec is not None and spec.loader is not None
+        run_generation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(run_generation)
+
+        for name in ["pilot_generations.jsonl", "pilot_manifest.json",
+                     "pilot_w0of2_generations.jsonl", "main_generations.jsonl"]:
+            (tmp_path / name).write_text("{}")
+        deleted = run_generation._delete_previous_run_outputs(tmp_path, "pilot")
+        assert {path.name for path in deleted} == {
+            "pilot_generations.jsonl", "pilot_manifest.json",
+            "pilot_w0of2_generations.jsonl"}
+        assert (tmp_path / "main_generations.jsonl").exists()
+
     def test_completed_shard_records_throughput_statistics(self, tmp_path):
         manifest = ShardManifest(tmp_path / "manifest.json")
         run_shard("shard1", [_make_request("t1"), _make_request("t2")],

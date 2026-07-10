@@ -1,0 +1,23 @@
+{
+ "schema": "1.1",
+ "completed_shards": [
+  "pilot_multiple_choice",
+  "pilot_reasoning"
+ ],
+ "shard_statistics": {
+  "pilot_reasoning": {
+   "rows": 3265,
+   "wall_seconds": 287.4,
+   "output_tokens": 615487,
+   "output_tokens_per_second": 2141.5,
+   "rows_per_hour": 40895.6
+  },
+  "pilot_multiple_choice": {
+   "rows": 3398,
+   "wall_seconds": 280.6,
+   "output_tokens": 130331,
+   "output_tokens_per_second": 464.4,
+   "rows_per_hour": 43590.5
+  }
+ }
+}

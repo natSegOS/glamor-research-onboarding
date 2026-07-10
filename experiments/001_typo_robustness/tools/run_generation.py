@@ -64,6 +64,12 @@ def parse_arguments():
         "--no-spacy", action="store_true",
         help="disable inline spaCy scoring (falls back to structural two-way classifier)")
     parser.add_argument(
+        "--fresh", action="store_true",
+        help="delete this run's previous outputs (generations, exclusions, "
+             "manifest) before generating. Without it the runner resumes: rows "
+             "already on disk — including ones committed to the repo — are "
+             "kept and skipped.")
+    parser.add_argument(
         "--shard-index", type=int, default=None,
         help="this worker's index (0-based) for parallel generation across "
              "GPUs/sessions; requires --shard-count. Each worker writes its own "
@@ -129,6 +135,15 @@ def _measure_max_model_length(configuration, specification, is_word) -> int:
         configuration.max_new_tokens_multiple_choice)
 
 
+def _delete_previous_run_outputs(output_directory: Path, run_id: str) -> list[Path]:
+    """Delete every prior output of ``run_id`` (generations, exclusions,
+    manifest — all workers' files) so --fresh regenerates from nothing."""
+    deleted = sorted(Path(output_directory).glob(f"{run_id}*"))
+    for path in deleted:
+        path.unlink()
+    return deleted
+
+
 def main():
     arguments = parse_arguments()
 
@@ -152,6 +167,12 @@ def main():
             print(f"[run_generation] WARNING: could not resolve current revision "
                   f"({error}); rows will carry the PIN_ME placeholder",
                   file=sys.stderr)
+
+    if arguments.fresh:
+        deleted = _delete_previous_run_outputs(
+            arguments.output_directory, configuration.run_id)
+        print(f"[run_generation] --fresh: deleted {len(deleted)} previous "
+              f"output file(s) for run {configuration.run_id!r}")
 
     dictionary_path = arguments.dictionary or _DEFAULT_DICTIONARY
     is_word = make_is_word(_load_dictionary(dictionary_path))
