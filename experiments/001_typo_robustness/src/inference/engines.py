@@ -1,50 +1,132 @@
-"""Inference engines: vLLM (primary) and HuggingFace transformers (fallback).
+"""Inference engine: vLLM with continuous batching and prefix caching.
 
-Provenance
-----------
-Greedy decoding everywhere in the confirmatory runs: temperature 0, top_p 1,
-fixed max_new_tokens (design/05 §5.6). We study input perturbation, not sampling
-randomness, so sampling noise is removed. vLLM gives continuous batching and
-prefix caching (design/07 §7.2); the HuggingFace engine is the fallback for
-machines without vLLM.
+Greedy decoding everywhere (temperature 0, top_p 1, fixed max_new_tokens per
+task family). vLLM is the only supported backend; runs on the USC GPU cluster.
+The DeterministicDummyEngine in pipeline/runner.py is used for unit tests.
 
 Chat templates
 --------------
-BOTH engines apply each model's OWN chat template before generation (design/05
-§5.7). This is essential: instruction-tuned models are trained on chat-formatted
-inputs and behave inconsistently on raw strings. Applying the template in BOTH
-engines (not just vLLM) means results from the cluster and from the fallback are
-comparable.
-
-The heavy imports (vllm, torch, transformers) are guarded inside the engine
-constructors so this module imports on any machine; the runner and tests use the
-DeterministicDummyEngine in pipeline/runner.py instead of a real model.
+The engine applies each model's OWN chat template before generation (design/05
+§5.7). Instruction-tuned models are trained on chat-formatted inputs and behave
+inconsistently on raw strings.
 """
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+import time
+
+from dataclasses import dataclass
+from typing import Iterator, Optional, Sequence
+
 
 from enums import Precision
 from inference.roster import ModelSpecification
 
 
+@dataclass(frozen=True)
+class StreamedGeneration:
+    """One finished generation from ``generate_streaming``.
+
+    ``request_wall_seconds`` is submit-to-finish wall time for this request.
+    Under continuous batching that includes scheduler queue time, so it is an
+    honest per-request latency, not a decode cost — throughput comes from the
+    shard-level totals the runner records.
+    """
+    prompt_index: int
+    text: str
+    output_token_count: int
+    finish_reason: str
+    request_wall_seconds: float
+
+
+# All current precisions (FP16, AWQ, GPTQ) use float16 as the compute dtype.
+# Passing this explicitly suppresses vLLM's deprecated torch_dtype auto-detection
+# path. AWQ and GPTQ weight-packing is controlled by the separate ``quantization``
+# constructor parameter; their unquantized layers (norms, embeddings) still run
+# in float16 regardless.
+_VLLM_COMPUTE_DTYPE = "float16"
+
+_GREEDY_TEMPERATURE = 0.0
+_GREEDY_TOP_P       = 1.0
+
+# vLLM 0.10's prefix-prefill Triton kernel fails to compile at scale on
+# pre-Ampere GPUs (Turing/T4 = compute capability 7.5) — a GPU-architecture
+# property, not a model property, so it is detected here at engine init rather
+# than configured per roster entry.
+_MINIMUM_COMPUTE_CAPABILITY_FOR_PREFIX_CACHING = (8, 0)
+
+# Modest concurrency cap for pre-Ampere (16 GB T4-class) GPUs to avoid KV-cache
+# OOM (design/07 §7.3); newer GPUs keep vLLM's default unless the roster entry
+# sets max_num_seqs explicitly.
+_PRE_AMPERE_MAX_NUM_SEQS = 128
+
+
+def _gpu_compute_capability() -> tuple[int, int]:
+    import torch
+    return torch.cuda.get_device_capability()
+
+
+def apply_chat_template(
+        tokenizer, user_message: str, system_message: Optional[str] = None) -> str:
+    """Wrap a user message (and optionally a system message) in a tokenizer's
+    own chat template (design/05 §5.7).
+
+    Standalone so it can be applied identically to a bare HF tokenizer (e.g.
+    for pre-flight context-length sizing in pipeline.experiment, before a vLLM
+    engine exists) and to the tokenizer vLLM ends up loading internally —
+    both are the same model's ``AutoTokenizer``, so the two never diverge.
+
+    ``system_message`` is included only when the tokenizer's chat template
+    declares a "system" role slot; otherwise it is prepended to the user turn
+    with a blank line so the instruction is never silently dropped.
+    """
+    messages = []
+    template_str = getattr(tokenizer, "chat_template", "") or ""
+    supports_system = "system" in template_str
+    if system_message:
+        if supports_system:
+            messages.append({"role": "system", "content": system_message})
+        else:
+            user_message = f"{system_message}\n\n{user_message}"
+    messages.append({"role": "user", "content": user_message})
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
 class VllmEngine:
     """Offline batched vLLM engine with continuous batching and prefix caching.
-    Callers pre-sort prompts so shared-prefix families are adjacent, maximizing
-    prefix-cache hits (design/07 §7.8)."""
 
-    def __init__(self, specification: ModelSpecification, seed: int = 1729,
-                 max_model_length: Optional[int] = None):
-        from vllm import LLM, SamplingParams        # guarded: GPU-side only
+    Callers pre-sort prompts so shared-prefix families are adjacent, maximising
+    prefix-cache hits (design/07 §7.7).
+    """
 
+    def __init__(
+            self,
+            specification: ModelSpecification,
+            seed: int = 1729,
+            max_model_length: Optional[int] = None,
+    ):
+        from vllm import LLM, SamplingParams
+
+        gpu_supports_prefix_caching = (
+            _gpu_compute_capability()
+            >= _MINIMUM_COMPUTE_CAPABILITY_FOR_PREFIX_CACHING)
         engine_arguments = dict(
             model=specification.huggingface_identifier,
             revision=specification.revision if specification.revision_is_pinned else None,
+            dtype=_VLLM_COMPUTE_DTYPE,
             gpu_memory_utilization=specification.gpu_memory_utilization,
-            enable_prefix_caching=specification.enable_prefix_caching,
+            enable_prefix_caching=(
+                specification.enable_prefix_caching and gpu_supports_prefix_caching),
             seed=seed,
         )
+        max_num_seqs = specification.max_num_seqs or (
+            None if gpu_supports_prefix_caching else _PRE_AMPERE_MAX_NUM_SEQS)
+        if max_num_seqs:
+            engine_arguments["max_num_seqs"] = max_num_seqs
         if specification.precision in (Precision.AWQ, Precision.GPTQ):
             engine_arguments["quantization"] = specification.precision
         if max_model_length:
@@ -56,88 +138,82 @@ class VllmEngine:
         self.specification = specification
         self.tokenizer = self._language_model.get_tokenizer()
 
-    def _greedy_sampling_params(self, max_new_tokens: int):
-        return self._sampling_params_class(temperature=0.0, top_p=1.0, max_tokens=max_new_tokens)
+        # Monotonic counter for vLLM engine request IDs (generate_streaming),
+        # unique across every call for the lifetime of this engine instance —
+        # several shards may stream through the same engine object in one run.
+        self._next_request_id = 0
 
-    def apply_chat_template(self, user_message: str) -> str:
-        """Wrap a user message in the model's own chat template (design/05 §5.7)."""
-        return self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": user_message}],
-            tokenize=False, add_generation_prompt=True)
+    def _greedy_sampling_params(self, max_new_tokens: int):
+        return self._sampling_params_class(
+            temperature=_GREEDY_TEMPERATURE,
+            top_p=_GREEDY_TOP_P,
+            max_tokens=max_new_tokens,
+        )
+
+    def apply_chat_template(
+            self, user_message: str, system_message: Optional[str] = None) -> str:
+        """Wrap a user message (and optionally a system message) in the model's
+        own chat template (design/05 §5.7). See the module-level
+        ``apply_chat_template`` for the shared implementation."""
+        return apply_chat_template(self.tokenizer, user_message, system_message)
 
     def generate(self, prompts: Sequence[str], max_new_tokens: int) -> list[str]:
-        """Generate greedily for a batch of ALREADY CHAT-TEMPLATED prompts."""
+        """Generate greedily for a batch of ALREADY CHAT-TEMPLATED prompts.
+
+        Blocks until every prompt in ``prompts`` has finished, then returns all
+        outputs at once — appropriate for a single small one-off call (e.g. the
+        LLM-judge in judge.py), but not for the main sweep: a caller that wants
+        to persist each row as soon as it is ready (surviving a mid-run crash
+        with minimal lost work) should use ``generate_streaming`` instead.
+        """
         outputs = self._language_model.generate(
             list(prompts), self._greedy_sampling_params(max_new_tokens))
         return [output.outputs[0].text for output in outputs]
 
+    def generate_streaming(
+            self, prompts: Sequence[str], max_new_tokens: int,
+    ) -> Iterator[StreamedGeneration]:
+        """Generate greedily, yielding a ``StreamedGeneration`` the instant
+        each prompt's decoding finishes — not only once every prompt in
+        ``prompts`` has, and not in submission order.
 
-class HuggingFaceEngine:
-    """transformers fallback: greedy, left-padded batched generation. Slower
-    than vLLM; for environments without it. Applies the chat template too, so
-    its outputs are comparable with the vLLM engine's (design/05 §5.7)."""
+        Drives vLLM's engine directly (``add_request`` + ``step``) instead of
+        the blocking bulk ``LLM.generate`` call that ``generate`` above uses.
+        vLLM's own scheduler is unchanged — it still decides how many requests
+        run concurrently via continuous batching — this only changes *when*
+        the caller is handed a finished result: as soon as that one request is
+        done, rather than after the slowest request in the batch. That lets a
+        caller (``pipeline.runner.run_shard``) persist and flush each row
+        immediately, so a crash loses only requests that were still in flight,
+        not an entire submitted batch (design/07 §7.6).
 
-    def __init__(self, specification: ModelSpecification, device: str = "cuda",
-                 batch_size: int = 8):
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        ``prompt_index`` is the prompt's position in the input ``prompts``
+        sequence, letting the caller map each finished generation back to the
+        request it came from.
+        """
+        sampling_params = self._greedy_sampling_params(max_new_tokens)
+        llm_engine = self._language_model.llm_engine
 
-        revision = specification.revision if specification.revision_is_pinned else None
+        index_by_request_id: dict[str, int] = {}
+        submit_time_by_request_id: dict[str, float] = {}
+        for index, prompt in enumerate(prompts):
+            request_id = str(self._next_request_id)
+            self._next_request_id += 1
+            index_by_request_id[request_id] = index
+            submit_time_by_request_id[request_id] = time.perf_counter()
+            llm_engine.add_request(request_id, prompt, sampling_params)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            specification.huggingface_identifier, revision=revision, padding_side="left")
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        quantization_config = None
-        if specification.precision == Precision.AWQ:
-            # bitsandbytes nf4 stands in for AWQ when AWQ wheels are unavailable
-            # on a given machine (design/05 §5.4). The main sweep uses real AWQ
-            # via vLLM; this is purely a fallback convenience.
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True)
-
-        self.model = AutoModelForCausalLM.from_pretrained(
-            specification.huggingface_identifier, revision=revision,
-            quantization_config=quantization_config,
-            dtype=torch.float16 if quantization_config is None else None,
-            device_map="auto")
-
-        self.revision = specification.revision
-        self.specification = specification
-        self.batch_size = batch_size
-        self._torch = torch
-
-    def apply_chat_template(self, user_message: str) -> str:
-        return self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": user_message}],
-            tokenize=False, add_generation_prompt=True)
-
-    def generate(self, prompts: Sequence[str], max_new_tokens: int) -> list[str]:
-        generations: list[str] = []
-        for batch_start in range(0, len(prompts), self.batch_size):
-            batch = list(prompts[batch_start:batch_start + self.batch_size])
-            encoded = self.tokenizer(batch, return_tensors="pt", padding=True).to(self.model.device)
-
-            with self._torch.no_grad():
-                generated_ids = self.model.generate(
-                    **encoded, do_sample=False, max_new_tokens=max_new_tokens,
-                    pad_token_id=self.tokenizer.pad_token_id)
-
-            prompt_length = encoded["input_ids"].shape[1]
-            for generated_row in generated_ids:
-                completion_ids = generated_row[prompt_length:]
-                generations.append(self.tokenizer.decode(completion_ids, skip_special_tokens=True))
-
-        return generations
-
-
-def build_inference_engine(specification: ModelSpecification, backend: str = "vllm", **keyword_arguments):
-    if backend == "vllm":
-        return VllmEngine(specification, **keyword_arguments)
-    if backend == "huggingface":
-        return HuggingFaceEngine(specification, **keyword_arguments)
-    raise ValueError(f"unknown backend {backend!r}")
+        while index_by_request_id:
+            for output in llm_engine.step():
+                if not output.finished:
+                    continue
+                completion = output.outputs[0]
+                yield StreamedGeneration(
+                    prompt_index=index_by_request_id.pop(output.request_id),
+                    text=completion.text,
+                    output_token_count=len(completion.token_ids),
+                    finish_reason=str(completion.finish_reason),
+                    request_wall_seconds=(
+                        time.perf_counter()
+                        - submit_time_by_request_id.pop(output.request_id)),
+                )

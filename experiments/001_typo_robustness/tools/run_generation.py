@@ -7,43 +7,141 @@ itself stays engine-agnostic (so it is testable with the dummy engine), and this
 script holds the one responsibility that needs the model specifications: the
 pin assertion (design/10 §10.5).
 
-Usage (on the GPU machine, after `pip install -r requirements-gpu.txt`):
+Runs on the USC GPU cluster and on Google Colab (T4) via the same vLLM path.
+
+Usage (after `pip install -r requirements-gpu.txt`):
 
     python tools/run_generation.py \\
         --config configs/main.yaml \\
         --model llama_8b_awq \\
-        --backend vllm \\
         --output-directory results/main
 
-For the real study, also:
-  - fill in the model revisions in src/inference/roster.py
-    (resolve_current_revision prints each SHA), and
-  - pin the dataset revisions in the loaders / swap in the official loaders.
+For the main study, also:
+  - fill in model revisions in src/inference/roster.py (use
+    inference.roster.resolve_current_revision), and
+  - pre-fetch dataset JSONL files with tools/build_task_items.py.
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 
+from dataclasses import replace
 from pathlib import Path
 
-from pipeline import ExperimentConfiguration, run_experiment
-from inference import build_inference_engine
-from inference import assert_revisions_pinned, get_model_specification
+from pipeline import (
+    ExperimentConfiguration,
+    build_requests,
+    load_task_items,
+    required_context_length,
+    run_experiment,
+)
+from inference import VllmEngine
+from inference import (
+    assert_revisions_pinned, get_model_specification, resolve_current_revision)
 from regimes import make_is_word
+
+# Default dictionary — built from SCOWL size-60 by tools/build_dictionary.py.
+# Never falls back to the 488-word demo list in real runs.
+_DEFAULT_DICTIONARY = Path(__file__).resolve().parent.parent / "data" / "wordlists" / "en_us_pinned.txt"
+
+# spaCy model used for inline four-way parse-status classification (Workstream 5).
+_SPACY_MODEL_NAME = "en_core_web_trf"
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--model", required=True, help="a roster key, e.g. llama_8b_awq")
-    parser.add_argument("--backend", default="vllm", choices=["vllm", "huggingface"])
     parser.add_argument("--output-directory", required=True, type=Path)
     parser.add_argument("--git-commit", default="unpinned",
                         help="the code commit SHA, recorded in every row")
-    parser.add_argument("--dictionary", type=Path, default=None,
-                        help="a pinned English word list; defaults to the demo list")
-    return parser.parse_args()
+    parser.add_argument(
+        "--dictionary", type=Path, default=None,
+        help=f"a pinned English word list (default: {_DEFAULT_DICTIONARY})")
+    parser.add_argument(
+        "--no-spacy", action="store_true",
+        help="disable inline spaCy scoring (falls back to structural two-way classifier)")
+    parser.add_argument(
+        "--fresh", action="store_true",
+        help="delete this run's previous outputs (generations, exclusions, "
+             "manifest) before generating. Without it the runner resumes: rows "
+             "already on disk — including ones committed to the repo — are "
+             "kept and skipped.")
+    parser.add_argument(
+        "--shard-index", type=int, default=None,
+        help="this worker's index (0-based) for parallel generation across "
+             "GPUs/sessions; requires --shard-count. Each worker writes its own "
+             "'..._w{index}of{count}_generations.jsonl' — start one process per "
+             "GPU with the same --config/--model and a distinct --shard-index, "
+             "and merge the outputs afterward (design/07 §7.7).")
+    parser.add_argument(
+        "--shard-count", type=int, default=None,
+        help="total number of parallel workers; requires --shard-index.")
+    arguments = parser.parse_args()
+    if (arguments.shard_index is None) != (arguments.shard_count is None):
+        parser.error("--shard-index and --shard-count must be given together")
+    if arguments.shard_index is not None and not (0 <= arguments.shard_index < arguments.shard_count):
+        parser.error("--shard-index must satisfy 0 <= shard_index < shard_count")
+    return arguments
+
+
+def _load_linguistic_pipeline(disabled: bool):
+    """Load the spaCy transformer pipeline once at startup.
+
+    Returns None when disabled or when spaCy / the model is not installed
+    (a warning is printed; the run continues with the structural fallback).
+    """
+    if disabled:
+        return None
+    try:
+        import spacy  # noqa: PLC0415
+        return spacy.load(_SPACY_MODEL_NAME)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[run_generation] WARNING: could not load spaCy model "
+            f"{_SPACY_MODEL_NAME!r}: {exc}\n"
+            f"  Falling back to structural two-way parse-status classifier.\n"
+            f"  Install: python -m spacy download {_SPACY_MODEL_NAME}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _measure_max_model_length(configuration, specification, is_word) -> int:
+    """Load the tokenizer up front and size vLLM's context window from the
+    request set this run will actually submit, rather than the model's native
+    (often 10x+ larger) default context.
+
+    Rebuilds the same requests ``run_experiment`` builds internally (cheap,
+    deterministic, CPU-only — see the shard_partition note in
+    run_experiment's docstring for the established precedent of redoing this
+    step rather than threading it through); no exclusion_sidecar is passed
+    here, so this pass logs nothing and cannot double-count exclusions.
+    """
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        specification.huggingface_identifier,
+        revision=specification.revision if specification.revision_is_pinned else None,
+    )
+    task_items = load_task_items(configuration)
+    requests = build_requests(
+        task_items, configuration.conditions, is_word, tokenizer, configuration.seed)
+    return required_context_length(
+        requests, tokenizer,
+        configuration.max_new_tokens_reasoning,
+        configuration.max_new_tokens_multiple_choice)
+
+
+def _delete_previous_run_outputs(output_directory: Path, run_id: str) -> list[Path]:
+    """Delete every prior output of ``run_id`` (generations, exclusions,
+    manifest — all workers' files) so --fresh regenerates from nothing."""
+    deleted = sorted(Path(output_directory).glob(f"{run_id}*"))
+    for path in deleted:
+        path.unlink()
+    return deleted
 
 
 def main():
@@ -56,9 +154,43 @@ def main():
     # (non-reproducible) model revision.
     if configuration.is_confirmatory:
         assert_revisions_pinned([specification])
+    elif not specification.revision_is_pinned:
+        # Non-confirmatory runs may proceed unpinned, but stamping the resolved
+        # SHA on every row keeps even the pilot reproducible.
+        try:
+            specification = replace(
+                specification,
+                revision=resolve_current_revision(specification.huggingface_identifier))
+            print(f"[run_generation] resolved unpinned revision to "
+                  f"{specification.revision}")
+        except Exception as error:  # noqa: BLE001 — offline/no-auth is survivable here
+            print(f"[run_generation] WARNING: could not resolve current revision "
+                  f"({error}); rows will carry the PIN_ME placeholder",
+                  file=sys.stderr)
 
-    engine = build_inference_engine(specification, backend=arguments.backend)
-    is_word = make_is_word(_load_dictionary(arguments.dictionary))
+    if arguments.fresh:
+        deleted = _delete_previous_run_outputs(
+            arguments.output_directory, configuration.run_id)
+        print(f"[run_generation] --fresh: deleted {len(deleted)} previous "
+              f"output file(s) for run {configuration.run_id!r}")
+
+    dictionary_path = arguments.dictionary or _DEFAULT_DICTIONARY
+    is_word = make_is_word(_load_dictionary(dictionary_path))
+
+    max_model_length = _measure_max_model_length(configuration, specification, is_word)
+    print(f"[run_generation] sized max_model_len={max_model_length} from the "
+          f"actual request set")
+
+    engine = VllmEngine(specification, max_model_length=max_model_length)
+
+    print(f"[run_generation] loading spaCy pipeline ({_SPACY_MODEL_NAME}) ...")
+    linguistic_pipeline = _load_linguistic_pipeline(arguments.no_spacy)
+    if linguistic_pipeline is not None:
+        print(f"[run_generation] spaCy loaded ({_SPACY_MODEL_NAME})")
+
+    shard_partition = (
+        (arguments.shard_index, arguments.shard_count)
+        if arguments.shard_index is not None else None)
 
     summary = run_experiment(
         configuration=configuration,
@@ -70,6 +202,8 @@ def main():
         model_revision=specification.revision,
         quantization_method=specification.precision,
         git_commit=arguments.git_commit,
+        linguistic_pipeline=linguistic_pipeline,
+        shard_partition=shard_partition,
     )
 
     print("run complete:")

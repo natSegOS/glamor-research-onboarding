@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Regime Audit — GLAMOR Lab Exp 001</title>
+<style>
+  /* ── reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:          #0f1117;
+    --surface:     #1a1d27;
+    --surface2:    #22263a;
+    --border:      #2e3350;
+    --text:        #e2e8f0;
+    --text-muted:  #7c85a2;
+    --accent:      #6366f1;
+    --accent-dim:  #3730a3;
+    --green:       #22c55e;
+    --red:         #ef4444;
+    --yellow:      #f59e0b;
+    --blue:        #3b82f6;
+    --purple:      #a855f7;
+    --A:           #22c55e;
+    --B:           #3b82f6;
+    --C:           #f59e0b;
+    --na:          #6b7280;
+    --radius:      8px;
+    --font:        'Inter', system-ui, -apple-system, sans-serif;
+    --mono:        'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  }
+  html { font-family: var(--font); background: var(--bg); color: var(--text); height: 100%; }
+  body { height: 100%; display: flex; flex-direction: column; }
+
+  /* ── layout ── */
+  #app { display: flex; flex-direction: column; height: 100%; max-width: 1200px; margin: 0 auto; width: 100%; padding: 0 16px; }
+  #header { padding: 16px 0 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+  #header h1 { font-size: 1rem; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+  #progress-bar-wrap { flex: 1; background: var(--surface2); border-radius: 99px; height: 6px; overflow: hidden; }
+  #progress-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s ease; }
+  #progress-label { font-size: .8rem; color: var(--text-muted); white-space: nowrap; }
+  #main { flex: 1; overflow: auto; padding: 20px 0; display: flex; flex-direction: column; gap: 16px; }
+
+  /* ── load screen ── */
+  #load-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; flex: 1; text-align: center; }
+  #load-screen h2 { font-size: 1.4rem; font-weight: 600; }
+  #load-screen p { color: var(--text-muted); max-width: 480px; line-height: 1.6; }
+  .load-btn { background: var(--accent); color: #fff; border: none; border-radius: var(--radius); padding: 12px 28px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background .15s; }
+  .load-btn:hover { background: var(--accent-dim); }
+
+  /* ── cards ── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .card-header { padding: 10px 16px; background: var(--surface2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; font-size: .82rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+  .card-body { padding: 14px 16px; }
+
+  /* ── meta badges ── */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 99px; font-size: .75rem; font-weight: 600; }
+  .badge-A { background: color-mix(in srgb, var(--A) 18%, transparent); color: var(--A); }
+  .badge-B { background: color-mix(in srgb, var(--B) 18%, transparent); color: var(--B); }
+  .badge-C { background: color-mix(in srgb, var(--C) 18%, transparent); color: var(--C); }
+  .badge-na { background: color-mix(in srgb, var(--na) 18%, transparent); color: var(--na); }
+  .badge-fail { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+  .badge-muted { background: var(--surface2); color: var(--text-muted); }
+
+  /* ── meta row ── */
+  #meta-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .meta-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; font-size: .78rem; color: var(--text-muted); }
+  .meta-chip span { color: var(--text); font-weight: 600; }
+
+  /* ── text display ── */
+  .text-box { font-family: var(--mono); font-size: .83rem; line-height: 1.7; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+  .diff-del { background: color-mix(in srgb, var(--red) 25%, transparent); color: var(--red); border-radius: 3px; padding: 0 2px; }
+  .diff-ins { background: color-mix(in srgb, var(--green) 25%, transparent); color: var(--green); border-radius: 3px; padding: 0 2px; }
+
+  /* ── two-column for texts ── */
+  #texts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 780px) { #texts-grid { grid-template-columns: 1fr; } }
+
+  /* ── judge panel ── */
+  #judge-panel { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+  .judge-field { display: flex; flex-direction: column; gap: 4px; }
+  .judge-label { font-size: .72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+  .judge-value { font-size: .9rem; font-weight: 600; }
+  #judge-rationale-text { font-size: .85rem; color: var(--text); line-height: 1.5; font-style: italic; }
+
+  /* ── annotation ── */
+  #annotation-section { display: flex; flex-direction: column; gap: 14px; }
+  .anno-label { font-size: .82rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+
+  #agree-row { display: flex; gap: 10px; }
+  .agree-btn { flex: 1; padding: 10px; border: 2px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text); font-size: .9rem; font-weight: 600; cursor: pointer; transition: all .15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .agree-btn:hover { border-color: var(--text-muted); }
+  .agree-btn.active-agree { border-color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+  .agree-btn.active-disagree { border-color: var(--red); background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+
+  #classification-row { display: flex; gap: 8px; }
+  .cls-btn { flex: 1; padding: 10px 6px; border: 2px solid var(--border); border-radius: var(--radius); background: transparent; font-size: .88rem; font-weight: 700; cursor: pointer; transition: all .15s; }
+  .cls-btn:hover { border-color: var(--text-muted); color: var(--text); }
+  .cls-btn.active-A { border-color: var(--A); background: color-mix(in srgb, var(--A) 15%, transparent); color: var(--A); }
+  .cls-btn.active-B { border-color: var(--B); background: color-mix(in srgb, var(--B) 15%, transparent); color: var(--B); }
+  .cls-btn.active-C { border-color: var(--C); background: color-mix(in srgb, var(--C) 15%, transparent); color: var(--C); }
+  .cls-btn.active-NA { border-color: var(--na); background: color-mix(in srgb, var(--na) 15%, transparent); color: var(--na); }
+  .cls-btn.inactive { color: var(--text-muted); }
+
+  #note-box { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--font); font-size: .88rem; padding: 10px 12px; resize: vertical; min-height: 64px; transition: border-color .15s; }
+  #note-box:focus { outline: none; border-color: var(--accent); }
+
+  /* ── navigation ── */
+  #nav-bar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 12px 0 16px; border-top: 1px solid var(--border); }
+  .nav-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: .88rem; font-weight: 600; padding: 9px 18px; cursor: pointer; transition: background .15s; display: flex; align-items: center; gap: 6px; }
+  .nav-btn:hover:not(:disabled) { background: var(--border); }
+  .nav-btn:disabled { opacity: .35; cursor: default; }
+  .nav-btn.primary { background: var(--accent); border-color: var(--accent); }
+  .nav-btn.primary:hover:not(:disabled) { background: var(--accent-dim); }
+  #item-counter { flex: 1; text-align: center; font-size: .88rem; color: var(--text-muted); }
+  #export-btn { background: transparent; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); font-size: .82rem; padding: 9px 14px; cursor: pointer; margin-left: auto; transition: all .15s; }
+  #export-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+  /* ── keyboard hint ── */
+  .kbd { display: inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: .72rem; font-family: var(--mono); color: var(--text-muted); }
+
+  /* ── toast ── */
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(60px); background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 20px; font-size: .85rem; color: var(--text); opacity: 0; transition: all .25s; pointer-events: none; z-index: 100; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── reviewed indicator ── */
+  .reviewed-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; }
+  .pending-dot  { width: 8px; height: 8px; border-radius: 50%; background: var(--border); display: inline-block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- LOAD SCREEN -->
+  <div id="load-screen">
+    <div>
+      <h2>Regime Audit Validator</h2>
+      <p style="margin-top:8px">GLAMOR Lab Experiment 001 — cross-family LLM judge verification</p>
+    </div>
+    <p>Load the <code>audit_sample.json</code> file produced by
+    <code>tools/sample_for_audit.py</code>. Progress is saved automatically
+    to your browser's local storage and survives page reloads.</p>
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:center;">
+      <button class="load-btn" onclick="triggerFileLoad()">Open audit_sample.json</button>
+      <span style="color:var(--text-muted); font-size:.85rem">or</span>
+      <button class="load-btn" style="background:var(--surface2); border:1px solid var(--border); color:var(--text);" onclick="loadFromDemo()">Load demo (3 items)</button>
+    </div>
+    <p id="load-error" style="color:var(--red); display:none;"></p>
+    <input type="file" id="file-input" accept=".json" style="display:none" onchange="handleFileLoad(event)">
+    <div style="margin-top:16px; color:var(--text-muted); font-size:.8rem;">
+      Keyboard shortcuts: <span class="kbd">←</span> prev &nbsp; <span class="kbd">→</span> next &nbsp;
+      <span class="kbd">Y</span> agree &nbsp; <span class="kbd">N</span> disagree &nbsp;
+      <span class="kbd">A</span> <span class="kbd">B</span> <span class="kbd">C</span> classify &nbsp;
+      <span class="kbd">S</span> save &amp; next
+    </div>
+  </div>
+
+  <!-- REVIEW UI (hidden until data loaded) -->
+  <div id="review-ui" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+    <div id="header">
+      <h1>Regime Audit</h1>
+      <div id="progress-bar-wrap"><div id="progress-bar-fill" style="width:0%"></div></div>
+      <div id="progress-label">0 / 0</div>
+    </div>
+
+    <div id="main">
+      <!-- meta row -->
+      <div id="meta-row"></div>
+
+      <!-- texts -->
+      <div id="texts-grid">
+        <div class="card">
+          <div class="card-header">Original</div>
+          <div class="card-body"><div class="text-box" id="original-text"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header">Perturbed <span id="diff-hint" style="margin-left:auto; font-size:.75rem; color:var(--text-muted); text-transform:none; font-weight:400;"></span></div>
+          <div class="card-body"><div class="text-box" id="perturbed-text"></div></div>
+        </div>
+      </div>
+
+      <!-- judge panel -->
+      <div class="card" id="judge-card">
+        <div class="card-header">Judge assessment</div>
+        <div class="card-body">
+          <div id="judge-panel">
+            <div class="judge-field">
+              <div class="judge-label">Classification</div>
+              <div class="judge-value" id="judge-cls-display">—</div>
+            </div>
+            <div class="judge-field">
+              <div class="judge-label">Confidence</div>
+              <div class="judge-value" id="judge-conf-display">—</div>
+            </div>
+            <div class="judge-field" style="flex:1; min-width:200px;">
+              <div class="judge-label">Rationale</div>
+              <div id="judge-rationale-text">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- annotation -->
+      <div class="card">
+        <div class="card-header">Your annotation</div>
+        <div class="card-body">
+          <div id="annotation-section">
+
+            <div>
+              <div class="anno-label">Agree with judge?
+                <span style="margin-left:8px; font-size:.72rem; color:var(--text-muted); text-transform:none; font-weight:400;">
+                  <span class="kbd">Y</span> yes &nbsp; <span class="kbd">N</span> no
+                </span>
+              </div>
+              <div id="agree-row">
+                <button class="agree-btn" id="btn-agree" onclick="setAgree(true)">✓ Agree</button>
+                <button class="agree-btn" id="btn-disagree" onclick="setAgree(false)">✗ Disagree</button>
+              </div>
+            </div>
+
+            <div id="classification-section">
+              <div class="anno-label">Your classification
+                <span style="margin-left:8px; font-size:.72rem; color:var(--text-muted); text-transform:none; font-weight:400;">
+                  <span class="kbd">A</span> <span class="kbd">B</span> <span class="kbd">C</span> <span class="kbd">0</span> N/A
+                </span>
+              </div>
+              <div id="classification-row">
+                <button class="cls-btn inactive" id="cls-A" onclick="setClassification('A')">A — Nonword typo</button>
+                <button class="cls-btn inactive" id="cls-B" onclick="setClassification('B')">B — Real-word shift</button>
+                <button class="cls-btn inactive" id="cls-C" onclick="setClassification('C')">C — Meaning-changing</button>
+                <button class="cls-btn inactive" id="cls-NA" onclick="setClassification('not_applicable')">N/A</button>
+              </div>
+            </div>
+
+            <div>
+              <div class="anno-label">Note (optional)</div>
+              <textarea id="note-box" placeholder="e.g. 'The edit produces a real word but context fully disambiguates — borderline B/A'" oninput="onNoteInput()"></textarea>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /main -->
+
+    <div id="nav-bar">
+      <button class="nav-btn" id="btn-prev" onclick="navigate(-1)">← Prev</button>
+      <button class="nav-btn primary" id="btn-save-next" onclick="saveAndNext()">Save &amp; Next →</button>
+      <div id="item-counter">1 / 200</div>
+      <button id="export-btn" onclick="exportResults()">⬇ Export JSON</button>
+    </div>
+  </div><!-- /review-ui -->
+</div><!-- /app -->
+
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════
+let state = {
+  items: [],          // array of audit items from JSON
+  annotations: {},    // { row_id: { agrees, classification, note, reviewed } }
+  current: 0,
+  storageKey: null,   // set after file load
+};
+
+// ═══════════════════════════════════════════════════════════════
+// File loading
+// ═══════════════════════════════════════════════════════════════
+function triggerFileLoad() {
+  document.getElementById('file-input').click();
+}
+
+function handleFileLoad(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      initReview(data, file.name);
+    } catch(err) {
+      showLoadError('Could not parse JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function loadFromDemo() {
+  const demo = {
+    schema_version: "1",
+    sample_size: 3,
+    seed: 1729,
+    judge_model: "gemma2_9b_judge",
+    items: [
+      {
+        row_id: "demo_001",
+        task_id: "gsm_symbolic_official_00000",
+        task_family: "gsm_symbolic_official",
+        model_id: "Qwen/Qwen2.5-1.5B-Instruct",
+        claimed_regime: "A",
+        selection_policy: "keyboard_neighbor",
+        edit_budget: 2,
+        original_text: "The Williams family has 9950 muffins. Each batch uses 1555 cups of flour. How many batches can they make?",
+        perturbed_text: "The Williams family has 9q50 muffins. Each batch uses 1555 cups of flour. Hkw many batches can they make?",
+        edited_word_before: "9950",
+        edited_word_after: "9q50",
+        edit_script: [{"word_before": "9950", "word_after": "9q50"}, {"word_before": "How", "word_after": "Hkw"}],
+        token_inflation_ratio: 1.06,
+        fragmentation_stratum: "High",
+        judge_classification: "A",
+        judge_confidence: "high",
+        judge_rationale: "9q50 is not a real word; the intended value 9950 is unambiguous from context.",
+        judge_parse_failed: false,
+        human_classification: null,
+        human_agrees_with_judge: null,
+        human_note: "",
+        human_reviewed: false,
+      },
+      {
+        row_id: "demo_002",
+        task_id: "gsm8k_00001",
+        task_family: "gsm8k",
+        model_id: "Qwen/Qwen2.5-1.5B-Instruct",
+        claimed_regime: "B",
+        selection_policy: "real_word",
+        edit_budget: 2,
+        original_text: "Lori needed 1 whole egg to make 2 deviled egg halves. She needs 3 dozen eggs for a party of 16 guests.",
+        perturbed_text: "Lori needed 1 hole egg to make 2 deviled egg halves. She needs 3 dozen eggs for a party of 16 guests.",
+        edited_word_before: "whole",
+        edited_word_after: "hole",
+        edit_script: [{"word_before": "whole", "word_after": "hole"}],
+        token_inflation_ratio: 1.0,
+        fragmentation_stratum: "Low",
+        judge_classification: "B",
+        judge_confidence: "medium",
+        judge_rationale: "'hole egg' is not a standard phrase; the intended 'whole egg' is recoverable from context.",
+        judge_parse_failed: false,
+        human_classification: null,
+        human_agrees_with_judge: null,
+        human_note: "",
+        human_reviewed: false,
+      },
+      {
+        row_id: "demo_003",
+        task_id: "mmlu_pro_00000",
+        task_family: "mmlu_pro",
+        model_id: "Qwen/Qwen2.5-1.5B-Instruct",
+        claimed_regime: "A",
+        selection_policy: "keyboard_neighbor",
+        edit_budget: 1,
+        original_text: "Two vectors, one 3 N and the other 4 N, can have a resultant of",
+        perturbed_text: "Two vectors, one 3 N and the other 4 N, can have a rrsultant of",
+        edited_word_before: "resultant",
+        edited_word_after: "rrsultant",
+        edit_script: [{"word_before": "resultant", "word_after": "rrsultant"}],
+        token_inflation_ratio: 1.12,
+        fragmentation_stratum: "High",
+        judge_classification: "A",
+        judge_confidence: "high",
+        judge_rationale: "'rrsultant' is not a word; 'resultant' is immediately recoverable.",
+        judge_parse_failed: false,
+        human_classification: null,
+        human_agrees_with_judge: null,
+        human_note: "",
+        human_reviewed: false,
+      },
+    ]
+  };
+  initReview(demo, 'demo');
+}
+
+function showLoadError(msg) {
+  const el = document.getElementById('load-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Initialise review session
+// ═══════════════════════════════════════════════════════════════
+function initReview(data, filename) {
+  if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
+    showLoadError('No items found in the JSON file.');
+    return;
+  }
+
+  state.items = data.items;
+  state.storageKey = 'glamor_audit_' + filename.replace(/[^a-z0-9]/gi, '_');
+  state.current = 0;
+
+  // Load any saved progress from localStorage
+  const saved = localStorage.getItem(state.storageKey);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      state.annotations = parsed.annotations || {};
+      state.current = Math.min(parsed.current || 0, state.items.length - 1);
+    } catch (_) {
+      state.annotations = {};
+    }
+  } else {
+    state.annotations = {};
+  }
+
+  // Merge stored annotations back into items
+  for (const item of state.items) {
+    const ann = state.annotations[item.row_id];
+    if (ann) {
+      item.human_agrees_with_judge = ann.agrees;
+      item.human_classification = ann.classification;
+      item.human_note = ann.note || '';
+      item.human_reviewed = ann.reviewed || false;
+    }
+  }
+
+  document.getElementById('load-screen').style.display = 'none';
+  document.getElementById('review-ui').style.display = 'flex';
+  renderItem();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Rendering
+// ═══════════════════════════════════════════════════════════════
+function renderItem() {
+  const item = state.items[state.current];
+  if (!item) return;
+  saveCurrentProgress();
+  updateProgress();
+
+  // --- meta ---
+  const claimed = item.claimed_regime;
+  document.getElementById('meta-row').innerHTML = `
+    <div class="meta-chip">Item <span>${state.current + 1} / ${state.items.length}</span></div>
+    <div class="meta-chip">Task <span>${escHtml(item.task_family)}</span></div>
+    <div class="meta-chip">Model <span>${escHtml((item.model_id || '').split('/').pop())}</span></div>
+    <div class="meta-chip">Policy <span>${escHtml(item.selection_policy || '—')}</span></div>
+    <div class="meta-chip">k <span>${escHtml(String(item.edit_budget ?? '—'))}</span></div>
+    <div class="meta-chip">Frag <span>${escHtml(item.fragmentation_stratum || '—')}</span></div>
+    <span class="badge badge-${claimed}">${escHtml(claimed)} claimed</span>
+    ${item.human_reviewed ? '<span class="reviewed-dot" title="Reviewed"></span>' : '<span class="pending-dot" title="Pending"></span>'}
+  `;
+
+  // --- texts ---
+  document.getElementById('original-text').textContent = item.original_text || '';
+  document.getElementById('perturbed-text').innerHTML = inlineDiff(
+    item.original_text || '', item.perturbed_text || '');
+
+  const diffHint = item.edited_word_before
+    ? `"${escHtml(item.edited_word_before)}" → "${escHtml(item.edited_word_after)}"`
+    : '';
+  document.getElementById('diff-hint').textContent = diffHint;
+
+  // --- judge ---
+  const jcls = item.judge_classification;
+  document.getElementById('judge-cls-display').innerHTML = jcls
+    ? `<span class="badge badge-${jcls === 'not_applicable' ? 'na' : jcls}">${escHtml(jcls)}</span>`
+    : (item.judge_parse_failed ? '<span class="badge badge-fail">parse failed</span>' : '<span style="color:var(--text-muted)">—</span>');
+  document.getElementById('judge-conf-display').innerHTML = item.judge_confidence
+    ? `<span class="badge badge-muted">${escHtml(item.judge_confidence)}</span>`
+    : '<span style="color:var(--text-muted)">—</span>';
+  document.getElementById('judge-rationale-text').textContent = item.judge_rationale || '—';
+
+  // --- annotation state ---
+  setAgreeUI(item.human_agrees_with_judge);
+  setClassificationUI(item.human_classification);
+  document.getElementById('note-box').value = item.human_note || '';
+
+  // --- nav buttons ---
+  document.getElementById('btn-prev').disabled = (state.current === 0);
+}
+
+function updateProgress() {
+  const total = state.items.length;
+  const reviewed = state.items.filter(i => i.human_reviewed).length;
+  const pct = total > 0 ? (reviewed / total * 100) : 0;
+  document.getElementById('progress-bar-fill').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = `${reviewed} / ${total} reviewed`;
+  document.getElementById('item-counter').textContent = `${state.current + 1} / ${total}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Annotation actions
+// ═══════════════════════════════════════════════════════════════
+function setAgree(value) {
+  const item = state.items[state.current];
+  item.human_agrees_with_judge = value;
+  if (value === true && item.judge_classification) {
+    item.human_classification = item.judge_classification;
+    setClassificationUI(item.judge_classification);
+  }
+  setAgreeUI(value);
+  persistAnnotation();
+}
+
+function setAgreeUI(value) {
+  document.getElementById('btn-agree').className =
+    'agree-btn' + (value === true ? ' active-agree' : '');
+  document.getElementById('btn-disagree').className =
+    'agree-btn' + (value === false ? ' active-disagree' : '');
+}
+
+function setClassification(cls) {
+  const item = state.items[state.current];
+  item.human_classification = cls;
+  setClassificationUI(cls);
+  persistAnnotation();
+}
+
+function setClassificationUI(cls) {
+  const buttons = ['A', 'B', 'C', 'NA'];
+  for (const key of buttons) {
+    const btn = document.getElementById('cls-' + key);
+    const match = (key === 'NA') ? (cls === 'not_applicable') : (cls === key);
+    btn.className = 'cls-btn ' + (match ? `active-${key}` : 'inactive');
+  }
+}
+
+function onNoteInput() {
+  const item = state.items[state.current];
+  item.human_note = document.getElementById('note-box').value;
+  persistAnnotation();
+}
+
+function saveAndNext() {
+  const item = state.items[state.current];
+  if (!item.human_classification) {
+    showToast('Please select a classification before saving.');
+    return;
+  }
+  item.human_reviewed = true;
+  persistAnnotation();
+  if (state.current < state.items.length - 1) {
+    navigate(1);
+  } else {
+    showToast('All items reviewed! Use Export JSON to save results.');
+    updateProgress();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Persistence
+// ═══════════════════════════════════════════════════════════════
+function persistAnnotation() {
+  const item = state.items[state.current];
+  state.annotations[item.row_id] = {
+    agrees: item.human_agrees_with_judge,
+    classification: item.human_classification,
+    note: item.human_note,
+    reviewed: item.human_reviewed,
+  };
+  saveCurrentProgress();
+}
+
+function saveCurrentProgress() {
+  if (!state.storageKey) return;
+  localStorage.setItem(state.storageKey, JSON.stringify({
+    current: state.current,
+    annotations: state.annotations,
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Navigation
+// ═══════════════════════════════════════════════════════════════
+function navigate(delta) {
+  const next = state.current + delta;
+  if (next < 0 || next >= state.items.length) return;
+  state.current = next;
+  renderItem();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Export
+// ═══════════════════════════════════════════════════════════════
+function exportResults() {
+  const reviewed = state.items.filter(i => i.human_reviewed);
+  const agrees = reviewed.filter(i => i.human_agrees_with_judge === true).length;
+  const disagrees = reviewed.filter(i => i.human_agrees_with_judge === false).length;
+
+  const output = {
+    schema_version: "1",
+    exported_items: state.items.length,
+    reviewed_count: reviewed.length,
+    judge_agreement_count: agrees,
+    judge_disagreement_count: disagrees,
+    judge_agreement_rate: reviewed.length > 0 ? (agrees / reviewed.length) : null,
+    items: state.items,
+  };
+
+  const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'regime_audit_results.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`Exported ${state.items.length} items (${reviewed.length} reviewed).`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Diff utility — character-level inline diff
+// ═══════════════════════════════════════════════════════════════
+function inlineDiff(original, perturbed) {
+  // Word-level LCS diff, fall back to plain text if identical
+  if (original === perturbed) return escHtml(perturbed);
+
+  const origWords = tokenise(original);
+  const pertWords = tokenise(perturbed);
+  const lcs = longestCommonSubsequence(origWords, pertWords);
+
+  let oi = 0, pi = 0, li = 0;
+  const parts = [];
+
+  while (li < lcs.length) {
+    while (oi < origWords.length && origWords[oi] !== lcs[li]) oi++;
+    while (pi < pertWords.length && pertWords[pi] !== lcs[li]) {
+      if (pertWords[pi] !== origWords[oi]) {
+        parts.push('<span class="diff-ins">' + escHtml(pertWords[pi]) + '</span>');
+      }
+      pi++;
+    }
+    parts.push(escHtml(lcs[li]));
+    oi++; pi++; li++;
+  }
+  // Trailing tokens
+  while (pi < pertWords.length) {
+    parts.push('<span class="diff-ins">' + escHtml(pertWords[pi]) + '</span>');
+    pi++;
+  }
+  return parts.join('');
+}
+
+function tokenise(text) {
+  return text.match(/\S+|\s+/g) || [];
+}
+
+function longestCommonSubsequence(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+  const seq = [];
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (a[i-1] === b[j-1]) { seq.push(a[i-1]); i--; j--; }
+    else if (dp[i-1][j] > dp[i][j-1]) i--;
+    else j--;
+  }
+  return seq.reverse();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Utility
+// ═══════════════════════════════════════════════════════════════
+function escHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+let _toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Keyboard shortcuts
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (!state.items.length) return;
+  if (e.target.tagName === 'TEXTAREA') return;
+
+  switch (e.key) {
+    case 'ArrowLeft':  e.preventDefault(); navigate(-1); break;
+    case 'ArrowRight': e.preventDefault(); navigate(1);  break;
+    case 'y': case 'Y': setAgree(true);  break;
+    case 'n': case 'N': setAgree(false); break;
+    case 'a': case 'A': setClassification('A'); break;
+    case 'b': case 'B': setClassification('B'); break;
+    case 'c': case 'C': setClassification('C'); break;
+    case '0':           setClassification('not_applicable'); break;
+    case 's': case 'S': e.preventDefault(); saveAndNext(); break;
+  }
+});
+</script>
+</body>
+</html>

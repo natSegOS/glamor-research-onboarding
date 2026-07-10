@@ -206,8 +206,10 @@ def audit_report(
         if len(ratings) == modal_panel_size
     ]
 
-    intent_categories = [[int(r.intent_preserved) for r in ratings] for ratings in fully_rated_items]
-    gold_categories = [[int(r.gold_answer_unchanged) for r in ratings] for ratings in fully_rated_items]
+    intent_categories = [
+        [int(rating.intent_preserved) for rating in ratings] for ratings in fully_rated_items]
+    gold_categories = [
+        [int(rating.gold_answer_unchanged) for rating in ratings] for ratings in fully_rated_items]
 
     kappa_intent = fleiss_kappa(intent_categories, category_count=2)
     kappa_gold = fleiss_kappa(gold_categories, category_count=2)
@@ -228,7 +230,8 @@ def audit_report(
         for regime, (preserved, total) in intent_preserved_counts.items()
     }
 
-    excluded_item_ids = [o.item_id for o in item_outcomes if o.excluded_from_primary]
+    excluded_item_ids = [
+        outcome.item_id for outcome in item_outcomes if outcome.excluded_from_primary]
 
     return AuditReport(
         fleiss_kappa_intent=kappa_intent,

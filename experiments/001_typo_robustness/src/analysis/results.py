@@ -6,9 +6,7 @@ This module consumes the JSONL rows written by pipeline.runner.run_shard and
 produces the analysis deliverables of design/06 §6.10 and design/08:
   - matched clean/perturbed pairs joined per (model_revision, task_id);
   - one statistics.summarize_cell block per reporting cell;
-  - the figures of design/08 §8.7, including the keyboard-vs-ASR degradation
-    profile that the latest review motivated (the two noise sources are the
-    study's two arms and deserve a direct side-by-side).
+  - the figures of design/08 §8.7.
 
 Every cell is keyed by the r_-prefixed perturbation-state fields that the runner
 writes, so the analysis dimensions and the logged dimensions cannot drift apart.
@@ -20,20 +18,24 @@ run (the n<2 guard lives in statistics.summarize_cell).
 from __future__ import annotations
 
 import csv
+import os
 
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
-from enums import SelectionPolicy
+from enums import FragmentationStratum, ParseStatus, SelectionPolicy
 from analysis import statistics
 
 
 # The dimensions that define a reporting cell (design/06 §6.10). All are
 # r_-prefixed perturbation-state fields written by the runner, plus the model
-# and task family.
+# and task family. model_id is included alongside model_revision because
+# unpinned runs share the PIN_ME revision placeholder — keying on revision
+# alone would merge every unpinned model into one cell.
 CELL_DIMENSION_KEYS = (
+    "model_id",
     "model_revision",
     "task_family",
     "r_semantic_class",
@@ -66,23 +68,19 @@ def _cell_key(perturbed_row: dict) -> tuple:
 def join_matched_pairs(rows: Sequence[dict]) -> list[MatchedPair]:
     """Join clean and perturbed rows into matched pairs.
 
-    Clean rows are indexed by (model_revision, task_id). Each perturbed row is
-    matched to the clean row for the SAME model and item, so the pairing is
-    exact and never crosses models or items (design/06 §6.2).
+    Clean rows are indexed by (model_id, model_revision, task_id). Each
+    perturbed row is matched to the clean row for the SAME model and item, so
+    the pairing is exact and never crosses models or items (design/06 §6.2).
     """
-    clean_by_model_and_task: dict = {}
-    perturbed_rows: list = []
+    def model_and_task(row: dict) -> tuple:
+        return (row.get("model_id"), row["model_revision"], row["task_id"])
 
-    for row in rows:
-        if row.get("is_clean"):
-            clean_by_model_and_task[(row["model_revision"], row["task_id"])] = row
-        else:
-            perturbed_rows.append(row)
+    clean_by_model_and_task = {
+        model_and_task(row): row for row in rows if row.get("is_clean")}
 
     matched_pairs: list[MatchedPair] = []
-    for perturbed_row in perturbed_rows:
-        clean_row = clean_by_model_and_task.get(
-            (perturbed_row["model_revision"], perturbed_row["task_id"]))
+    for perturbed_row in (row for row in rows if not row.get("is_clean")):
+        clean_row = clean_by_model_and_task.get(model_and_task(perturbed_row))
         if clean_row is None:
             continue                          # no clean partner; cannot pair
 
@@ -94,7 +92,7 @@ def join_matched_pairs(rows: Sequence[dict]) -> list[MatchedPair]:
             perturbed_is_correct=int(perturbed_row["is_correct"]),
             clean_answer=clean_row.get("parsed_answer"),
             perturbed_answer=perturbed_row.get("parsed_answer"),
-            perturbed_parse_status=perturbed_row.get("parse_status", "valid"),
+            perturbed_parse_status=perturbed_row.get("parse_status", ParseStatus.VALID),
             cell_key=_cell_key(perturbed_row),
         ))
 
@@ -111,27 +109,136 @@ def group_pairs_into_cells(matched_pairs: Sequence[MatchedPair]) -> dict:
 
 def summarize_all_cells(matched_pairs: Sequence[MatchedPair],
                         seed: int = 1729,
-                        resamples: int = statistics.DEFAULT_BOOTSTRAP_RESAMPLES) -> list[dict]:
-    """Produce one summary row per cell, sorted for stable output. Each row
-    carries the cell's dimension values plus the full statistics block."""
+                        resamples: int = statistics.DEFAULT_BOOTSTRAP_RESAMPLES,
+                        audit_outcomes: Optional[dict] = None) -> list[dict]:
+    """Produce one summary row per cell, sorted for stable output.
+
+    Each row carries the cell's dimension values plus the full statistics block.
+
+    ``audit_outcomes`` — when provided, maps task_id to
+    ``analysis.audit.ItemAuditOutcome``. Pairs whose item is flagged
+    ``excluded_from_primary=True`` are removed from the cell before computing
+    any statistics; ``n_audit_excluded`` in the output counts them.  When None
+    the gate is open (no items excluded).
+
+    VALID-only sensitivity (Part 4): ``delta_valid_only`` and
+    ``mcnemar_p_valid_only`` are computed on the subset of pairs where the
+    perturbed response has ParseStatus.VALID, providing a sensitivity check
+    that coincides with the all-in statistics when ICR=0 (design/06 §6.10).
+    """
     cells = group_pairs_into_cells(matched_pairs)
 
     summaries: list[dict] = []
     for cell_key in sorted(cells, key=lambda key: tuple(str(part) for part in key)):
-        pairs = cells[cell_key]
+        all_pairs = cells[cell_key]
+
+        # Audit-exclusion gate (Part 7).
+        n_audit_excluded = 0
+        if audit_outcomes is not None:
+            excluded_ids = {
+                pair.task_id for pair in all_pairs
+                if audit_outcomes.get(pair.task_id) is not None
+                and audit_outcomes[pair.task_id].excluded_from_primary
+            }
+            n_audit_excluded = len(excluded_ids)
+            pairs = [pair for pair in all_pairs if pair.task_id not in excluded_ids]
+        else:
+            pairs = all_pairs
+
         clean_correctness = [pair.clean_is_correct for pair in pairs]
         perturbed_correctness = [pair.perturbed_is_correct for pair in pairs]
 
-        summary = dict(zip(CELL_DIMENSION_KEYS, cell_key))
+        summary: dict = dict(zip(CELL_DIMENSION_KEYS, cell_key))
         summary.update(statistics.summarize_cell(
             clean_correctness, perturbed_correctness, seed=seed, resamples=resamples))
-        summary["answer_flip_rate"] = statistics.answer_flip_rate(
-            [pair.clean_answer for pair in pairs],
-            [pair.perturbed_answer for pair in pairs])
-        summary["invalid_or_clarification_rate"] = statistics.invalid_or_clarification_rate(
-            [pair.perturbed_parse_status for pair in pairs])
+        summary["answer_flip_rate"] = (
+            statistics.answer_flip_rate(
+                [pair.clean_answer for pair in pairs],
+                [pair.perturbed_answer for pair in pairs])
+            if pairs else float("nan"))
+        summary["invalid_or_clarification_rate"] = (
+            statistics.invalid_or_clarification_rate(
+                [pair.perturbed_parse_status for pair in pairs])
+            if pairs else float("nan"))
+        summary["n_audit_excluded"] = n_audit_excluded
+
+        # VALID-only sensitivity (Part 4).
+        valid_pairs = [pair for pair in pairs
+                       if pair.perturbed_parse_status == ParseStatus.VALID]
+        if len(valid_pairs) >= 2:
+            valid_clean = [pair.clean_is_correct for pair in valid_pairs]
+            valid_perturbed = [pair.perturbed_is_correct for pair in valid_pairs]
+            delta_valid_only: Optional[float] = statistics.paired_degradation(
+                valid_clean, valid_perturbed)
+            valid_table = statistics.build_paired_table(valid_clean, valid_perturbed)
+            valid_mcnemar = statistics.mcnemar_test(
+                valid_table.broke, valid_table.recovered)
+            mcnemar_p_valid_only: Optional[float] = valid_mcnemar.p_value
+        else:
+            delta_valid_only = None
+            mcnemar_p_valid_only = None
+
+        summary["delta_valid_only"] = delta_valid_only
+        summary["mcnemar_p_valid_only"] = mcnemar_p_valid_only
+
         summaries.append(summary)
 
+    return summaries
+
+
+# The dimensions of one Method A contrast group (all Low/High pairs of one
+# model x family x budget).
+FRAGMENTATION_CONTRAST_KEYS = (
+    "model_id", "model_revision", "task_family", "r_edit_budget")
+
+
+def summarize_fragmentation_contrast(rows: Sequence[dict],
+                                     seed: int = 1729,
+                                     resamples: int = statistics.DEFAULT_BOOTSTRAP_RESAMPLES,
+                                     ) -> list[dict]:
+    """Method A: the paired Low-vs-High fragmentation contrast (design/06 §6.8).
+
+    Pairs the two fragmentation_matched variants of each item x budget,
+    restricted to items whose CLEAN generation was correct (the contrast is
+    clean-conditioned by construction). The Low variant plays the "clean" arm
+    and High the "perturbed" arm of the standard paired machinery, so
+    ``delta`` in each summary is ΔCCF_frag = P(High wrong) − P(Low wrong): a
+    positive, significant value means more fragmentation causes more failure
+    with meaning, word, position, and edit count held fixed.
+    """
+    clean_correct_items = {
+        (row.get("model_id"), row["model_revision"], row["task_id"])
+        for row in rows if row.get("is_clean") and row.get("is_correct")}
+
+    counterfactual_rows = [
+        row for row in rows
+        if not row.get("is_clean")
+        and row.get("r_selection_policy") == SelectionPolicy.FRAGMENTATION_MATCHED
+        and (row.get("model_id"), row["model_revision"], row["task_id"])
+        in clean_correct_items]
+
+    correctness_by_pair: dict = defaultdict(dict)
+    for row in counterfactual_rows:
+        group_key = tuple(row.get(key) for key in FRAGMENTATION_CONTRAST_KEYS)
+        correctness_by_pair[(group_key, row["task_id"])][
+            row.get("r_fragmentation_stratum")] = int(row["is_correct"])
+
+    contrast_arms_by_group: dict = defaultdict(lambda: ([], []))
+    for (group_key, _task_id), correctness_by_stratum in sorted(
+            correctness_by_pair.items(), key=lambda entry: tuple(map(str, entry[0]))):
+        if {FragmentationStratum.LOW, FragmentationStratum.HIGH} <= set(correctness_by_stratum):
+            low_arm, high_arm = contrast_arms_by_group[group_key]
+            low_arm.append(correctness_by_stratum[FragmentationStratum.LOW])
+            high_arm.append(correctness_by_stratum[FragmentationStratum.HIGH])
+
+    summaries = []
+    for group_key in sorted(contrast_arms_by_group,
+                            key=lambda key: tuple(str(part) for part in key)):
+        low_arm, high_arm = contrast_arms_by_group[group_key]
+        summary: dict = dict(zip(FRAGMENTATION_CONTRAST_KEYS, group_key))
+        summary.update(statistics.summarize_cell(
+            low_arm, high_arm, seed=seed, resamples=resamples))
+        summaries.append(summary)
     return summaries
 
 
@@ -158,6 +265,10 @@ def write_cell_table(cell_summaries: Sequence[dict], output_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def _import_pyplot():
+    # matplotlib reads MPLBACKEND at import time, before matplotlib.use() below
+    # can override it — so a stray inherited value (e.g. Jupyter's own) would
+    # crash the import itself. Force it first, regardless of environment.
+    os.environ["MPLBACKEND"] = "Agg"
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -194,63 +305,6 @@ def figure_clean_conditioned_failure_vs_edit_budget(
     axes.set_title("Typo-induced failure vs severity, by edit operation")
     if series_by_operation:
         axes.legend(title="operation")
-    figure.tight_layout()
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=150)
-    pyplot.close(figure)
-    return output_path
-
-
-def figure_keyboard_versus_asr_profile(
-        cell_summaries: Sequence[dict], output_path: Path) -> Optional[Path]:
-    """Side-by-side degradation profile for the two noise sources — keyboard
-    typos versus ASR transcription errors — the figure the latest review
-    motivated. Bars are mean paired degradation per model, grouped by source.
-    """
-    pyplot = _import_pyplot()
-    if pyplot is None:
-        return None
-
-    keyboard_policies = {SelectionPolicy.KEYBOARD_NEIGHBOR, SelectionPolicy.INFORMATIVE_WORD, SelectionPolicy.UNIFORM}
-    asr_policies = {SelectionPolicy.ASR_CLEAN, SelectionPolicy.ASR_NOISY}
-
-    degradation_by_model: dict = defaultdict(lambda: {"keyboard": [], "asr": []})
-    for summary in cell_summaries:
-        policy = summary.get("r_selection_policy")
-        model = summary.get("model_revision")
-        delta = summary.get("delta")
-        if model is None or delta is None:
-            continue
-        if policy in keyboard_policies:
-            degradation_by_model[model]["keyboard"].append(delta)
-        elif policy in asr_policies:
-            degradation_by_model[model]["asr"].append(delta)
-
-    models = sorted(degradation_by_model)
-    if not models:
-        return None
-
-    def mean_or_zero(values):
-        return sum(values) / len(values) if values else 0.0
-
-    keyboard_means = [mean_or_zero(degradation_by_model[m]["keyboard"]) for m in models]
-    asr_means = [mean_or_zero(degradation_by_model[m]["asr"]) for m in models]
-
-    figure, axes = pyplot.subplots(figsize=(8, 5))
-    bar_positions = range(len(models))
-    bar_width = 0.38
-    axes.bar([p - bar_width / 2 for p in bar_positions], keyboard_means,
-             bar_width, label="keyboard typos")
-    axes.bar([p + bar_width / 2 for p in bar_positions], asr_means,
-             bar_width, label="ASR transcription")
-
-    axes.set_xticks(list(bar_positions))
-    axes.set_xticklabels(models, rotation=30, ha="right")
-    axes.set_ylabel("mean paired degradation")
-    axes.set_title("Degradation by noise source, per model")
-    axes.legend()
     figure.tight_layout()
 
     output_path = Path(output_path)

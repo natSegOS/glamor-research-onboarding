@@ -21,6 +21,7 @@ a deterministic fake.
 from __future__ import annotations
 
 import random
+import re
 
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -28,6 +29,21 @@ from typing import Callable, Optional
 from enums import FragmentationStratum, Operation, SelectionPolicy, Scope
 from perturbation import PerturbationError, damerau_levenshtein_distance
 from regimes import derived_seed, make_regime_a_nonword_typo
+
+
+_COUNTERFACTUAL_MINIMUM_WORD_LENGTH = 4
+
+# Stop enumerating counterfactual candidates once both strata hold this many
+# distinct variants: the choice pool is already diverse, and full enumeration
+# of every seed x 4 operations per word per budget dominated request-building
+# time on the Colab pilot.
+_SUFFICIENT_VARIANTS_PER_STRATUM = 8
+
+# Give up after this many candidates while a stratum is still EMPTY — under a
+# 128k vocabulary ~75% of words never yield a High variant, and continuing to
+# search for them doubles build time for zero pairs. The wider search (the
+# candidate_count default) only continues for words with both strata started.
+_GIVE_UP_CANDIDATES_WHILE_STRATUM_EMPTY = 48
 
 
 def count_tokens(tokenizer, text: str) -> int:
@@ -85,7 +101,11 @@ def build_fragmentation_matched_pair(
         edit_budget: int,
         seed: int,
         is_word: Callable[[str], bool],
-        candidate_count: int = 48,
+        # 96 (not 48): under a 128k-vocabulary tokenizer most single typos do
+        # not add subword pieces, so High variants are rare — the wider search
+        # nearly doubles pair yield, and the early stratum exit keeps the
+        # common case cheap.
+        candidate_count: int = 96,
 ) -> Optional[FragmentationMatchedPair]:
     """Build the fragmentation-matched counterfactual for one word (design/02
     §2.5, design/06 §6.8).
@@ -100,7 +120,18 @@ def build_fragmentation_matched_pair(
     """
     subword_change_by_variant: dict[str, int] = {}
 
+    def stratum_counts() -> tuple[int, int]:
+        changes = subword_change_by_variant.values()
+        return (sum(change <= 0 for change in changes),
+                sum(change >= 1 for change in changes))
+
     for candidate_index in range(candidate_count):
+        low_count, high_count = stratum_counts()
+        if min(low_count, high_count) >= _SUFFICIENT_VARIANTS_PER_STRATUM:
+            break
+        if (candidate_index >= _GIVE_UP_CANDIDATES_WHILE_STRATUM_EMPTY
+                and min(low_count, high_count) == 0):
+            break
         candidate_seed = derived_seed(seed, "counterfactual", word, edit_budget, candidate_index)
 
         for operation in (Operation.SUBSTITUTE, Operation.INSERT, Operation.DELETE, Operation.TRANSPOSE):
@@ -143,3 +174,35 @@ def build_fragmentation_matched_pair(
         low_fragmentation_subword_change=subword_change_by_variant[chosen_low],
         high_fragmentation_subword_change=subword_change_by_variant[chosen_high],
     )
+
+
+def select_counterfactual_target_word(
+        content_text: str, is_word: Callable[[str], bool]) -> Optional[str]:
+    """The counterfactual's target word: the longest real word of at least
+    the minimum length (first occurrence wins ties). The longest word has the
+    richest keyboard-plausible variant space, maximizing the chance both
+    fragmentation strata are populated. Deterministic — no seed."""
+    eligible_words = [
+        word for word in re.findall(r"[A-Za-z]+", content_text)
+        if len(word) >= _COUNTERFACTUAL_MINIMUM_WORD_LENGTH and is_word(word)]
+    return max(eligible_words, key=len) if eligible_words else None
+
+
+def apply_counterfactual_variant(
+        content_text: str, word: str, variant: str) -> tuple[str, int]:
+    """Replace the first whole-word occurrence of ``word`` with ``variant``.
+    Returns the perturbed text and the character index of the replacement.
+
+    Boundaries are letter-based lookarounds, not ``\\b``: the target word comes
+    from the ``[A-Za-z]+`` tokenizer above, which extracts "Python" out of
+    "Python3" — where ``\\bPython\\b`` would NOT match (digits are word
+    characters to ``\\b``). The two functions must share one notion of "word"
+    (this exact mismatch crashed the first Llama pilot on an MMLU item).
+    """
+    match = re.search(
+        rf"(?<![A-Za-z]){re.escape(word)}(?![A-Za-z])", content_text)
+    if match is None:
+        raise PerturbationError(
+            f"counterfactual target word {word!r} not found as a whole word")
+    return (content_text[:match.start()] + variant + content_text[match.end():],
+            match.start())

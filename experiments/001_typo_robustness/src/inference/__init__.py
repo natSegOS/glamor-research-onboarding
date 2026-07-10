@@ -3,7 +3,7 @@
 Re-exports the full public surface of both modules:
 
     from inference import MODEL_ROSTER, get_model_specification
-    from inference import build_inference_engine, VllmEngine
+    from inference import VllmEngine
 """
 
 from inference.roster import (
@@ -15,8 +15,4 @@ from inference.roster import (
     assert_revisions_pinned,
 )
 
-from inference.engines import (
-    VllmEngine,
-    HuggingFaceEngine,
-    build_inference_engine,
-)
+from inference.engines import VllmEngine

@@ -33,13 +33,20 @@ REVISION_PLACEHOLDER = "PIN_ME"
 
 @dataclass(frozen=True)
 class ModelSpecification:
-    """Everything the inference engines need to load a model reproducibly."""
+    """Everything the inference engines need to load a model reproducibly.
+
+    ``enable_prefix_caching`` is the per-model intent; the engine additionally
+    disables it at runtime on GPUs whose architecture cannot compile vLLM's
+    prefix-prefill kernel (see VllmEngine). ``max_num_seqs`` of None leaves
+    concurrency to vLLM's default (the engine caps it on T4-class GPUs).
+    """
     roster_key: str
     huggingface_identifier: str
     revision: str                          # pinned commit SHA, or REVISION_PLACEHOLDER
     precision: Precision = Precision.FP16
     gpu_memory_utilization: float = 0.85
     enable_prefix_caching: bool = True
+    max_num_seqs: int | None = None
 
     @property
     def revision_is_pinned(self) -> bool:
@@ -47,24 +54,48 @@ class ModelSpecification:
 
 
 # The roster. Identifiers verified on HuggingFace, June 2026 (docs/PROVENANCE.md
-# §4). Revisions are PIN_ME until pre-registration.
-MODEL_ROSTER: dict[str, ModelSpecification] = {
-    "llama_1b": ModelSpecification(
+# §4). Revisions are PIN_ME until pre-registration. Each spec's roster_key
+# appears once here; MODEL_ROSTER below indexes this tuple by that key, so the
+# key can never drift out of sync with its dict entry.
+_MODEL_SPECIFICATIONS: tuple[ModelSpecification, ...] = (
+    # Ungated fallback pilot model (any GPU, fp16): fits a T4 comfortably and
+    # needs no HF gating approval. The spec'd pilot model is llama_1b
+    # (design/11 §11.2); this entry remains for runs without gated access.
+    ModelSpecification(
+        "qwen_1b5_pilot", "Qwen/Qwen2.5-1.5B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
+
+    # Main study models (gated; pin revisions before a confirmatory run).
+    ModelSpecification(
         "llama_1b", "meta-llama/Llama-3.2-1B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "llama_3b": ModelSpecification(
+    ModelSpecification(
         "llama_3b", "meta-llama/Llama-3.2-3B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "llama_8b": ModelSpecification(
+    ModelSpecification(
         "llama_8b", "meta-llama/Llama-3.1-8B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "llama_8b_awq": ModelSpecification(
+    ModelSpecification(
         "llama_8b_awq", "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4",
         REVISION_PLACEHOLDER, Precision.AWQ),
-    "qwen_7b": ModelSpecification(
+    ModelSpecification(
         "qwen_7b", "Qwen/Qwen2.5-7B-Instruct", REVISION_PLACEHOLDER, Precision.FP16),
-    "qwen_7b_awq": ModelSpecification(
+    ModelSpecification(
         "qwen_7b_awq", "Qwen/Qwen2.5-7B-Instruct-AWQ", REVISION_PLACEHOLDER, Precision.AWQ),
-    "mistral_7b": ModelSpecification(
+    ModelSpecification(
         "mistral_7b", "mistralai/Mistral-7B-Instruct-v0.3", REVISION_PLACEHOLDER, Precision.FP16),
-}
+
+    # Cross-family regime-audit judge. Gemma 2 9B is from Google DeepMind —
+    # a distinct pre-training corpus and architecture from every generation
+    # model in this study (Llama = Meta, Qwen = Alibaba, Mistral = Mistral AI).
+    # Cross-family selection is required so that the judge's own tendencies
+    # are not correlated with the tendencies of the models being judged.
+    # The judge always runs at temperature=0 (greedy) via run_judge() in
+    # src/judge.py; all decisions are cached content-addressably so the judge
+    # is called at most once per unique (judge_revision, prompt_version, input).
+    ModelSpecification(
+        "gemma2_9b_judge", "google/gemma-2-9b-it", REVISION_PLACEHOLDER, Precision.FP16,
+        gpu_memory_utilization=0.90),
+)
+
+MODEL_ROSTER: dict[str, ModelSpecification] = {
+    spec.roster_key: spec for spec in _MODEL_SPECIFICATIONS}
 
 
 def get_model_specification(roster_key: str) -> ModelSpecification:
@@ -80,7 +111,11 @@ def resolve_current_revision(huggingface_identifier: str) -> str:
     this to fill in the PIN_ME placeholders at pre-registration time. Requires
     network access and (for gated models) authentication."""
     from huggingface_hub import HfApi
-    return HfApi().model_info(huggingface_identifier).sha
+    revision_sha = HfApi().model_info(huggingface_identifier).sha
+    if revision_sha is None:
+        raise RuntimeError(
+            f"HuggingFace returned no commit SHA for {huggingface_identifier!r}")
+    return revision_sha
 
 
 def assert_revisions_pinned(specifications) -> None:

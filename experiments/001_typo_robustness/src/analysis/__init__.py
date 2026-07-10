@@ -1,17 +1,18 @@
 """The analysis sub-package: paired statistics, per-cell result summarization,
-and the three-regime human audit.
+mixed-effects models, and the three-regime human audit.
 
 Import order matters here: results.py imports statistics, so statistics must
 exist on the package namespace before results is loaded.
 
 Usage:
 
-    from analysis import statistics, results, audit
+    from analysis import statistics, results, models, audit
     from analysis import mcnemar_test, MatchedPair, AuditReport
 """
 
 from analysis import statistics     # must be first (results.py imports it)
 from analysis import results
+from analysis import models
 from analysis import audit
 
 # Re-export the full public surface of all three modules so callers can import
@@ -47,4 +48,11 @@ from analysis.audit import (
     resolve_item,
     AuditReport,
     audit_report,
+)
+
+from analysis.models import (
+    MixedEffectsLogisticResult,
+    fit_crossed_mixed_effects_logistic,
+    MediationResult,
+    compute_mediation_proportion,
 )

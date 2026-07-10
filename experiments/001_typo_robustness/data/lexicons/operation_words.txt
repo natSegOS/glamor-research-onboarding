@@ -1,0 +1,77 @@
+# Arithmetic operation words for key_terms extraction in reasoning questions.
+#
+# Derived from the template vocabulary of:
+#   Cobbe et al. (2021) "Training Verifiers to Solve Math Word Problems"
+#     (GSM8K, arXiv:2110.14168) — Appendix B template structure.
+#   Mirzadeh et al. (2024) "GSM-Symbolic: Understanding the Limitations of
+#     Mathematical Reasoning in Large Language Models" (ICLR 2025,
+#     arXiv:2410.05229) — Figure 1 and template definitions.
+#
+# A reasoning question word is included here if it:
+#   (a) appears as a core operator or relation word in the GSM template family, OR
+#   (b) signals a quantitative change, accumulation, or partition operation
+#       in typical arithmetic word problem phrasing.
+#
+# These words are matched as key_terms so that the informative_word and
+# answer_critical perturbation policies target the operationally meaningful
+# spans of the question, not merely numeric tokens.
+#
+# Implements: extract_key_terms_from_reasoning_question in tasks/reasoning.py
+
+# --- Accumulation / addition ---
+more
+extra
+additional
+total
+sum
+altogether
+combined
+plus
+add
+added
+
+# --- Partition / subtraction ---
+fewer
+less
+remaining
+left
+minus
+difference
+reduced
+removed
+
+# --- Multiplicative ---
+each
+per
+every
+twice
+double
+triple
+times
+multiply
+
+# --- Division / sharing ---
+half
+quarter
+split
+share
+divide
+divided
+equally
+
+# --- Change-of-possession verbs (Cobbe et al. Appendix B) ---
+buys
+sells
+gives
+receives
+earns
+spends
+saves
+loses
+gains
+collects
+produces
+distributes
+donates
+borrows
+returns

@@ -24,7 +24,7 @@ from typing import Optional, Sequence
 import numpy
 from scipy import stats as scipy_stats
 
-from enums import INTERACTIONAL_FAILURE_STATUSES
+from enums import INTERACTIONAL_FAILURE_STATUSES, McNemarTestMethod, SampleSizeMethod
 
 
 # Exact McNemar when the number of discordant pairs is below this threshold;
@@ -89,7 +89,7 @@ class McNemarResult:
     recovered: int
     statistic: Optional[float]
     p_value: float
-    method: str                        # "exact_midp" | "asymptotic"
+    method: McNemarTestMethod
 
 
 def mcnemar_test(broke: int, recovered: int,
@@ -105,7 +105,7 @@ def mcnemar_test(broke: int, recovered: int,
     discordant_count = broke + recovered
 
     if discordant_count == 0:
-        return McNemarResult(broke, recovered, None, 1.0, "exact_midp")
+        return McNemarResult(broke, recovered, None, 1.0, McNemarTestMethod.EXACT_MIDP)
 
     if discordant_count < exact_threshold:
         smaller_count = min(broke, recovered)
@@ -113,11 +113,11 @@ def mcnemar_test(broke: int, recovered: int,
         if use_mid_p:
             two_sided_p = max(0.0, two_sided_p
                               - scipy_stats.binom.pmf(smaller_count, discordant_count, 0.5))
-        return McNemarResult(broke, recovered, None, float(two_sided_p), "exact_midp")
+        return McNemarResult(broke, recovered, None, float(two_sided_p), McNemarTestMethod.EXACT_MIDP)
 
     chi_square_statistic = (broke - recovered) ** 2 / discordant_count
     p_value = float(scipy_stats.chi2.sf(chi_square_statistic, df=1))
-    return McNemarResult(broke, recovered, float(chi_square_statistic), p_value, "asymptotic")
+    return McNemarResult(broke, recovered, float(chi_square_statistic), p_value, McNemarTestMethod.ASYMPTOTIC)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ def mcnemar_sample_size(
         discordant_pair_rate: float,
         alpha: float = 0.05,
         power: float = 0.80,
-        method: str = "connor") -> int:
+        method: SampleSizeMethod = SampleSizeMethod.CONNOR) -> int:
     """Paired items needed to detect a paired-accuracy difference
     ``detectable_difference`` (= p_broke - p_recovered) at discordant-pair rate
     ``discordant_pair_rate`` (= p_broke + p_recovered).
@@ -145,13 +145,13 @@ def mcnemar_sample_size(
     z_alpha = scipy_stats.norm.ppf(1 - alpha / 2)
     z_power = scipy_stats.norm.ppf(power)
 
-    if method == "connor":
+    if method == SampleSizeMethod.CONNOR:
         sample_size = (
             (z_alpha * numpy.sqrt(discordant_pair_rate)
              + z_power * numpy.sqrt(discordant_pair_rate - detectable_difference ** 2)) ** 2
             / detectable_difference ** 2
         )
-    elif method == "simple":
+    elif method == SampleSizeMethod.SIMPLE:
         sample_size = (
             (z_alpha + z_power) ** 2 * discordant_pair_rate / detectable_difference ** 2
         )
@@ -181,6 +181,14 @@ class ConfidenceInterval:
     high: float
     method: str
     resamples: int
+
+
+# ``ConfidenceInterval.method`` when even the percentile bootstrap fails (a
+# fully degenerate cell — every item has the same outcome); the interval
+# collapses to the point estimate with zero resamples, per the pre-registered
+# contingency in bootstrap_confidence_interval_paired's docstring.
+DEGENERATE_BOOTSTRAP_METHOD_LABEL = "degenerate"
+DEGENERATE_BOOTSTRAP_RESAMPLE_COUNT = 0
 
 
 _PAIRED_STATISTICS = {
@@ -246,10 +254,15 @@ def bootstrap_confidence_interval_paired(
             high = float(result.confidence_interval.high)
             if numpy.isfinite(low) and numpy.isfinite(high):
                 return ConfidenceInterval(point_estimate, low, high, method, resamples)
-        except Exception:
+        except ValueError:
+            # scipy raises ValueError when BCa's acceleration/bias-correction
+            # is undefined for degenerate data (see the docstring's
+            # degenerate-distribution guard) — expected, try the next method.
             continue
 
-    return ConfidenceInterval(point_estimate, point_estimate, point_estimate, "degenerate", 0)
+    return ConfidenceInterval(
+        point_estimate, point_estimate, point_estimate,
+        DEGENERATE_BOOTSTRAP_METHOD_LABEL, DEGENERATE_BOOTSTRAP_RESAMPLE_COUNT)
 
 
 # ---------------------------------------------------------------------------

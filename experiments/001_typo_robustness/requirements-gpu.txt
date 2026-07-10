@@ -1,35 +1,18 @@
-# GPU-side and ASR dependencies — needed only for the generation step
-# (running the models) and the ASR pre-processing step (TTS -> Whisper).
-# Install these on the USC cluster or Colab, on top of requirements.txt.
-#
-# Versions verified against PyPI in June 2026. See docs/PROVENANCE.md §8.
-#
-# COMPATIBILITY NOTE (important): as of June 2026 the newest vLLM (0.23.x) ships
-# on torch 2.11 / CUDA 13, and `transformers` has moved to the 5.x series, which
-# carries breaking changes from the 4.x line. For a reproducible research
-# pipeline we pin to a known-good, widely-deployed window rather than the
-# bleeding edge. The pins below are mutually compatible and run on the common
-# Colab/cluster CUDA 12.x images. Confirm against your cluster's CUDA at
-# pre-registration and bump together if needed (vLLM's CUDA policy follows
-# PyTorch's).
+# GPU-side dependencies — needed only for the generation step (running the
+# models). Install these on the USC cluster or Colab, on top of requirements.txt.
 
 # Inference engine. Continuous batching + prefix caching (design/07 §7.2).
 # 0.10.x is the last 0.10 series on the torch 2.x / CUDA 12.x line and is what
 # the Colab/cluster images of this era ship; pin exactly at pre-registration.
-vllm>=0.10,<0.11
+vllm==0.10.0
 
 # Model loading / tokenizers / fallback HF generation engine. Held in the 4.x
 # line for compatibility with the pinned vLLM above; the 5.x series is a
 # breaking change and is deliberately avoided here.
-transformers>=4.44,<5.0
-accelerate>=0.33
+transformers==4.53.2
+accelerate==1.14.0
+
 # bitsandbytes powers the nf4 stand-in in the HF fallback engine when AWQ wheels
 # are unavailable on a given machine (design/05 §5.4, HFEngine).
-bitsandbytes>=0.43
-
-# ASR arm (pre-processing step only; runs once, CPU or small GPU is fine).
-# openai-whisper latest release is dated 20250625 (verified June 2026).
-openai-whisper>=20240930
-edge-tts>=6.1             # neural TTS, single fixed voice en-US-AriaNeural
-soundfile>=0.12           # WAV read/write for the SNR noise-mixing step
+bitsandbytes==0.49.2
 

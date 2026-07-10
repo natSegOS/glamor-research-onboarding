@@ -2,9 +2,8 @@
 
 Runs entirely offline — no GPU, no HuggingFace access needed. Loads synthetic
 reasoning items and the built-in demo MCQ items, applies every condition in the
-config file (ASR conditions are skipped — they require pre-built audio items),
-and writes a self-contained HTML file showing the original and perturbed text
-side-by-side with changes highlighted.
+config file, and writes a self-contained HTML file showing the original and
+perturbed text side-by-side with changes highlighted.
 
 Usage:
 
@@ -31,8 +30,8 @@ from pathlib import Path
 # Make src/ importable when run as `python tools/preview_perturbations.py`.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from enums import ConditionSource, SemanticClass
-from pipeline.experiment import ExperimentConfiguration, load_task_items
+from enums import SemanticClass
+from pipeline.experiment import DatasetConfig, ExperimentConfiguration, load_task_items
 from perturbation.engine import damerau_levenshtein_distance
 from perturbation import PerturbationError
 import regimes
@@ -129,9 +128,9 @@ def _build_condition_rows(
 # ---------------------------------------------------------------------------
 
 _REGIME_BADGE = {
-    "A": '<span class="badge bg-warning text-dark">Regime A — nonword typo</span>',
-    "B": '<span class="badge bg-info text-dark">Regime B — real-word shift</span>',
-    "C": '<span class="badge bg-secondary">Regime C — meaning change</span>',
+    str(SemanticClass.A): '<span class="badge bg-warning text-dark">Regime A — nonword typo</span>',
+    str(SemanticClass.B): '<span class="badge bg-info text-dark">Regime B — real-word shift</span>',
+    str(SemanticClass.C): '<span class="badge bg-secondary">Regime C — meaning change</span>',
 }
 
 
@@ -214,15 +213,8 @@ def _condition_card_html(condition, rows: list[dict], index: int) -> str:
 
 
 def _build_html(condition_cards: list[str], config_path: str,
-                item_count: int, seed: int, skipped_conditions: list[str]) -> str:
+                item_count: int, seed: int) -> str:
     cards_html = "\n".join(condition_cards)
-
-    skipped_note = ""
-    if skipped_conditions:
-        names = ", ".join(f"<code>{c}</code>" for c in skipped_conditions)
-        skipped_note = (
-            f'<div class="alert alert-secondary mb-3">'
-            f'<strong>Skipped (ASR — requires pre-built audio items):</strong> {names}</div>')
 
     return f"""<!doctype html>
 <html lang="en">
@@ -266,7 +258,6 @@ def _build_html(condition_cards: list[str], config_path: str,
     </p>
   </div>
 
-  {skipped_note}
   {cards_html}
 
 </div>
@@ -309,35 +300,26 @@ def main() -> None:
 
     print(f"loading config:    {args.config}")
     configuration = ExperimentConfiguration.from_yaml(args.config)
-    configuration.reasoning_item_count = args.items
-    configuration.multiple_choice_item_count = args.items
     configuration.seed = args.seed
+    # Force offline mode: override the config's dataset list with the synthetic
+    # generator and the built-in demo MCQ, so this tool works before
+    # build_task_items.py has been run (the main PI review use case).
+    configuration.datasets = [
+        DatasetConfig(key="gsm_symbolic_synthetic", item_count=args.items),
+        DatasetConfig(key="mcq_demo"),
+    ]
 
     print("loading word list ...")
     wordlist = regimes.load_wordlist(args.dictionary)
     is_word = regimes.make_is_word(wordlist)
-
-    # Force offline mode: synthetic reasoning + built-in demo MCQ.
-    # This makes the script work before build_task_items.py has been run,
-    # which is the main use case (PI review before the GPU sweep).
-    from enums import ReasoningSource
-    configuration.reasoning_source = ReasoningSource.SYNTHETIC
-    configuration.multiple_choice_items_path = None
-    configuration.asr_items_path = None
 
     print(f"generating {args.items} items per task type (offline synthetic) ...")
     task_items = load_task_items(configuration)
     print(f"  {len(task_items)} total items")
 
     condition_cards: list[str] = []
-    skipped: list[str] = []
 
     for index, condition in enumerate(configuration.conditions):
-        if condition.source == ConditionSource.ASR:
-            skipped.append(condition.name)
-            print(f"  skip (ASR): {condition.name}")
-            continue
-
         print(f"  building: {condition.name} ...")
         rows = _build_condition_rows(condition, task_items, is_word, args.seed)
         condition_cards.append(
@@ -350,7 +332,6 @@ def main() -> None:
         config_path=str(args.config),
         item_count=args.items,
         seed=args.seed,
-        skipped_conditions=skipped,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

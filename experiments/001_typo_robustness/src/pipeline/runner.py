@@ -1,20 +1,16 @@
 """The idempotent, resumable generation runner.
 
-Provenance
-----------
 The unit of work is one (model, task, condition-cell) shard. Every generation
 row is keyed by a deterministic ID computed from (model revision, task id,
 perturbation state vector, seed, is_clean); before generating, the runner skips
 IDs already present on disk, so a killed session loses at most the in-flight
 batch and shards are embarrassingly parallel across GPUs (design/07 §7.7).
 
-Chat templates
---------------
-The runner applies the engine's chat template to every prompt before
-generation, when the engine exposes ``apply_chat_template``. This guarantees the
-template is applied uniformly to clean and perturbed prompts alike and cannot be
-forgotten by a caller (design/05 §5.7). The DeterministicDummyEngine has no chat
-template, so dummy runs see the raw prompt — which is correct, since the dummy
+The runner applies the model's chat template to every prompt before generation
+when the engine exposes ``apply_chat_template``. This guarantees the template
+is applied uniformly to clean and perturbed prompts alike and cannot be
+forgotten by a caller (design/05 §5.7). The DeterministicDummyEngine has no
+chat template, so dummy runs see the raw prompt — correct, since the dummy
 answers by exact prompt lookup.
 """
 
@@ -26,21 +22,43 @@ import time
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Iterator, Optional, Sequence
 
-from enums import Precision, Decoding
+from enums import (
+    Decoding, FinishReason, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES)
+from inference.engines import StreamedGeneration
 import scoring
 
 
-SCHEMA_VERSION = "1.0"
+# 1.1: generation_elapsed_seconds (cumulative time-since-shard-start, a timing
+# bug) replaced by request_wall_seconds; output_token_count and finish_reason
+# added; per-shard throughput statistics recorded in the manifest.
+SCHEMA_VERSION = "1.1"
+
+_ROW_ID_HASH_HEX_LENGTH = 24
+_MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
+_MANIFEST_SHARD_STATISTICS_KEY = "shard_statistics"
+
+# DeterministicDummyEngine's revision id — a fixed, recognisable sentinel
+# (never a real HuggingFace revision SHA) so a generation row's provenance
+# makes it obvious the row came from the GPU-free dummy engine, not a model.
+DUMMY_ENGINE_REVISION = "dummy-engine-0"
 
 
-def deterministic_row_id(model_revision: str, task_id: str,
-                         perturbation_state_vector: dict, seed: int, is_clean: bool) -> str:
-    """A stable 24-hex-character row ID, the hash of everything that defines a
-    unique generation (design/07 §7.7). Two rows collide if and only if they
-    would re-run the identical generation, which is exactly when we want to skip
-    the second one."""
+def deterministic_row_id(
+        model_revision: str,
+        task_id: str,
+        perturbation_state_vector: dict,
+        seed: int,
+        is_clean: bool,
+) -> str:
+    """A stable 24-hex-character row ID, the SHA-256 hash of everything that
+    defines a unique generation (design/07 §7.7).
+
+    Two rows share an ID if and only if they would produce the identical
+    generation, which is exactly when the second should be skipped.
+    """
+
     payload = json.dumps(
         {
             "model_revision": model_revision,
@@ -54,13 +72,15 @@ def deterministic_row_id(model_revision: str, task_id: str,
         },
         sort_keys=True,
     )
-    return hashlib.sha256(payload.encode()).hexdigest()[:24]
+    return hashlib.sha256(payload.encode()).hexdigest()[:_ROW_ID_HASH_HEX_LENGTH]
 
 
 @dataclass
 class GenerationRequest:
     """One prompt to run, carrying everything the canonical output schema needs
-    (design/08 §8.4)."""
+    (design/08 §8.4).
+    """
+
     task_id: str
     task_family: str
     prompt: str
@@ -71,89 +91,195 @@ class GenerationRequest:
 
     clean_prompt: str = ""
     edit_script: list = field(default_factory=list)
-    extra_fields: dict = field(default_factory=dict)   # token metrics, ASR fields, etc.
+    extra_fields: dict = field(default_factory=dict)
 
 
 class DeterministicDummyEngine:
-    """A GPU-free fake engine for full pipeline tests. ``answer_function`` maps a
-    prompt string to a generation string; the default echoes '#### 0'. Has no
-    chat template, so the runner sends it the raw prompt — appropriate, since the
-    dummy answers by exact prompt lookup."""
+    """A GPU-free deterministic engine for full pipeline tests.
 
-    revision = "dummy-engine-0"
+    ``answer_function`` maps a prompt string to a generation string; the
+    default echoes ``'#### 0'``. Has no chat template, so the runner sends it
+    the raw prompt — appropriate, since the dummy answers by exact prompt
+    lookup.
+    """
 
-    def __init__(self, answer_function: Optional[Callable[[str], str]] = None):
+    revision = DUMMY_ENGINE_REVISION
+
+    def __init__(
+            self,
+            answer_function: Optional[Callable[[str], str]] = None,
+    ) -> None:
+
         self.answer_function = answer_function or (lambda prompt: "#### 0")
 
-    def generate(self, prompts: Sequence[str], max_new_tokens: int) -> list[str]:
+    def generate(
+            self,
+            prompts: Sequence[str],
+            max_new_tokens: int,
+    ) -> list[str]:
+
         return [self.answer_function(prompt) for prompt in prompts]
+
+    def generate_streaming(
+            self,
+            prompts: Sequence[str],
+            max_new_tokens: int,
+    ) -> Iterator[StreamedGeneration]:
+        """Mirrors ``VllmEngine.generate_streaming``'s ``StreamedGeneration``
+        yield contract so ``run_shard`` can drive either engine identically.
+        Nothing here is actually concurrent (there is no GPU to schedule), so
+        this just yields every result in order — sufficient for exercising
+        ``run_shard``'s incremental-write and resume behaviour in tests.
+        Token counts are whitespace-word counts, good enough for tests.
+        """
+        for index, prompt in enumerate(prompts):
+            text = self.answer_function(prompt)
+            yield StreamedGeneration(
+                prompt_index=index,
+                text=text,
+                output_token_count=len(text.split()),
+                finish_reason=FinishReason.STOPPED,
+                request_wall_seconds=0.0,
+            )
 
 
 class ShardManifest:
-    """A per-run record of which shards have completed, so a resumed run skips
-    finished shards entirely (design/07 §7.7)."""
+    """A per-run record of which shards have completed, plus each completed
+    shard's throughput statistics.
 
-    def __init__(self, path: Path):
-        self.path = Path(path)
+    A resumed run loads this file and skips every shard already listed,
+    so progress is never lost across session restarts (design/07 §7.7).
+    The statistics (wall seconds, output tokens, tokens/sec) are what the
+    main-study compute budget is sized from (design/07 §7.5) — the per-row
+    request_wall_seconds includes scheduler queue time and must not be summed.
+    """
+
+    def __init__(self, manifest_path: Path) -> None:
+
+        self.manifest_path = Path(manifest_path)
         self.completed_shard_ids: set[str] = set()
-        if self.path.exists():
-            stored = json.loads(self.path.read_text())
-            self.completed_shard_ids = set(stored.get("completed_shards", []))
+        self.shard_statistics: dict[str, dict] = {}
+
+        if self.manifest_path.exists():
+            stored_data = json.loads(self.manifest_path.read_text())
+            # A manifest from a different schema version describes a different
+            # row format; trusting its completed_shards would silently skip
+            # regenerating every row (this happened: a committed 1.0 manifest
+            # made a fresh clone generate nothing).
+            if stored_data.get("schema") == SCHEMA_VERSION:
+                self.completed_shard_ids = set(
+                    stored_data.get(_MANIFEST_COMPLETED_SHARDS_KEY, []))
+                self.shard_statistics = stored_data.get(
+                    _MANIFEST_SHARD_STATISTICS_KEY, {})
+            else:
+                print(f"[runner] ignoring manifest {self.manifest_path} with "
+                      f"stale schema {stored_data.get('schema')!r} "
+                      f"(current: {SCHEMA_VERSION!r})")
 
     def is_shard_complete(self, shard_id: str) -> bool:
         return shard_id in self.completed_shard_ids
 
-    def mark_shard_complete(self, shard_id: str) -> None:
+    def mark_shard_complete(
+            self, shard_id: str, statistics: Optional[dict] = None) -> None:
+
         self.completed_shard_ids.add(shard_id)
-        self.path.write_text(json.dumps(
-            {"schema": SCHEMA_VERSION, "completed_shards": sorted(self.completed_shard_ids)},
-            indent=1))
+        if statistics is not None:
+            self.shard_statistics[shard_id] = statistics
+        self.manifest_path.write_text(
+            json.dumps(
+                {
+                    "schema": SCHEMA_VERSION,
+                    _MANIFEST_COMPLETED_SHARDS_KEY: sorted(
+                        self.completed_shard_ids),
+                    _MANIFEST_SHARD_STATISTICS_KEY: self.shard_statistics,
+                },
+                indent=1,
+            )
+        )
 
 
 def _existing_row_ids(output_path: Path) -> set[str]:
-    """The set of row IDs already written to an output file, for resume-skip."""
+    """Return the set of row IDs already written to ``output_path``.
+
+    Used at resume-time to skip rows that were written before the session
+    died, so we never double-write a row.
+    """
+
     if not output_path.exists():
         return set()
-    row_ids: set[str] = set()
+
+    already_written_ids: set[str] = set()
+
     for line in output_path.read_text().splitlines():
         if not line.strip():
             continue
         try:
-            row_ids.add(json.loads(line)["row_id"])
+            already_written_ids.add(json.loads(line)["row_id"])
         except (json.JSONDecodeError, KeyError):
             continue
-    return row_ids
+
+    return already_written_ids
 
 
-def _apply_chat_template_if_available(engine, prompt: str) -> str:
-    """Apply the engine's chat template if it has one; otherwise return the
-    prompt unchanged (the dummy engine path)."""
+def _apply_chat_template_if_available(engine: object, prompt: str) -> str:
+    """Apply the engine's chat template if it exposes one; return the prompt
+    unchanged for engines that do not (e.g. DeterministicDummyEngine).
+    """
+
     if hasattr(engine, "apply_chat_template"):
-        return engine.apply_chat_template(prompt)
+        return engine.apply_chat_template(prompt)  # type: ignore[union-attr]
     return prompt
 
 
 def run_shard(
         shard_id: str,
         requests: Sequence[GenerationRequest],
-        engine,
+        engine: object,
         output_path: Path,
         manifest: ShardManifest,
         model_id: str,
         model_revision: str,
         quantization_method: Precision = Precision.FP16,
         max_new_tokens: int = 512,
-        flush_every: int = 500,
         decoding: Decoding = Decoding.GREEDY,
         git_commit: str = "unpinned",
+        progress_callback: Optional[Callable[[int], None]] = None,
+        linguistic_pipeline: Optional[object] = None,
 ) -> int:
-    """Run one shard idempotently and return the number of NEW rows written.
+    """Run one shard idempotently and return the number of new rows written.
 
-    Prompts are submitted in request order; callers group clean and perturbed
-    families together and sort by length upstream so prefix caching is maximally
-    effective (design/07 §7.8). The chat template is applied here, once, to every
-    prompt.
+    Requests are submitted in the order given; callers group clean and
+    perturbed families together and sort by prompt length so prefix caching is
+    maximally effective (design/07 §7.8). The chat template is applied here,
+    once, to every prompt.
+
+    Every request already on disk (by ``row_id``) is skipped before
+    generation even starts, so re-running this function — after a crash, or
+    as one of several parallel workers each handed a partition of the same
+    request list (design/07 §7.7) — never regenerates or duplicates a row.
+
+    Rows are written and flushed to ``output_path`` as soon as each individual
+    request finishes decoding (``engine.generate_streaming``), not after a
+    fixed-size batch completes. A killed process therefore loses at most the
+    handful of requests actually in flight at that moment, never an entire
+    batch — and, since vLLM's own continuous-batching scheduler (not a
+    batch-size parameter here) decides how many requests run concurrently,
+    this is also never slower than batching would have been.
+
+    ``progress_callback``, when provided, is called with ``1`` after every
+    row is written.
+
+    ``linguistic_pipeline``, when provided, is a loaded spaCy model passed from
+    the run script (loaded once at startup).  When present, the full four-way
+    parse-status classifier is used inline (VALID/UNPARSEABLE/CLARIFICATION/
+    REFUSAL).  When absent, the structural two-way classifier is used as a
+    fallback.  Scoring is always inline; there is no separate post-generation
+    scoring step.
+
+    Dual-accounting rule: CLARIFICATION and REFUSAL always force is_correct=0,
+    even if the extractor finds a number elsewhere in the text (Workstream 5).
     """
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -162,77 +288,129 @@ def run_shard(
 
     already_written_row_ids = _existing_row_ids(output_path)
 
-    pending: list[tuple[str, GenerationRequest]] = []
+    pending_requests: list[tuple[str, GenerationRequest]] = []
+
     for request in requests:
         row_id = deterministic_row_id(
-            model_revision, request.task_id,
-            request.perturbation_state_vector, request.seed, request.is_clean)
+            model_revision,
+            request.task_id,
+            request.perturbation_state_vector,
+            request.seed,
+            request.is_clean,
+        )
         if row_id not in already_written_row_ids:
-            pending.append((row_id, request))
+            pending_requests.append((row_id, request))
 
-    rows_written = 0
+    if not pending_requests:
+        manifest.mark_shard_complete(shard_id)
+        return 0
+
+    chat_templated_prompts = [
+        _apply_chat_template_if_available(engine, request.prompt)
+        for _row_id, request in pending_requests
+    ]
+
+    new_rows_written = 0
+    total_output_tokens = 0
+    shard_start_time = time.perf_counter()
+
     with output_path.open("a") as output_file:
-        for batch_start in range(0, len(pending), flush_every):
-            batch = pending[batch_start:batch_start + flush_every]
+        for generation in engine.generate_streaming(  # type: ignore[union-attr]
+                chat_templated_prompts, max_new_tokens):
+            row_id, request = pending_requests[generation.prompt_index]
+            generated_text = generation.text
+            total_output_tokens += generation.output_token_count
 
-            templated_prompts = [
-                _apply_chat_template_if_available(engine, request.prompt)
-                for _row_id, request in batch
-            ]
+            row = {
+                "schema": SCHEMA_VERSION,
+                "row_id": row_id,
+                "shard_id": shard_id,
+                "git_commit": git_commit,
+                "timestamp": time.time(),
+                "model_id": model_id,
+                "model_revision": model_revision,
+                "quantization_method": quantization_method,
+                "task_family": request.task_family,
+                "task_id": request.task_id,
+                "is_clean": request.is_clean,
+                "clean_prompt": (
+                    request.clean_prompt
+                    or (request.prompt if request.is_clean else "")
+                ),
+                "perturbed_prompt": "" if request.is_clean else request.prompt,
+                "expected_answer": request.gold_answer,
+                "seed": request.seed,
+                "edit_script": [
+                    edit.to_dict() if hasattr(edit, "to_dict") else edit
+                    for edit in request.edit_script
+                ],
+                "decoding": decoding,
+                "max_new_tokens": max_new_tokens,
+                "model_output": generated_text,
+                "output_token_count": generation.output_token_count,
+                "finish_reason": generation.finish_reason,
+                "request_wall_seconds": round(generation.request_wall_seconds, 3),
+                **{
+                    f"r_{key}": value
+                    for key, value in
+                    request.perturbation_state_vector.items()
+                },
+                **request.extra_fields,
+            }
 
-            batch_start_time = time.perf_counter()
-            generations = engine.generate(templated_prompts, max_new_tokens)
-            batch_elapsed_seconds = time.perf_counter() - batch_start_time
-
-            for (row_id, request), generation in zip(batch, generations):
-                score_result = scoring.score(
-                    generation, request.gold_answer, request.task_family)
-
-                row = {
-                    "schema": SCHEMA_VERSION,
-                    "row_id": row_id,
-                    "shard_id": shard_id,
-                    "git_commit": git_commit,
-                    "timestamp": time.time(),
-                    "model_id": model_id,
-                    "model_revision": model_revision,
-                    "quantization_method": quantization_method,
-                    "task_family": request.task_family,
-                    "task_id": request.task_id,
-                    "is_clean": request.is_clean,
-                    "clean_prompt": request.clean_prompt or (request.prompt if request.is_clean else ""),
-                    "perturbed_prompt": "" if request.is_clean else request.prompt,
-                    "expected_answer": request.gold_answer,
-                    "seed": request.seed,
-                    "edit_script": [
-                        edit.to_dict() if hasattr(edit, "to_dict") else edit
-                        for edit in request.edit_script
-                    ],
-                    "decoding": decoding,
-                    "max_new_tokens": max_new_tokens,
-                    "model_output": generation,
-                    "parsed_answer": score_result.parsed_answer,
-                    "is_correct": score_result.is_correct,
-                    "parse_status": score_result.parse_status,
-                    "batch_latency_seconds": round(batch_elapsed_seconds, 3),
-                    **{f"r_{key}": value
-                       for key, value in request.perturbation_state_vector.items()},
-                    **request.extra_fields,
-                }
-                output_file.write(json.dumps(row) + "\n")
-                rows_written += 1
-
+            # Inline scoring — always on (Workstream 5). Uses the full
+            # four-way linguistic classifier when a spaCy pipeline is
+            # provided; falls back to structural two-way otherwise.
+            score_result = scoring.score(
+                generated_text, request.gold_answer, request.task_family)
+            if (linguistic_pipeline is not None
+                    and score_result.parse_status == ParseStatus.UNPARSEABLE):
+                # Upgrade UNPARSEABLE to CLARIFICATION/REFUSAL when the
+                # linguistic classifier finds evidence.
+                refined = scoring.classify_parse_status_with_linguistic_pipeline(
+                    generated_text, score_result.parsed_answer, linguistic_pipeline)
+                score_result = scoring.ScoreResult(
+                    score_result.parsed_answer,
+                    score_result.is_correct,
+                    refined,
+                    score_result.extraction_tier,
+                )
+            # Dual-accounting: interactional failures always score 0.
+            final_is_correct = (
+                0 if score_result.parse_status in INTERACTIONAL_FAILURE_STATUSES
+                else score_result.is_correct)
+            row["parsed_answer"] = score_result.parsed_answer
+            row["is_correct"] = final_is_correct
+            row["parse_status"] = score_result.parse_status
+            row["extraction_tier"] = score_result.extraction_tier
+            output_file.write(json.dumps(row) + "\n")
             output_file.flush()
+            new_rows_written += 1
 
-    manifest.mark_shard_complete(shard_id)
-    return rows_written
+            if progress_callback is not None:
+                progress_callback(1)
+
+    shard_wall_seconds = time.perf_counter() - shard_start_time
+    manifest.mark_shard_complete(shard_id, statistics={
+        "rows": new_rows_written,
+        "wall_seconds": round(shard_wall_seconds, 1),
+        "output_tokens": total_output_tokens,
+        "output_tokens_per_second": round(
+            total_output_tokens / shard_wall_seconds, 1) if shard_wall_seconds else 0.0,
+        "rows_per_hour": round(
+            new_rows_written / shard_wall_seconds * 3600, 1) if shard_wall_seconds else 0.0,
+    })
+    return new_rows_written
 
 
 def load_generation_rows(paths: Sequence[Path]) -> list[dict]:
     """Load all generation rows from one or more JSONL files."""
+
     rows: list[dict] = []
+
     for path in paths:
         for line in Path(path).read_text().splitlines():
             if line.strip():
                 rows.append(json.loads(line))
+
     return rows

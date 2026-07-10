@@ -1,0 +1,45 @@
+{
+  "converged": true,
+  "method": "quasi_newton_cascade",
+  "log_likelihood": -1528.905840409181,
+  "n_observations": 6663,
+  "n_items": 400,
+  "n_models": 1,
+  "fixed_effects": {
+    "is_perturbed": {
+      "coef": -0.03265745382957292,
+      "or": 0.9678700429883029,
+      "p": 0.04450765303196694
+    },
+    "token_inflation_excess": {
+      "coef": -0.3108166951674392,
+      "or": 0.7328481981742514,
+      "p": 0.10428521024386689
+    },
+    "word_length_before": {
+      "coef": 0.002321125145315556,
+      "or": 1.0023238210417198,
+      "p": 0.06878728812223346
+    },
+    "subword_count_change": {
+      "coef": 0.00029093783194577774,
+      "or": 1.0002909801584614,
+      "p": 0.9516740166727656
+    },
+    "is_perturbed Var": {
+      "coef": 0.03278640227243861,
+      "or": 1.0333297987704744,
+      "p": 0.8411035991355488
+    }
+  },
+  "random_effects_variance": {
+    "Group": {
+      "Group": 0.16560136895370953,
+      "is_perturbed": -0.020262291716694084
+    },
+    "is_perturbed": {
+      "Group": -0.020262291716694084,
+      "is_perturbed": 0.002479209628253856
+    }
+  }
+}
