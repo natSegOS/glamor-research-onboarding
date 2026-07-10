@@ -35,9 +35,15 @@ _COUNTERFACTUAL_MINIMUM_WORD_LENGTH = 4
 
 # Stop enumerating counterfactual candidates once both strata hold this many
 # distinct variants: the choice pool is already diverse, and full enumeration
-# of 48 seeds x 4 operations per word per budget dominated request-building
+# of every seed x 4 operations per word per budget dominated request-building
 # time on the Colab pilot.
 _SUFFICIENT_VARIANTS_PER_STRATUM = 8
+
+# Give up after this many candidates while a stratum is still EMPTY — under a
+# 128k vocabulary ~75% of words never yield a High variant, and continuing to
+# search for them doubles build time for zero pairs. The wider search (the
+# candidate_count default) only continues for words with both strata started.
+_GIVE_UP_CANDIDATES_WHILE_STRATUM_EMPTY = 48
 
 
 def count_tokens(tokenizer, text: str) -> int:
@@ -122,6 +128,9 @@ def build_fragmentation_matched_pair(
     for candidate_index in range(candidate_count):
         low_count, high_count = stratum_counts()
         if min(low_count, high_count) >= _SUFFICIENT_VARIANTS_PER_STRATUM:
+            break
+        if (candidate_index >= _GIVE_UP_CANDIDATES_WHILE_STRATUM_EMPTY
+                and min(low_count, high_count) == 0):
             break
         candidate_seed = derived_seed(seed, "counterfactual", word, edit_budget, candidate_index)
 
