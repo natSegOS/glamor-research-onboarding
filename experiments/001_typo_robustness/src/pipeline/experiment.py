@@ -519,57 +519,76 @@ def _build_fragmentation_matched_requests(
         item_seed = regimes.derived_seed(
             seed, condition.name, task_item.task_id, edit_budget)
 
-        pair = tokenization.build_fragmentation_matched_pair(
-            tokenizer, target_word, edit_budget, item_seed, is_word)
-        if pair is None:
-            exclusion_records.append(exclusion(
-                edit_budget, f"no Low/High fragmentation pair for word {target_word!r}"))
-            continue
+        # A PerturbationError on one item must become an exclusion record,
+        # never propagate — an uncaught worker exception aborts the entire
+        # parallel build (this killed the first Llama pilot run).
+        try:
+            pair = tokenization.build_fragmentation_matched_pair(
+                tokenizer, target_word, edit_budget, item_seed, is_word)
+            if pair is None:
+                exclusion_records.append(exclusion(
+                    edit_budget, f"no Low/High fragmentation pair for word {target_word!r}"))
+                continue
 
-        stratum_variants = (
-            (FragmentationStratum.LOW, pair.low_fragmentation_variant,
-             pair.low_fragmentation_subword_change),
-            (FragmentationStratum.HIGH, pair.high_fragmentation_variant,
-             pair.high_fragmentation_subword_change),
-        )
-        for stratum, variant, subword_change in stratum_variants:
-            perturbed_content, character_index = tokenization.apply_counterfactual_variant(
-                content_text, target_word, variant)
-            requests.append(GenerationRequest(
-                task_id=task_item.task_id,
-                task_family=task_item.task_family,
-                prompt=clean_prompt.replace(content_text, perturbed_content),
-                gold_answer=gold_answer,
-                is_clean=False,
-                perturbation_state_vector={
-                    "semantic_class": SemanticClass.A,
-                    "operation": condition.operation,
-                    "selection_policy": SelectionPolicy.FRAGMENTATION_MATCHED,
-                    "scope": condition.scope,
-                    "edit_budget": edit_budget,
-                    "fragmentation_stratum": stratum,
-                },
-                seed=item_seed,
-                clean_prompt=clean_prompt,
-                edit_script=[Edit(
-                    operation=Operation.WORD_SUBSTITUTE, index=character_index,
-                    before=target_word, after=variant,
-                    word_before=target_word, word_after=variant)],
-                extra_fields={
-                    "token_inflation_ratio": tokenization.token_inflation_ratio(
-                        tokenizer, content_text, perturbed_content),
-                    # Only the target word changed, so whole-text DL equals the
-                    # builder-verified word-level DL — exactly the budget.
-                    "measured_dl": edit_budget,
-                    "subword_count_change": subword_change,
-                    "fragmentation_stratum": stratum,
-                    "word_length_before": len(target_word),
-                    "edited_word": variant,
-                    "counterfactual_target_word": target_word,
-                },
-            ))
+            stratum_requests = [
+                _fragmentation_stratum_request(
+                    task_item, condition, gold_answer, clean_prompt, tokenizer,
+                    content_text, target_word, edit_budget, item_seed,
+                    stratum, variant, subword_change)
+                for stratum, variant, subword_change in (
+                    (FragmentationStratum.LOW, pair.low_fragmentation_variant,
+                     pair.low_fragmentation_subword_change),
+                    (FragmentationStratum.HIGH, pair.high_fragmentation_variant,
+                     pair.high_fragmentation_subword_change),
+                )
+            ]
+        except PerturbationError as error:
+            exclusion_records.append(exclusion(edit_budget, str(error)))
+            continue
+        requests.extend(stratum_requests)
 
     return requests, exclusion_records
+
+
+def _fragmentation_stratum_request(
+        task_item, condition, gold_answer, clean_prompt, tokenizer,
+        content_text, target_word, edit_budget, item_seed,
+        stratum, variant, subword_change) -> GenerationRequest:
+    perturbed_content, character_index = tokenization.apply_counterfactual_variant(
+        content_text, target_word, variant)
+    return GenerationRequest(
+        task_id=task_item.task_id,
+        task_family=task_item.task_family,
+        prompt=clean_prompt.replace(content_text, perturbed_content),
+        gold_answer=gold_answer,
+        is_clean=False,
+        perturbation_state_vector={
+            "semantic_class": SemanticClass.A,
+            "operation": condition.operation,
+            "selection_policy": SelectionPolicy.FRAGMENTATION_MATCHED,
+            "scope": condition.scope,
+            "edit_budget": edit_budget,
+            "fragmentation_stratum": stratum,
+        },
+        seed=item_seed,
+        clean_prompt=clean_prompt,
+        edit_script=[Edit(
+            operation=Operation.WORD_SUBSTITUTE, index=character_index,
+            before=target_word, after=variant,
+            word_before=target_word, word_after=variant)],
+        extra_fields={
+            "token_inflation_ratio": tokenization.token_inflation_ratio(
+                tokenizer, content_text, perturbed_content),
+            # Only the target word changed, so whole-text DL equals the
+            # builder-verified word-level DL — exactly the budget.
+            "measured_dl": edit_budget,
+            "subword_count_change": subword_change,
+            "fragmentation_stratum": stratum,
+            "word_length_before": len(target_word),
+            "edited_word": variant,
+            "counterfactual_target_word": target_word,
+        },
+    )
 
 
 def _construct_regime_c(task_item, item_seed):

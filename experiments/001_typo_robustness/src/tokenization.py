@@ -33,6 +33,12 @@ from regimes import derived_seed, make_regime_a_nonword_typo
 
 _COUNTERFACTUAL_MINIMUM_WORD_LENGTH = 4
 
+# Stop enumerating counterfactual candidates once both strata hold this many
+# distinct variants: the choice pool is already diverse, and full enumeration
+# of 48 seeds x 4 operations per word per budget dominated request-building
+# time on the Colab pilot.
+_SUFFICIENT_VARIANTS_PER_STRATUM = 8
+
 
 def count_tokens(tokenizer, text: str) -> int:
     return len(tokenizer.encode(text))
@@ -104,7 +110,15 @@ def build_fragmentation_matched_pair(
     """
     subword_change_by_variant: dict[str, int] = {}
 
+    def stratum_counts() -> tuple[int, int]:
+        changes = subword_change_by_variant.values()
+        return (sum(change <= 0 for change in changes),
+                sum(change >= 1 for change in changes))
+
     for candidate_index in range(candidate_count):
+        low_count, high_count = stratum_counts()
+        if min(low_count, high_count) >= _SUFFICIENT_VARIANTS_PER_STRATUM:
+            break
         candidate_seed = derived_seed(seed, "counterfactual", word, edit_budget, candidate_index)
 
         for operation in (Operation.SUBSTITUTE, Operation.INSERT, Operation.DELETE, Operation.TRANSPOSE):
@@ -164,8 +178,16 @@ def select_counterfactual_target_word(
 def apply_counterfactual_variant(
         content_text: str, word: str, variant: str) -> tuple[str, int]:
     """Replace the first whole-word occurrence of ``word`` with ``variant``.
-    Returns the perturbed text and the character index of the replacement."""
-    match = re.search(rf"\b{re.escape(word)}\b", content_text)
+    Returns the perturbed text and the character index of the replacement.
+
+    Boundaries are letter-based lookarounds, not ``\\b``: the target word comes
+    from the ``[A-Za-z]+`` tokenizer above, which extracts "Python" out of
+    "Python3" — where ``\\bPython\\b`` would NOT match (digits are word
+    characters to ``\\b``). The two functions must share one notion of "word"
+    (this exact mismatch crashed the first Llama pilot on an MMLU item).
+    """
+    match = re.search(
+        rf"(?<![A-Za-z]){re.escape(word)}(?![A-Za-z])", content_text)
     if match is None:
         raise PerturbationError(
             f"counterfactual target word {word!r} not found as a whole word")

@@ -226,3 +226,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Experiment run outputs (regenerated per run; a committed manifest would make
+# a fresh clone skip generation entirely)
+experiments/*/results/

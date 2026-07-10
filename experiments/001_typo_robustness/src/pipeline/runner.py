@@ -162,10 +162,19 @@ class ShardManifest:
 
         if self.manifest_path.exists():
             stored_data = json.loads(self.manifest_path.read_text())
-            self.completed_shard_ids = set(
-                stored_data.get(_MANIFEST_COMPLETED_SHARDS_KEY, []))
-            self.shard_statistics = stored_data.get(
-                _MANIFEST_SHARD_STATISTICS_KEY, {})
+            # A manifest from a different schema version describes a different
+            # row format; trusting its completed_shards would silently skip
+            # regenerating every row (this happened: a committed 1.0 manifest
+            # made a fresh clone generate nothing).
+            if stored_data.get("schema") == SCHEMA_VERSION:
+                self.completed_shard_ids = set(
+                    stored_data.get(_MANIFEST_COMPLETED_SHARDS_KEY, []))
+                self.shard_statistics = stored_data.get(
+                    _MANIFEST_SHARD_STATISTICS_KEY, {})
+            else:
+                print(f"[runner] ignoring manifest {self.manifest_path} with "
+                      f"stale schema {stored_data.get('schema')!r} "
+                      f"(current: {SCHEMA_VERSION!r})")
 
     def is_shard_complete(self, shard_id: str) -> bool:
         return shard_id in self.completed_shard_ids

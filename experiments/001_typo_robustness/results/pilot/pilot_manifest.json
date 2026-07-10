@@ -1,7 +1,0 @@
-{
- "schema": "1.0",
- "completed_shards": [
-  "pilot_multiple_choice",
-  "pilot_reasoning"
- ]
-}
