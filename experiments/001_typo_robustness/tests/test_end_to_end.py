@@ -337,6 +337,17 @@ class TestCounterfactualTargetWord:
         assert perturbed == "count the caat and the cat again"
         assert index == 10
 
+    def test_selection_and_application_agree_on_letter_digit_boundaries(self):
+        # 'Python' extracted from 'Python3' by the [A-Za-z]+ tokenizer must be
+        # replaceable — \b-style boundaries fail between 'n' and '3' and
+        # crashed the first Llama pilot on an MMLU item.
+        content = "code written in Python3 syntax"
+        is_python_a_word = lambda token: token.lower() == "python"
+        target = tm.select_counterfactual_target_word(content, is_python_a_word)
+        assert target == "Python"
+        perturbed, _ = tm.apply_counterfactual_variant(content, target, "Pythxn")
+        assert perturbed == "code written in Pythxn3 syntax"
+
 
 class _RareLetterTokenizer:
     """Fragments a word by its rare-letter count, so keyboard substitutions can
