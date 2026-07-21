@@ -104,23 +104,32 @@ The design suite lives in `design/` (13 documents, start at
 
 ### 2.2 Keyboard-neighbor substitution policy
 
-- **Paper:** MulTypo (Liu et al., 2025, arXiv:2510.09536). Their four operations
-  are replacement (a single character replaced by a neighboring key on the
-  language-specific keyboard layout), insertion (an extra character inserted
-  immediately after a correctly typed character, simulating simultaneous
-  keystrokes), deletion, and transposition. Our keyboard policy mirrors this
-  exactly for English QWERTY.
+- **Paper:** MulTypo (Zhao et al., 2025, arXiv:2510.09536 — "MulTypo" is the
+  method/package name; the first-listed author is Zhao, with Liu as co-equal
+  contributor). Their four operations are replacement (a single character
+  replaced by a neighboring key on the language-specific keyboard layout),
+  insertion (an extra character inserted immediately after a correctly typed
+  character, simulating simultaneous keystrokes), deletion, and transposition.
+  Our keyboard policy follows their **replacement** operation for English
+  QWERTY. Two deliberate fidelity differences, stated for accuracy: our
+  transposition does not enforce MulTypo's different-hands constraint (their
+  §3.1), and our insertion draws from the anchor's keyboard neighbors plus the
+  anchor itself (double-typing) rather than a uniformly random character.
+  MulTypo's exclusion of numeric tokens from typo insertion (their §3.1) is
+  convergent support for our protected numeric spans.
 - **Code:** `perturbation/keyboard.py` builds the QWERTY adjacency graph;
   `perturbation/engine.py` uses it for the `keyboard_neighbor` policy. Design:
   `03` §3.5.
 
 ### 2.3 Informative-word targeting
 
-- **Papers:** Adv-BERT (Pruthi et al., 2019, "Combating Adversarial
-  Misspellings") showed perturbing informative words hurts more; R2ATA (Gan et
-  al., 2024, arXiv:2411.05345) targets query-important words. Our
-  `informative_word` policy restricts edits to task key terms. Design: `03` §3.5,
-  `01` §1.6 (H4).
+- **Papers:** Adv-BERT (Sun et al., 2020, arXiv:2003.04985) showed typos on
+  informative words damage more than typos on random words; R2ATA (Gan et al.,
+  2024, arXiv:2411.05345) targets query-important words via gradient saliency;
+  Pruthi et al. (ACL 2019, P19-1561) supply the swap/drop/keyboard/add attack
+  primitive family and the ScRNN word-recognition defense used as a mitigation
+  baseline in design/10. Our `informative_word` policy restricts edits to task
+  key terms. Design: `03` §3.5, `01` §1.6 (H4).
 
 ### 2.4 Severity ladder (edit budgets k ∈ {1, 2, 4}, exploratory 8)
 
@@ -130,9 +139,19 @@ The design suite lives in `design/` (13 documents, start at
 
 ---
 
-## 3. ASR (automatic speech recognition) arm
+## 3. ASR (automatic speech recognition) arm — DEFERRED
 
-### 3.1 Whisper as the ASR engine
+> **Status (design/00 §0.5, 2026-07-09):** the TTS+Whisper pipeline was judged
+> too unrealistic and the ASR arm was deferred before any of it was implemented
+> — there is **no ASR code in `src/`** and no audio dependency in the
+> requirements files. This section is preserved as the design record for the
+> deferred acoustic branch; the text-side proxies that DID ship (Regime B
+> phonetic homophones via the CMU Pronouncing Dictionary, filler-word
+> insertion, whitespace merge) are documented in §2 and design/03. A
+> replacement approach (LLM verbalization, following the HIVE voice arm) is
+> pending a decision with the PI.
+
+### 3.1 Whisper as the ASR engine (deferred design)
 
 - **Paper:** Radford et al., 2022, "Robust Speech Recognition via Large-Scale
   Weak Supervision" (Whisper). arXiv:2212.04356.
@@ -150,8 +169,9 @@ The design suite lives in `design/` (13 documents, start at
     temperature 0 can occasionally cause repetition/hallucination on a hard
     segment. We therefore compute a transcription-quality flag (gzip compression
     ratio and a repetition check) and exclude flagged items from the dataset
-    rather than letting a degenerate transcription enter silently. See
-    `asr.py::flag_degenerate_transcription`.
+    rather than letting a degenerate transcription enter silently. (Planned as
+    `asr_generate.py` / a degenerate-transcription flag; never implemented —
+    the arm was deferred first.)
 - **Pinned model:** Whisper `large-v3`. The package version is pinned in
   `requirements.txt`.
 
@@ -249,13 +269,20 @@ backed by a paper in the references:
 | Choice                          | Source                                                            |
 |---------------------------------|-------------------------------------------------------------------|
 | Paired item-level design        | Card et al. 2020 (power); Dror et al. 2018 (test selection)       |
-| McNemar mid-p exact / asymptotic| Standard for paired binary; exact when discordant pairs are few   |
-| Sample-size formula             | Connor 1987, Biometrics 43:207-211 (McNemar power)                |
-| BCa paired bootstrap, B=10,000  | Bestgen 2022; the 10,000-resample convention in NLP evaluation    |
-| Mixed-effects logistic model    | Barr et al. 2013 (maximal random effects); Baayen et al. 2008;    |
-|                                 | the "keep it maximal" debate is acknowledged with a fallback ladder|
-| Multiplicity (BH-FDR, q=0.05)   | Benjamini-Hochberg; Dror et al. replicability analysis            |
-| Mediation analysis              | Imai et al. (general approach to causal mediation)                |
+| McNemar mid-p exact / asymptotic| Fagerland, Lydersen & Laake 2013 (mid-p over exact conditional);  |
+|                                 | exact variant when discordant pairs < 25                          |
+| Sample-size formula             | Connor 1987, Biometrics 43:207-211 (eq. 3, exact); the design     |
+|                                 | tables use the simple planning approximation (see REFERENCES.md)  |
+| BCa paired bootstrap, B=10,000  | Efron 1987 (the BCa method); Bestgen 2022 (bootstrap CIs for      |
+|                                 | system differences; B=10,000 in its case studies)                 |
+| Mixed-effects logistic model    | Jaeger 2008 (logit over linear on binary outcomes); Barr et al.   |
+| (lme4 glmer, logit link)        | 2013 (maximal random effects + convergence ladder); Baayen 2008   |
+| Multiplicity                    | Benjamini & Hochberg 1995 (FDR q=0.05, exploratory grid); Holm    |
+|                                 | 1979 (within-model primary family); Dror et al. 2017 (NLP framing)|
+| Mediation analysis              | Imai, Keele & Tingley 2010 — the general algorithm (counterfactual|
+|                                 | prediction under a logistic outcome model), binary-outcome-valid  |
+| Inter-annotator agreement       | Fleiss 1971 (κ, many raters); Cohen 1960 (pairwise κ); Landis &   |
+|                                 | Koch 1977 (interpretation scale)                                  |
 
 The headline contribution (tokenization-fragmentation mediation) connects to
 Chai et al. 2024 ("Tokenization Falling Short", arXiv:2406.11687), which shows
@@ -277,15 +304,19 @@ causal statement. Design: `01` §1.4, `06` §6.8.
 
 ## 8. Package and dependency versions
 
-All pins and the reason for each pin are in `requirements.txt` (CPU/analysis
-core), `requirements-gpu.txt` (GPU/ASR), and `requirements-annotation.txt`
-(spaCy Stage 0 annotation), with version provenance verified June 2026. The
-split exists because the statistics, perturbation, and analysis layers run on
-any machine with NumPy/SciPy, while only the generation and ASR steps need the
-heavy GPU/audio stack; `requirements-annotation.txt` is broken out separately
-from the CPU/analysis core because `spacy-transformers` pins `transformers<4.53.3`,
-which caps `huggingface-hub<1.0` — incompatible with `requirements.txt`'s
-`huggingface-hub>=1.2.0` (needed there for gradio 6.19.0 compatibility). Install
-`requirements-gpu.txt` and `requirements-annotation.txt` together in one `pip`
-invocation (see `colab_driver.ipynb` Cell 2) so the resolver picks a `transformers`
-version satisfying both, rather than as two independent installs.
+All pins and the reason for each pin are in `requirements.txt` (CPU core:
+statistics, perturbation, spaCy annotation, analysis — the offline test suite
+runs with these alone), `requirements-gpu.txt` (the vLLM generation stack),
+and `requirements-stats.txt` (the R bridge for the confirmatory GLMM:
+`pymer4`/`rpy2`, which additionally require a system R installation with
+`lme4` — present on Colab and the analysis machine, deliberately NOT part of
+the offline-test core; `src/analysis/models.py` degrades to the fixed-effects
+logistic GLM rung with a loud `method` label when the bridge is absent).
+Version provenance verified June–July 2026. The split exists because
+everything except generation runs on any machine with NumPy/SciPy; only the
+generation step needs a GPU. spaCy and `spacy-transformers` live in
+`requirements.txt` — there is no separate annotation requirements file.
+`huggingface_hub` is pinned explicitly in `requirements.txt` because the
+revision-pinning path imports it directly (`tools/pin_revisions.py`,
+`src/inference/roster.py`, `tools/build_task_items.py`) — it must not float as
+a transitive dependency of `datasets`/`transformers`.

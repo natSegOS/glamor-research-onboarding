@@ -61,7 +61,7 @@ We audit a 385-item-per-regime sample, not every perturbation. To justify applyi
 
 ## 9.7 The LLM-as-judge boundary (locked)
 
-LLM-as-judge is **not used for the primary endpoint or for regime assignment.** Documented reliability problems make it unsuitable as a final arbiter: position/verbosity/self-enhancement bias (Shi et al. 2024, "Judging the Judges," arXiv:2406.07791, 15 judges over ~150k evaluations), broad judgment biases (Chen et al., EMNLP 2024, aclanthology 2024.emnlp-main.474), and domain-expert disagreement (Szymanski et al., ACM IUI 2025 / arXiv:2410.20266: SMEs agreed with LLM judges only ~64% in mental health and ~68% in dietetics).
+LLM-as-judge is **not used for the primary endpoint or for regime assignment.** Documented reliability problems make it unsuitable as a final arbiter: position, verbosity, and self-enhancement biases (Zheng et al. 2023, "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena," arXiv:2306.05685); position bias confirmed systematically at scale (Shi et al. 2024, "Judging the Judges: A Systematic Study of Position Bias in LLM-as-a-Judge," arXiv:2406.07791 — 15 judges, >150,000 evaluation instances); broad judgment biases shared by human and LLM judges (Chen et al., EMNLP 2024, aclanthology 2024.emnlp-main.474); and domain-expert disagreement (Szymanski et al., ACM IUI 2025 / arXiv:2410.20266: SMEs agreed with LLM judges only ~64% in mental health and ~68% in dietetics).
 
 Where an LLM judge *may* assist (clearly labeled, never final):
 - **Pre-screening** the audit pool to prioritize likely-ambiguous items for human attention.

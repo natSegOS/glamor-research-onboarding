@@ -84,7 +84,7 @@ Powers of two are chosen to estimate the *shape* of the response curve efficient
 s ∈ {keyboard-neighbor, uniform, informative-word-targeted, real-word, whitespace}
 ```
 
-- **keyboard-neighbor (primary):** substitutions/insertions drawn from a QWERTY adjacency graph; this is the ecologically realistic policy and is exactly what MulTypo implements and validated against human typists (Liu et al., 2025). It is the default for Modules 1–3.
+- **keyboard-neighbor (primary):** substitutions/insertions drawn from a QWERTY adjacency graph; this is the ecologically realistic policy and follows what MulTypo implements and validated for human naturalness (>=15 raters per language; Zhao et al., 2025). It is the default for Modules 1–3.
 - **uniform (ablation):** edits drawn uniformly over the alphabet; the "arbitrary noise" baseline, included so we can show human-realistic noise differs from arbitrary noise (a question MulTypo motivates).
 - **informative-word-targeted:** edits placed on the most task-relevant content words (operationalized in Document 04 §4.6 via task-specific key-term lists, not gradient saliency, to keep it model-agnostic and reproducible). This is the upper-bound-of-damage policy and tests H4, extending Pruthi et al. (2019).
 - **real-word:** edit sequences whose result is a valid word — used to *construct* Regime B items, drawing on the WikiTypos and GitHub Typo Corpus distributions.

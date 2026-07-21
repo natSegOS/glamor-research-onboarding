@@ -90,7 +90,7 @@ Guarantees the engine must satisfy (each is a unit test, §8.7):
 5. **Reconstructibility:** applying `edit_script` to `text` reproduces `perturbed_text` exactly, and the script records, per edit, `(op, word_index, char_index, before, after, old_char, new_char)`.
 6. **Policy fidelity:** keyboard_neighbor draws only from the QWERTY adjacency graph; uniform draws from the full alphabet; real_word guarantees a valid-word result; informative_word/answer_critical only edit positions inside `key_terms`.
 
-**Upstream library:** the keyboard-neighbor policy wraps **MulTypo** (Liu et al., 2025; github.com/cisnlp/multypo), which provides validated keyboard-layout-based typo generation; we cite it and use its adjacency model rather than reinventing one. We add the state-vector logging, edit-script reconstruction, protected-span handling, and regime hooks around it. The uniform policy uses the simpler Pruthi et al. (2019) swap/drop/key/add primitives for the ablation baseline.
+**Upstream library:** the keyboard-neighbor policy wraps **MulTypo** (Zhao et al., 2025; github.com/cisnlp/multypo), which provides validated keyboard-layout-based typo generation; we cite it and use its adjacency model rather than reinventing one. We add the state-vector logging, edit-script reconstruction, protected-span handling, and regime hooks around it. The uniform policy uses the simpler Pruthi et al. (2019) swap/drop/key/add primitives for the ablation baseline.
 
 ## 8.4 The canonical output schema (one row per generation)
 
