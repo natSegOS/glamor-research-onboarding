@@ -262,8 +262,14 @@ def _fit_glmer(formula_text: str, data) -> _GlmerFit:
     from rpy2.robjects.conversion import localconverter
 
     glmer_fit_function = robjects.r(_GLMER_FIT_FUNCTION_R_SOURCE)
+    # Convert the frame INSIDE the pandas converter but make the call OUTSIDE
+    # it: with the pandas converter active for the call, rpy2 converts the
+    # returned named R list to a NamedList (no .rx2), which broke every rung
+    # on the first Colab run. Under the default converter the result stays a
+    # ListVector.
     with localconverter(robjects.default_converter + pandas2ri.converter):
-        r_result = glmer_fit_function(formula_text, data)
+        r_model_frame = robjects.conversion.get_conversion().py2rpy(data)
+    r_result = glmer_fit_function(formula_text, r_model_frame)
 
     def field_of(name: str):
         return list(r_result.rx2(name))
@@ -661,9 +667,13 @@ def _fit_quasibayes_mediation(data, mediator_column: str) -> dict:
     from rpy2.robjects.conversion import localconverter
 
     mediation_function = robjects.r(_MEDIATION_QUASIBAYES_R_SOURCE)
+    # Same conversion discipline as _fit_glmer: frame converted inside the
+    # pandas converter, call made under the default converter so the returned
+    # named list keeps .rx2.
     with localconverter(robjects.default_converter + pandas2ri.converter):
-        r_result = mediation_function(
-            data, mediator_column, _QUASIBAYES_PARAMETER_DRAWS, _QUASIBAYES_SEED)
+        r_model_frame = robjects.conversion.get_conversion().py2rpy(data)
+    r_result = mediation_function(
+        r_model_frame, mediator_column, _QUASIBAYES_PARAMETER_DRAWS, _QUASIBAYES_SEED)
 
     def field_of(name: str):
         return list(r_result.rx2(name))
