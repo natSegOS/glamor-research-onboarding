@@ -239,7 +239,11 @@ def main() -> None:
 
         print(f"running judge on {len(sample)} items (cache: {cache_path}) ...")
         with ProgressBar(total=len(sample), description="judging") as progress:
-            decisions = run_judge_on_sample(
+            # Aligned 1:1 with `sample` (None = skipped Regime-C MCQ) — the
+            # alignment contract of run_judge_on_sample is what makes this
+            # zip safe; a decision list that silently dropped skipped rows
+            # attached judge labels to the WRONG audit items.
+            aligned_decisions = run_judge_on_sample(
                 engine=engine,
                 judge_revision=specification.revision,
                 sample_rows=sample,
@@ -247,22 +251,24 @@ def main() -> None:
                 progress_callback=progress.advance,
             )
 
-        for row, decision in zip(sample, decisions):
+        for row, decision in zip(sample, aligned_decisions):
             audit_items.append(_build_audit_item(row, judge_decision=decision))
 
+        judged = [decision for decision in aligned_decisions if decision is not None]
         agreement_count = sum(
-            1 for decision in decisions
+            1 for decision in judged
             if decision.agrees_with_claimed_regime() is True
         )
         disagreement_count = sum(
-            1 for decision in decisions
+            1 for decision in judged
             if decision.agrees_with_claimed_regime() is False
         )
-        parse_failed_count = sum(1 for decision in decisions if decision.parse_failed)
+        parse_failed_count = sum(1 for decision in judged if decision.parse_failed)
         print(
             f"  judge agrees: {agreement_count}, "
             f"disagrees: {disagreement_count}, "
-            f"parse failed: {parse_failed_count}"
+            f"parse failed: {parse_failed_count}, "
+            f"skipped (Regime-C MCQ, structurally guaranteed): {len(sample) - len(judged)}"
         )
 
     output = {

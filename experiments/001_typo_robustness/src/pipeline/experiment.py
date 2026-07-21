@@ -363,7 +363,11 @@ def _build_requests_for_item_slice(
     for task_item in task_items_slice:
         clean_prompt = task_item.full_prompt
         # ReasoningItem carries gold_answer; MultipleChoiceItem carries gold_letter.
-        gold_answer = getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
+        # `is None` (not truthiness): a legitimate reasoning gold of 0 is falsy
+        # and an `or`-chain would silently discard it.
+        gold_answer = getattr(task_item, "gold_answer", None)
+        if gold_answer is None:
+            gold_answer = getattr(task_item, "gold_letter", None)
 
         if task_item.task_id not in seen_clean_task_ids:
             slice_requests.append(GenerationRequest(
@@ -418,10 +422,16 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
             if condition.semantic_class == SemanticClass.C:
                 perturbed_content, edits, regime_metadata = _construct_regime_c(
                     task_item, item_seed)
-                effective_gold = (
-                    regime_metadata.get("new_gold_letter")
-                    or regime_metadata.get("new_gold_answer")
-                    or gold_answer)
+                # First non-None wins; truthiness would misroute a recomputed
+                # gold of 0 (the operand swap permits new_gold == 0) back to
+                # the OLD gold and score the row against the wrong answer.
+                effective_gold = next(
+                    (candidate_gold for candidate_gold in (
+                        regime_metadata.get("new_gold_letter"),
+                        regime_metadata.get("new_gold_answer"),
+                        gold_answer)
+                     if candidate_gold is not None),
+                    None)
             else:
                 perturbed_content, edits, regime_metadata = _construct_regime(
                     condition, content_text, edit_budget, item_seed, is_word,
@@ -523,9 +533,10 @@ def _build_fragmentation_matched_requests(
     exclusion_records: list[dict] = []
 
     content_text = content_text_of(task_item)
-    target_word = tokenization.select_counterfactual_target_word(content_text, is_word)
+    candidate_words = tokenization.ordered_counterfactual_candidate_words(
+        content_text, is_word)
 
-    def exclusion(edit_budget: int, failure_reason: str) -> dict:
+    def exclusion(edit_budget: int, failure_reason: str, word: str = "") -> dict:
         return build_exclusion_record(
             task_id=task_item.task_id,
             condition_name=condition.name,
@@ -533,11 +544,11 @@ def _build_fragmentation_matched_requests(
             failure_stage="perturbation",
             failure_reason=failure_reason,
             item_length=len(content_text),
-            word_before=target_word or "",
+            word_before=word,
         )
 
-    if target_word is None:
-        return [], [exclusion(edit_budget, "no eligible counterfactual target word")
+    if not candidate_words:
+        return [], [exclusion(edit_budget, "no eligible counterfactual candidate words")
                     for edit_budget in condition.edit_budgets]
 
     for edit_budget in condition.edit_budgets:
@@ -548,11 +559,23 @@ def _build_fragmentation_matched_requests(
         # never propagate — an uncaught worker exception aborts the entire
         # parallel build (this killed the first Llama pilot run).
         try:
-            pair = tokenization.build_fragmentation_matched_pair(
-                tokenizer, target_word, edit_budget, item_seed, is_word)
+            # Pair-aware target selection: try candidates best-first until one
+            # admits a Low/High pair, instead of committing to the single
+            # longest word (which excluded 607/740 pilot items).
+            pair = None
+            target_word = ""
+            for candidate_word in candidate_words:
+                pair = tokenization.build_fragmentation_matched_pair(
+                    tokenizer, candidate_word, edit_budget, item_seed, is_word)
+                if pair is not None:
+                    target_word = candidate_word
+                    break
             if pair is None:
                 exclusion_records.append(exclusion(
-                    edit_budget, f"no Low/High fragmentation pair for word {target_word!r}"))
+                    edit_budget,
+                    f"no Low/High fragmentation pair among "
+                    f"{len(candidate_words)} candidate words",
+                    word=candidate_words[0]))
                 continue
 
             stratum_requests = [
@@ -678,7 +701,9 @@ def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
         return regimes.make_regime_b_real_word_shift(
             content_text, item_seed, is_word,
             scope=condition.scope, scope_spans=scope_spans,
-            edit_budget=edit_budget, **regime_b_kwargs)
+            edit_budget=edit_budget,
+            phonetic_only=(condition.selection_policy == SelectionPolicy.HOMOPHONE),
+            **regime_b_kwargs)
 
     raise PerturbationError(
         f"_construct_regime only handles Regime A and B; "

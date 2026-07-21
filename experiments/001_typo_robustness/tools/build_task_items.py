@@ -84,7 +84,11 @@ from tasks import (
 
 
 _DEFAULT_OUTPUT_DIRECTORY  = Path("data/items")
-_DEFAULT_GSM_CONFIG        = "main"
+# "p1", not "main": the Apple template repository ships templates/p1 and
+# templates/p2 only — with "main" the template-enrichment step finds nothing,
+# no question_annotated fields are written, and Regime C reasoning silently
+# produces zero items. p1 is what the pilot used (data/items/PROVENANCE.json).
+_DEFAULT_GSM_CONFIG        = "p1"
 _DEFAULT_ITEMS_PER_DATASET = 600
 _DEFAULT_SAMPLING_SEED     = 1729
 
@@ -277,7 +281,9 @@ def parse_arguments() -> argparse.Namespace:
         "--gsm-config",
         default=_DEFAULT_GSM_CONFIG,
         choices=["main", "p1", "p2"],
-        help="GSM-Symbolic difficulty variant: main (default), p1 (+1 clause), p2 (+2 clauses)",
+        help="GSM-Symbolic difficulty variant: p1 (+1 clause, default — has Apple "
+             "templates, enabling Regime C), p2 (+2 clauses), main (no templates "
+             "published: Regime C reasoning will be empty)",
     )
     parser.add_argument(
         "--reasoning-items",

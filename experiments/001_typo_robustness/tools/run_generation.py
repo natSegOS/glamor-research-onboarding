@@ -135,10 +135,28 @@ def _measure_max_model_length(configuration, specification, is_word) -> int:
         configuration.max_new_tokens_multiple_choice)
 
 
+# The exact output suffixes the pipeline writes (pipeline/experiment.py):
+# {run_id}[_wIofN]_generations.jsonl, _manifest.json, plus the worker-0
+# {run_id}_exclusions.jsonl. --fresh deletes ONLY these; a bare "{run_id}*"
+# glob also matched unrelated files sharing the prefix (e.g. a user's
+# pilot_results.zip next to run_id "pilot") and deleted them.
+_RUN_OUTPUT_GLOB_PATTERNS = (
+    "{run_id}_generations.jsonl",
+    "{run_id}_manifest.json",
+    "{run_id}_exclusions.jsonl",
+    "{run_id}_w*of*_generations.jsonl",
+    "{run_id}_w*of*_manifest.json",
+)
+
+
 def _delete_previous_run_outputs(output_directory: Path, run_id: str) -> list[Path]:
-    """Delete every prior output of ``run_id`` (generations, exclusions,
-    manifest — all workers' files) so --fresh regenerates from nothing."""
-    deleted = sorted(Path(output_directory).glob(f"{run_id}*"))
+    """Delete every prior pipeline output of ``run_id`` (generations,
+    exclusions, manifest — all workers' files) so --fresh regenerates from
+    nothing. Only the known output suffixes are touched."""
+    deleted = sorted(
+        path
+        for pattern in _RUN_OUTPUT_GLOB_PATTERNS
+        for path in Path(output_directory).glob(pattern.format(run_id=run_id)))
     for path in deleted:
         path.unlink()
     return deleted

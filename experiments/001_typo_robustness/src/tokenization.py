@@ -176,16 +176,31 @@ def build_fragmentation_matched_pair(
     )
 
 
-def select_counterfactual_target_word(
-        content_text: str, is_word: Callable[[str], bool]) -> Optional[str]:
-    """The counterfactual's target word: the longest real word of at least
-    the minimum length (first occurrence wins ties). The longest word has the
-    richest keyboard-plausible variant space, maximizing the chance both
-    fragmentation strata are populated. Deterministic — no seed."""
-    eligible_words = [
-        word for word in re.findall(r"[A-Za-z]+", content_text)
-        if len(word) >= _COUNTERFACTUAL_MINIMUM_WORD_LENGTH and is_word(word)]
-    return max(eligible_words, key=len) if eligible_words else None
+# How many candidate words the pair-aware search tries before giving up on an
+# item. Bounds request-building time; under a 128k vocabulary ~75% of words
+# yield no High variant, so trying several candidates (rather than committing
+# to the single longest word, the pre-2026-07-20 rule) is what lifted Method
+# A's item yield — the pilot excluded 607 of 740 items for "no Low/High pair"
+# under the single-candidate rule.
+MAXIMUM_COUNTERFACTUAL_CANDIDATE_WORDS = 8
+
+
+def ordered_counterfactual_candidate_words(
+        content_text: str, is_word: Callable[[str], bool]) -> list[str]:
+    """Candidate target words for the counterfactual, best-first: longest
+    words first (richest keyboard-plausible variant space, so the best chance
+    both fragmentation strata are populated), first occurrence breaking ties.
+    Deterministic — no seed. The caller tries each in order until one admits
+    a Low/High pair, capped at MAXIMUM_COUNTERFACTUAL_CANDIDATE_WORDS."""
+    eligible_words = []
+    for word in re.findall(r"[A-Za-z]+", content_text):
+        if (len(word) >= _COUNTERFACTUAL_MINIMUM_WORD_LENGTH
+                and is_word(word) and word not in eligible_words):
+            eligible_words.append(word)
+    by_length_then_first_occurrence = sorted(
+        eligible_words,
+        key=lambda word: (-len(word), eligible_words.index(word)))
+    return by_length_then_first_occurrence[:MAXIMUM_COUNTERFACTUAL_CANDIDATE_WORDS]
 
 
 def apply_counterfactual_variant(

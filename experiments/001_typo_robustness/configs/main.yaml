@@ -52,8 +52,16 @@ primary_edit_budget_mcq: 4
 # Perturbation conditions (design/11 §11.4): keyboard-neighbor operations
 # across all four Damerau-Levenshtein primitives (substitute, delete, insert,
 # transpose), scope variations (anywhere / content / answer_critical), discourse-
-# particle filler-word insertion (Regime A), real-word shift (Regime B), and
-# deterministic meaning-change (Regime C). ASR is out of scope for this study.
+# particle filler-word insertion (Regime A), whitespace merge (Regime A,
+# "missed-space"), real-word shift (Regime B), homophone-only shift (Regime B),
+# and deterministic meaning-change (Regime C).
+#
+# The ACOUSTIC ASR arm is deferred (design/00 §0.5, 2026-07-09); its text-side
+# proxies run here: homophone-only Regime B (acoustic confusions), filler
+# insertion (disfluency), missed-space (transcription boundary error). Each
+# crosswalks to a HIVE voice-arm operator (fillers ↔ HIVE #9, homophone ↔
+# HIVE #13, missed-space ↔ HIVE #21), giving the cross-modal comparison a
+# shared operator axis.
 conditions:
   - name: regime_a_substitute_keyboard
     semantic_class: A
@@ -91,10 +99,25 @@ conditions:
   # set {"uh", "um", "like", "so"} at eligible inter-word positions. Intent is
   # preserved definitionally (discourse particles carry no propositional content);
   # no rejection sampling is needed. Novel relative to prior typo-robustness work.
+  # H1b lever (design/06 §6.8): fillers inflate token count WITHOUT fragmenting
+  # any word — contrasted against keyboard substitution in the mediation fits.
   - name: regime_a_filler
     semantic_class: A
     operation: insert
     selection_policy: filler_word
+    scope: anywhere
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  # Whitespace merge ("missed-space", exploratory): delete an inter-word space
+  # so two words fuse into one token ("a week" → "aweek"). The merged token
+  # goes through the standard Regime-A nonword rejection sampling (a merge
+  # that lands on a real word, e.g. "a part" → "apart", is resampled).
+  # Crosswalk: HIVE keyboard operator #21.
+  - name: regime_a_missed_space
+    semantic_class: A
+    operation: delete
+    selection_policy: whitespace
     scope: anywhere
     edit_budgets: [1, 2]
     source: synthetic
@@ -137,12 +160,25 @@ conditions:
     edit_budgets: [2, 3, 4]
     source: synthetic
 
+  # Homophone-only Regime B: candidate pool restricted to CMU exact homophones
+  # ("weather" → "whether") — the pure acoustic-confusion proxy. Items whose
+  # words carry no homophone are excluded via the sidecar (the honest yield
+  # record). Crosswalk: HIVE voice operator #13 (clean+homophone).
+  - name: regime_b_homophone
+    semantic_class: B
+    operation: substitute
+    selection_policy: homophone
+    scope: anywhere
+    edit_budgets: [1, 2]
+    source: synthetic
+
   # Regime C: deterministic meaning-change perturbations with computationally
   # verifiable gold answers (design/04 §4.7).
   #   MCQ items:       option-label permutation — gold tracked by content,
-  #                    not by letter (Ko et al. 2020; Pezeshkpour & Hruschka 2023).
+  #                    not by letter (Pezeshkpour & Hruschka 2023, arXiv:2308.11483).
   #   Reasoning items: operand swap on synthetic-template items only — new gold
-  #                    recomputed via the template answer function.
+  #                    recomputed via the template answer function
+  #                    (numeric-edit motivation: Xie et al. 2024, arXiv:2402.17916).
   # The operation/scope/selection_policy fields are unused for Regime C; the
   # dispatch is determined solely by item type inside experiment._construct_regime_c.
   - name: regime_c_meaning_changing
