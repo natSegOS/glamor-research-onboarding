@@ -171,6 +171,46 @@ def audit_sample_size(margin: float, confidence: float = 0.95) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Multiplicity control (design/06 §6.7) — both locked decisions of design/00
+# §0.4: Benjamini–Hochberg FDR across the exploratory cell grid, Holm within
+# a model's pre-registered primary family.
+# ---------------------------------------------------------------------------
+
+BENJAMINI_HOCHBERG_FDR_Q = 0.05
+HOLM_PRIMARY_FAMILY_ALPHA = 0.05
+
+
+def _adjusted_p_values_ignoring_nan(p_values: Sequence, method: str) -> list:
+    """statsmodels ``multipletests`` over the non-NaN entries, with NaN
+    positions preserved (a cell with no computable test must not consume a
+    share of the correction budget, nor crash it)."""
+    from statsmodels.stats.multitest import multipletests
+
+    values = [float(p) if p == p else float("nan") for p in p_values]  # NaN-safe copy
+    testable_indices = [index for index, p in enumerate(values) if p == p]
+    if not testable_indices:
+        return values
+    _rejected, corrected, _alpha_sidak, _alpha_bonferroni = multipletests(
+        [values[index] for index in testable_indices], method=method)
+    adjusted = list(values)
+    for index, corrected_p in zip(testable_indices, corrected):
+        adjusted[index] = float(corrected_p)
+    return adjusted
+
+
+def benjamini_hochberg_adjusted_p_values(p_values: Sequence) -> list:
+    """Benjamini & Hochberg (1995) step-up FDR adjustment; compare the result
+    against BENJAMINI_HOCHBERG_FDR_Q."""
+    return _adjusted_p_values_ignoring_nan(p_values, method="fdr_bh")
+
+
+def holm_adjusted_p_values(p_values: Sequence) -> list:
+    """Holm (1979) step-down adjustment for strong FWER control within a
+    model's pre-registered primary comparison family."""
+    return _adjusted_p_values_ignoring_nan(p_values, method="holm")
+
+
+# ---------------------------------------------------------------------------
 # BCa item-paired bootstrap confidence intervals (design/06 §6.5).
 # ---------------------------------------------------------------------------
 
