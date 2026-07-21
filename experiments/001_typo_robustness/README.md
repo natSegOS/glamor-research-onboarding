@@ -2,13 +2,13 @@
 
 Implementation of the design suite in `design/` (12 documents; start at `design/00_README_index.md`).
 
-**ASR arm: deferred** (design/00 §0.5, 2026-07-09). The TTS+Whisper pipeline was judged too unrealistic; a replacement approach is pending from the PI. Everything below is the keyboard-typo arm, which stands alone.
+**Acoustic ASR arm: deferred** (design/00 §0.5, 2026-07-09). The TTS+Whisper pipeline was judged too unrealistic; a replacement approach is pending from the PI. Its **text-side proxies run in this arm**: homophone-only Regime B (CMU acoustic confusions), filler-word insertion (disfluency), and whitespace merge ("missed-space") — each crosswalks to a HIVE voice-arm operator (design/00 §0.5, 2026-07-20 item 7).
 
-**Status (2026-07-10):** Stage-1 pilot complete on Llama-3.2-1B (results in `results/pilot/`, gate readout in `analysis/pilot/gates.json`, interactive report in `results/pilot/report.html`). Engineering is done; before the confirmatory main run: a few-shot prompting iteration (format compliance 0.61 vs 0.95 gate — the one failure) + ~30-min re-pilot, PI decisions on the low-A₀ anchor / GSM8K N=720 / Method A yield, then the Stage-2 human audit and the Stage-3 OSF pre-registration lock. Full detail: design/00 §0.5, 2026-07-10 entry.
+**Status (2026-07-20):** Stage-1 pilot v2 complete on Llama-3.2-1B — all gates pass (compliance 0.9825, results in `results/pilot/`, readout in `analysis/pilot/gates.json`, report in `results/pilot/report.html`) — followed by the pre-registration hardening pass: confirmatory statistics corrected to a true logistic GLMM (lme4 via rpy2) + Imai quasi-Bayesian mediation, multiplicity implemented, reference manifest rebuilt and mechanically verified (`tools/verify_references.py`), audit tooling bugs fixed, and the test suite refactored into 8 failure-class modules. Full decision log: design/00 §0.5, 2026-07-20 entry. Before the confirmatory run: PI sign-off on the four flagged decisions, Stage-2 human audit, Stage-3 OSF lock.
 
 ## What this is
 
-A matched-pair robustness study of controlled keyboard-adjacency typos, built around a tokenization-fragmentation **mediation** analysis (primary contribution: Method A fragmentation-matched counterfactual + Method B product-of-coefficients, design/06 §6.8), a quantization x noise interaction (secondary), and a three-regime selective-invariance audit (framing). Every numeric and procedural choice is justified in the design docs; the code is the executable form of that spec.
+A matched-pair robustness study of controlled keyboard-adjacency typos, built around a tokenization-fragmentation **mediation** analysis (primary contribution: Method B — Imai quasi-Bayesian mediation over mixed models — corroborated by the Method A fragmentation-matched counterfactual, design/06 §6.8), a quantization x noise interaction (secondary), and a three-regime selective-invariance audit (framing). Every numeric and procedural choice is justified in the design docs; the code is the executable form of that spec.
 
 ## Quickstart (no GPU needed)
 
@@ -47,5 +47,6 @@ python3 tools/benchmark_throughput.py --config configs/pilot.yaml --model llama_
 
 ## Dependencies
 
-Core: `numpy scipy pyyaml` (analysis), `matplotlib` (figures, optional), `statsmodels pandas` (mixed-effects + mediation).
-GPU side: `requirements-gpu.txt` (vLLM stack). Tests run offline with the core dependencies only.
+Core: `requirements.txt` (statistics, perturbation, annotation, analysis — the full offline test suite runs with these alone).
+GPU side: `requirements-gpu.txt` (vLLM stack).
+Confirmatory GLMM/mediation: `requirements-stats.txt` (rpy2 bridge to R's lme4; the analysis degrades to loudly-labeled pure-Python fallbacks without it — see `src/analysis/models.py`).
