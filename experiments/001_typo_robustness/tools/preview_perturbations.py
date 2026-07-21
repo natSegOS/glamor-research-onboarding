@@ -1,9 +1,11 @@
 """Generate an HTML preview of every perturbation condition for PI/auditor review.
 
-Runs entirely offline — no GPU, no HuggingFace access needed. Loads synthetic
-reasoning items and the built-in demo MCQ items, applies every condition in the
-config file, and writes a self-contained HTML file showing the original and
-perturbed text side-by-side with changes highlighted.
+Runs entirely offline — no GPU, no HuggingFace access needed. Loads the real
+task items named by the config's ``datasets:`` list when their JSONL files are
+present on disk (falling back to synthetic reasoning items plus the built-in
+demo MCQ items when they are not), applies every condition in the config file,
+and writes a self-contained HTML file showing the original and perturbed text
+side-by-side with changes highlighted.
 
 Usage:
 
@@ -98,6 +100,17 @@ def _build_condition_rows(
                         scope=condition.scope,
                         scope_spans=scope_spans,
                     )
+                elif condition.semantic_class == SemanticClass.C:
+                    # Same dispatch as pipeline.experiment._construct_regime_c:
+                    # MCQ → option permutation; templated reasoning → operand swap.
+                    if hasattr(item, "options"):
+                        perturbed_content, edits, metadata = (
+                            regimes.make_regime_c_mcq_option_permutation(item, item_seed))
+                    elif getattr(item, "supports_regime_c_operand_swap", False):
+                        perturbed_content, edits, metadata = (
+                            regimes.make_regime_c_reasoning_operand_swap(item, item_seed))
+                    else:
+                        continue
                 else:
                     continue
             except PerturbationError:
@@ -107,6 +120,13 @@ def _build_condition_rows(
             changed_words = sorted({
                 e.word_before for e in edits if e.word_before and e.word_after
             })
+
+            # Regime C changes the gold answer by construction; its builders
+            # report the change under letter (MCQ) or answer (reasoning) keys.
+            old_gold_answer = metadata.get(
+                "old_gold_letter", metadata.get("old_gold_answer"))
+            new_gold_answer = metadata.get(
+                "new_gold_letter", metadata.get("new_gold_answer"))
 
             rows.append({
                 "task_id": item.task_id,
@@ -118,6 +138,8 @@ def _build_condition_rows(
                 "diff_html": _inline_diff_html(content_text, perturbed_content),
                 "words_changed": ", ".join(changed_words) if changed_words else "—",
                 "edit_count": len(edits),
+                "gold_change": (f"{old_gold_answer} → {new_gold_answer}"
+                                if new_gold_answer is not None else None),
             })
 
     return rows
@@ -159,6 +181,9 @@ def _condition_card_html(condition, rows: list[dict], index: int) -> str:
         for row in rows:
             budget_badge = f'<span class="badge bg-secondary rounded-pill">k={row["budget"]}</span>'
             dl_badge = f'<span class="badge bg-light text-dark border">DL={row["dl_distance"]}</span>'
+            gold_badge = (
+                f'<span class="badge bg-danger">gold {html_module.escape(row["gold_change"])}</span>'
+                if row["gold_change"] else "")
             family_color = "primary" if "gsm" in row["task_family"] else "success"
             family_badge = (
                 f'<span class="badge bg-{family_color} rounded-pill">'
@@ -168,7 +193,7 @@ def _condition_card_html(condition, rows: list[dict], index: int) -> str:
               <tr>
                 <td class="align-top text-nowrap small text-muted">{html_module.escape(row["task_id"])}</td>
                 <td class="align-top">{family_badge}</td>
-                <td class="align-top">{budget_badge} {dl_badge}</td>
+                <td class="align-top">{budget_badge} {dl_badge} {gold_badge}</td>
                 <td class="align-top original-col font-monospace small"
                     style="white-space: pre-wrap; max-width:340px">{html_module.escape(row["original"])}</td>
                 <td class="align-top perturbed-col font-monospace small"
@@ -254,6 +279,7 @@ def _build_html(condition_cards: list[str], config_path: str,
     <p class="text-muted small">
       <span class="badge bg-warning text-dark">Regime A</span> nonword typo — intent preserved, answer should be unchanged.<br>
       <span class="badge bg-info text-dark">Regime B</span> real-word shift — different valid word, context recovers intent.<br>
+      <span class="badge bg-secondary">Regime C</span> meaning change — the gold answer changes by construction (old → new shown in red).<br>
       Changes: <del class="diff-del">deleted</del> &nbsp; <ins class="diff-ins">inserted</ins>
     </p>
   </div>
@@ -301,19 +327,35 @@ def main() -> None:
     print(f"loading config:    {args.config}")
     configuration = ExperimentConfiguration.from_yaml(args.config)
     configuration.seed = args.seed
-    # Force offline mode: override the config's dataset list with the synthetic
-    # generator and the built-in demo MCQ, so this tool works before
-    # build_task_items.py has been run (the main PI review use case).
-    configuration.datasets = [
-        DatasetConfig(key="gsm_symbolic_synthetic", item_count=args.items),
-        DatasetConfig(key="mcq_demo"),
+
+    # Preview the real items the pipeline would run whenever their JSONL files
+    # exist on disk, capped at --items per dataset; the synthetic generator and
+    # built-in demo MCQ are only the fallback for a checkout where
+    # build_task_items.py has not been run yet.
+    datasets_with_files_on_disk = [
+        dataset for dataset in configuration.datasets
+        if dataset.path and Path(dataset.path).exists()
     ]
+    if datasets_with_files_on_disk:
+        configuration.datasets = [
+            DatasetConfig(key=dataset.key, item_count=args.items, path=dataset.path)
+            for dataset in datasets_with_files_on_disk
+        ]
+        print("dataset mode:      REAL items — "
+              + ", ".join(dataset.path for dataset in datasets_with_files_on_disk))
+    else:
+        configuration.datasets = [
+            DatasetConfig(key="gsm_symbolic_synthetic", item_count=args.items),
+            DatasetConfig(key="mcq_demo"),
+        ]
+        print("dataset mode:      SYNTHETIC fallback — no configured dataset "
+              "path exists on disk")
 
     print("loading word list ...")
     wordlist = regimes.load_wordlist(args.dictionary)
     is_word = regimes.make_is_word(wordlist)
 
-    print(f"generating {args.items} items per task type (offline synthetic) ...")
+    print(f"loading up to {args.items} items per dataset ...")
     task_items = load_task_items(configuration)
     print(f"  {len(task_items)} total items")
 

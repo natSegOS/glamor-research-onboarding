@@ -47,6 +47,11 @@ from pipeline.runner import load_generation_rows
 
 _PAYLOAD_MARKER = "__PAYLOAD_JSON__"
 _GENERATED_AT_MARKER = "__GENERATED_AT__"
+_RUN_LABEL_MARKER = "__RUN_LABEL__"
+
+# Runner convention: generation files are named <run_id>_generations.jsonl, so
+# stripping the suffix from the first --generations stem recovers the run id.
+_GENERATIONS_FILE_STEM_SUFFIX = "_generations"
 
 # Fields carried per perturbed item into the drill-down, as a positional array
 # (object keys repeated 6,000+ times would double the payload). Order must
@@ -263,7 +268,9 @@ def main() -> None:
         arguments.analysis_directory, arguments.seed, arguments.bootstrap_resamples)
 
     print("building HTML ...")
+    run_label = arguments.generations[0].stem.removesuffix(_GENERATIONS_FILE_STEM_SUFFIX)
     page = (_PAGE_TEMPLATE
+            .replace(_RUN_LABEL_MARKER, run_label)
             .replace(_GENERATED_AT_MARKER, time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()))
             .replace(_PAYLOAD_MARKER, json.dumps(payload, separators=(",", ":"))
                      .replace("</", "<\\/")))
@@ -286,7 +293,7 @@ _PAGE_TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Exp 001 — Typo Robustness Pilot Report</title>
+<title>Experiment 001 — Typo Robustness — __RUN_LABEL__ report</title>
 <style>
 :root {
   --surface: #fcfcfb; --plane: #f9f9f7;
@@ -426,7 +433,7 @@ button.more {
 <body>
 <div id="tooltip" role="status"></div>
 <header>
-  <h1>Experiment 001 — Typo Robustness Pilot</h1>
+  <h1>Experiment 001 — Typo Robustness — __RUN_LABEL__ report</h1>
   <div class="sub" id="header-sub"></div>
 </header>
 <nav class="tabs" id="tabs"></nav>
@@ -920,19 +927,31 @@ function methodADumbbells(groups) {
     svg);
 }
 
+/* Fit keys are namespaced ("task_family:gsm8k", "h1b_policy:filler_word");
+   render them with a readable prefix instead of the raw namespace. */
+const FIT_KEY_PREFIX_LABELS = { "task_family:": "", "h1b_policy:": "H1b policy · " };
+function mediationFitLabel(name) {
+  for (const [prefix, label] of Object.entries(FIT_KEY_PREFIX_LABELS)) {
+    if (name.startsWith(prefix)) return label + name.slice(prefix.length);
+  }
+  return name;
+}
+
 function renderMediation(container) {
   const mediation = DATA.mediation;
   if (mediation) {
     const entries = Object.entries(mediation)
       .filter(([, block]) => block.indirect_effect != null)
       .map(([name, block]) => ({
-        name: name.replace("task_family:", ""),
+        name: mediationFitLabel(name),
         value: block.indirect_effect,
         low: (block.bootstrap_ci_indirect || [])[0],
         high: (block.bootstrap_ci_indirect || [])[1],
       }));
+    const estimators = [...new Set(Object.values(mediation)
+      .map(block => block.estimator).filter(Boolean))];
     container.append(el("div", { class: "card" },
-      el("h2", { text: "Method B — fragmentation indirect effect per task family" }),
+      el("h2", { text: "Statistical mediation (Method B) — indirect effect per task family" }),
       el("p", { class: "hint", text: "Product-of-coefficients (α·β) with by-item cluster-bootstrap 95% CI. "
         + "Negative = accuracy loss mediated by subword fragmentation. The pooled row is supplementary." }),
       forestPlot(entries),
@@ -941,14 +960,18 @@ function renderMediation(container) {
             "indirect", "total", "proportion mediated", "n"].map(
           head => el("th", { class: "nosort", text: head })))),
         el("tbody", {}, ...Object.entries(mediation).map(([name, block]) => el("tr", {},
-          el("td", { text: name.replace("task_family:", "") }),
+          el("td", { text: mediationFitLabel(name) }),
           el("td", { text: num(block.treatment_on_mediator_coef) }),
           el("td", { text: num(block.mediator_on_outcome_coef) }),
           el("td", { text: num(block.indirect_effect) }),
           el("td", { text: num(block.total_effect) }),
           el("td", { text: block.proportion_mediated != null ? num(block.proportion_mediated)
               : "withheld (" + (block.proportion_mediated_reason || "—") + ")" }),
-          el("td", { text: String(block.n_observations || "—") })))))));
+          el("td", { text: String(block.n_observations || "—") }))))),
+      estimators.length
+        ? el("p", { class: "mini-note", style: "margin-top:8px",
+                    text: "estimator: " + estimators.join(" · ") })
+        : null));
   } else {
     container.append(el("div", { class: "card" },
       el("h2", { text: "Method B mediation" }),
@@ -957,7 +980,7 @@ function renderMediation(container) {
 
   if (DATA.method_a && DATA.method_a.length) {
     container.append(el("div", { class: "card" },
-      el("h2", { text: "Method A — fragmentation-matched counterfactual (paired Low vs High)" }),
+      el("h2", { text: "Fragmentation-matched counterfactual (Method A)" }),
       el("p", { class: "hint", text: "Same word, same edit count, same position; only the tokenization "
         + "consequence differs. Restricted to items whose clean answer was correct. Left dot = accuracy on "
         + "the Low-fragmentation variant, right/darker = High. A leftward High dot means fragmentation hurt." }),
