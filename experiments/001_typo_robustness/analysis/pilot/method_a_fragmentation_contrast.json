@@ -40,7 +40,7 @@
     "clean_conditioned_failure": 0.0,
     "retention": 1.1428571428571428,
     "discordant_rate": 0.125,
-    "mcnemar_p_value": 0.4999999999999999,
+    "mcnemar_p_value": 0.5000000000000001,
     "mcnemar_method": "exact_midp"
   },
   {
@@ -106,7 +106,7 @@
     "clean_conditioned_failure": 0.125,
     "retention": 0.875,
     "discordant_rate": 0.125,
-    "mcnemar_p_value": 0.4999999999999999,
+    "mcnemar_p_value": 0.5000000000000001,
     "mcnemar_method": "exact_midp"
   },
   {
