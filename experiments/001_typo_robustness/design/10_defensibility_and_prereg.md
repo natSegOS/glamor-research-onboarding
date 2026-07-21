@@ -1,4 +1,4 @@
-# 10 — Defensibility, Pre-Registration, and Bounded Claims
+# 10: Defensibility, Pre-Registration, and Bounded Claims
 
 This document consolidates everything that makes the study hard to refute: the reviewer-attack table (each likely objection paired with the design feature that pre-empts it), the bounded-claim language, the reproducibility checklist, and the pre-registration plan. It is the place to look when asking "could a reviewer kill this, and is the answer already built in?"
 
@@ -6,14 +6,21 @@ This document consolidates everything that makes the study hard to refute: the r
 
 ## 10.1 The non-refutability strategy in one idea
 
-A claim cannot be refuted *on the basis of the findings* if (a) the claim is bounded to exactly what the data support, (b) every confound a reviewer could name is held constant and logged, (c) the central judgments (intent preservation, correctness) are data or deterministic rather than authorial, and (d) the whole analysis plan was fixed before the confirmatory runs so nothing was fished. The study is engineered around these four properties; this document maps each design feature to the objection it neutralizes.
+A claim cannot be refuted *on the basis of the findings* if:
+
+- (a) the claim is bounded to exactly what the data support;
+- (b) every confound a reviewer could name is held constant and logged;
+- (c) the central judgments (intent preservation, correctness) are data or deterministic rather than authorial;
+- (d) the whole analysis plan was fixed before the confirmatory runs so nothing was fished.
+
+The study is engineered around these four properties; this document maps each design feature to the objection it neutralizes.
 
 ## 10.2 The reviewer-attack table
 
 | # | Likely objection | Pre-emption (and where it lives) |
 |---|---|---|
-| 1 | "Your typos changed the meaning — you measured task redefinition." | Human audit, Fleiss κ≥0.60 gate, primary endpoint restricted to audited intent-preserving items, audit-failed items excluded by a pre-registered rule. (Doc 09) |
-| 2 | "Your benchmark is contaminated — the drop is a memorization artifact." | Fresh GSM-Symbolic-style instances + MMLU-Pro as primary; standard GSM8K/MMLU only as contamination contrast; clean A₀ validated against published bands. (Doc 04 §4.2–4.3) |
+| 1 | "Your typos changed the meaning: you measured task redefinition." | Human audit, Fleiss κ≥0.60 gate, primary endpoint restricted to audited intent-preserving items, audit-failed items excluded by a pre-registered rule. (Doc 09) |
+| 2 | "Your benchmark is contaminated: the drop is a memorization artifact." | Fresh GSM-Symbolic-style instances + MMLU-Pro as primary; standard GSM8K/MMLU only as contamination contrast; clean A₀ validated against published bands. (Doc 04 §4.2–4.3) |
 | 3 | "The differences are within noise." | Paired McNemar (mid-p exact), BCa 95% CIs on every effect, pre-registered MDE and power; raw discordant counts reported. (Doc 06) |
 | 4 | "Underpowered, like most NLP studies." | N derived from a 5 pp MDE at 80% power, pilot-gated on measured discordant rate; cite Card et al. 2020. (Doc 06 §6.3) |
 | 5 | "Cherry-picked model or quantization recipe." | 3 families × 3 scales; AWQ held constant in main sweep; fp16/AWQ/GPTQ sub-study guards against recipe artifacts. (Doc 05) |
@@ -26,16 +33,16 @@ A claim cannot be refuted *on the basis of the findings* if (a) the claim is bou
 | 12 | "LLM-judge is unreliable." | LLM-judge excluded from the primary endpoint and regime assignment; humans final; judge only pre-screens / confirms deterministic Regime-C comparisons. (Doc 09 §9.7) |
 | 13 | "Not reproducible." | Released code, configs, seeds, model commit hashes, pinned versions, run manifests, all state vectors + edit scripts; generation scripts where licenses block source release. (§10.4, Doc 08 §8.8) |
 | 14 | "You're just restating CheckList / Niu & Bansal." | Explicit attribution of the selective-invariance concept; contribution framed as mechanism + quantization + paired stats, not the concept. (Doc 01 §1.2–1.3) |
-| 15 | "Multiple comparisons — you found significance by running many cells." | Primary endpoint + 2 interactions designated and protected; everything else BH-FDR at q=0.05; Holm within a model's family. (Doc 06 §6.7) |
+| 15 | "Multiple comparisons: you found significance by running many cells." | Primary endpoint + 2 interactions designated and protected; everything else BH-FDR at q=0.05; Holm within a model's family. (Doc 06 §6.7) |
 | 16 | "Edit budgets / percentages are arbitrary." | Exact primitive-edit counts (not %), powers of two justified by response-curve estimation, edit density logged. (Doc 03 §3.4) |
 | 17 | "Single task, can't generalize." | Two task archetypes (reasoning + MCQ) spanning the literature's disagreement about which is more fragile. (Doc 04 §4.1) |
-| 18 | "No baseline defense — so what?" | Report at least one denoising baseline (spell-check pre-pass / ScRNN-style) and the re-pass strategy from Wang et al. 2024. (§10.6) |
+| 18 | "No baseline defense, so what?" | Report at least one denoising baseline (spell-check pre-pass / ScRNN-style) and the re-pass strategy from Wang et al. 2024. (§10.6) |
 | 19 | "vLLM batching makes it non-deterministic." | Greedy removes sampling variance; versions pinned and logged; reproducibility test bounds rare batch-composition flips; manifests released. (Doc 07 §7.9) |
 | 20 | "You haven't shown it matters in the real world." | ASR transcription is the primary real-world motivation; noise in voice interfaces is structural and unavoidable. The mediation result is actionable: it tells you whether the fix should be at the tokenizer level, the acoustic model level, or via input normalization. (Doc 01 §1.9) |
-| 21 | "Your ASR errors are from a controlled TTS+Whisper setup, not real spontaneous speech." | Acknowledged as a scope limitation stated explicitly in §1.7. TTS+Whisper is a reproducible, pinned, fully auditable noise source — real spontaneous speech is not. The noisy-ASR condition (babble noise at 10 dB SNR) approximates realistic ambient conditions. The keyboard-typo arm serves as the controlled baseline that makes the mechanism findings hold regardless of ASR realism. |
-| 22 | "Your ASR and keyboard errors are not the same kind of noise — you can't compare them." | Correct — and the paper never claims they are the same. The comparison is: does the same causal mechanism (tokenization fragmentation) explain accuracy loss under *both* noise types? If yes, it is a general mechanism. If no, that is itself a finding. The dual-source design is designed to ask this question, not to equate the sources. |
+| 21 | "Your ASR errors are from a controlled TTS+Whisper setup, not real spontaneous speech." | Acknowledged as a scope limitation stated explicitly in §1.7. TTS+Whisper is a reproducible, pinned, fully auditable noise source; real spontaneous speech is not. The noisy-ASR condition (babble noise at 10 dB SNR) approximates realistic ambient conditions. The keyboard-typo arm serves as the controlled baseline that makes the mechanism findings hold regardless of ASR realism. |
+| 22 | "Your ASR and keyboard errors are not the same kind of noise: you can't compare them." | Correct, and the paper never claims they are the same. The comparison is: does the same causal mechanism (tokenization fragmentation) explain accuracy loss under *both* noise types? If yes, it is a general mechanism. If no, that is itself a finding. The dual-source design is designed to ask this question, not to equate the sources. |
 
-If a 21st objection appears in review, it is added here with its pre-emption; the table is the living defense.
+If a new objection appears in review, it is added here with its pre-emption; the table is the living defense.
 
 ## 10.3 Bounded-claim language (use verbatim in the paper)
 
@@ -66,21 +73,21 @@ Released with the paper:
 ## 10.5 Pre-registration plan
 
 Before any confirmatory run on the held-out evaluation items, we lock an OSF (or AsPredicted-style) pre-registration containing:
-- The research questions and **directional hypotheses** (H1, H3, H4 directional; H2 two-sided) — Doc 01 §1.6.
-- The **primary endpoint** and the two **primary interactions** (mediation, quantization) — Doc 06.
-- The **statistical tests**, the multiplicity scheme, and the convergence-fallback ladder — Doc 06 §6.4–6.7.
-- The **sample sizes** and the pilot decision rule for `N` — Doc 06 §6.3.
-- The **exclusion rule** (audit-failed and ambiguous items) — Doc 09 §9.5.
-- The **held-constant confound register** — Doc 03 §3.3.
-- The **fallback design** if compute is constrained — Doc 03 §3.7, Doc 07 §7.6.
+- The research questions and **directional hypotheses** (H1, H3, H4 directional; H2 two-sided) (Doc 01 §1.6).
+- The **primary endpoint** and the two **primary interactions** (mediation, quantization) (Doc 06).
+- The **statistical tests**, the multiplicity scheme, and the convergence-fallback ladder (Doc 06 §6.4–6.7).
+- The **sample sizes** and the pilot decision rule for `N` (Doc 06 §6.3).
+- The **exclusion rule** (audit-failed and ambiguous items) (Doc 09 §9.5).
+- The **held-constant confound register** (Doc 03 §3.3).
+- The **fallback design** if compute is constrained (Doc 03 §3.7, Doc 07 §7.6).
 
-The pilot (Stage 2, Doc 11) is explicitly *exploratory* and may inform parameter choices; the pre-registration is locked *after* the pilot fixes `N`, `max_new_tokens`, and the discordance contingency, and *before* the held-out confirmatory runs. This sequencing — pilot to set parameters, then lock, then confirm — is standard and is what lets us call the main results confirmatory.
+The pilot (Stage 2, Doc 11) is explicitly *exploratory* and may inform parameter choices; the pre-registration is locked *after* the pilot fixes `N`, `max_new_tokens`, and the discordance contingency, and *before* the held-out confirmatory runs. This sequencing (pilot to set parameters, then lock, then confirm) is standard and is what lets us call the main results confirmatory.
 
 ## 10.6 Baseline defenses to include
 
 So that "so what / is it fixable?" is answered, we run at least one mitigation and report whether it closes the gap:
 - **Spell-check / robust-word-recognition pre-pass** (ScRNN-style, Pruthi et al. 2019): correct the input before the model sees it; report residual CCF.
-- **"Re-pass" self-denoising** (Wang et al. 2024): ask the model to clean the input first; report whether it helps for open small models (Wang et al. found it weak for open models — replicating that is itself informative).
+- **"Re-pass" self-denoising** (Wang et al. 2024): ask the model to clean the input first; report whether it helps for open small models (Wang et al. found it weak for open models; replicating that is itself informative).
 - Optionally, a single **byte-level reference point** (ByT5/BLT-class) to show the architectural ceiling.
 These turn the paper from "here is a problem" into "here is a mechanism *and* what does/does not fix it," which is stronger and harder to dismiss.
 
@@ -88,9 +95,9 @@ These turn the paper from "here is a problem" into "here is a mechanism *and* wh
 
 - **Data:** all tasks are public benchmarks; no personal data; licenses honored (Doc 04 §4.8).
 - **Annotators:** if labmates/peers, acknowledge; if paid, report compensation at or above local norms.
-- **Compute:** report GPU type, GPU-hours, and approximate cost (the study is < $50 of burst compute, Doc 07 §7.5) — a transparency point reviewers increasingly expect.
+- **Compute:** report GPU type, GPU-hours, and approximate cost (the study is < $50 of burst compute, Doc 07 §7.5), a transparency point reviewers increasingly expect.
 - **Risk:** the study reveals a brittleness that could be misused to craft adversarial typos, but the effect is already public (R²ATA et al.); the mitigation analysis (§10.6) is the responsible counterweight. State this briefly.
 
 ## 10.8 The standard we are holding ourselves to
 
-A paper of this kind is "respectable and hard to disagree with" when a skeptical reader, having read the methods, cannot point to a single claim that outruns its evidence, a single confound that was left free, or a single central judgment that rests on the authors' say-so. The combination of (1) bounded claims, (2) the confound register, (3) human-audited regimes and deterministic scoring, (4) pre-registration, and (5) full reproducibility is designed to leave no such pointer. Where the data are genuinely uncertain — most importantly the *direction* of the quantization effect — we say so and test two-sided, because an honest "we don't know yet, here's the bounded measurement" is itself unrefutable in a way that an overclaim never is.
+A paper of this kind is "respectable and hard to disagree with" when a skeptical reader, having read the methods, cannot point to a single claim that outruns its evidence, a single confound that was left free, or a single central judgment that rests on the authors' say-so. The combination of (1) bounded claims, (2) the confound register, (3) human-audited regimes and deterministic scoring, (4) pre-registration, and (5) full reproducibility is designed to leave no such pointer. Where the data are genuinely uncertain (most importantly the *direction* of the quantization effect) we say so and test two-sided, because an honest "we don't know yet, here's the bounded measurement" is itself unrefutable in a way that an overclaim never is.
