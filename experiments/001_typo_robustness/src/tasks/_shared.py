@@ -23,8 +23,8 @@ from enums import Scope
 
 # The full ordered alphabet of option letters used by MMLU-Pro (up to ten
 # options, A through J) and standard MMLU (four options, A through D).
-# All option-letter logic — label dictionaries, answer-extraction regexes,
-# valid-letter checks — is derived from this string rather than scattered
+# All option-letter logic (label dictionaries, answer-extraction regexes,
+# valid-letter checks) is derived from this string rather than scattered
 # independent hard-codings of "ABCDEFGHIJ" or "[A-J]".
 #
 # Extends naturally: to add an eleventh option, change this one constant and

@@ -7,7 +7,7 @@ them to JSONL, and records full provenance. The exported JSONL files are what
 the pipeline reads during generation via the config's ``datasets:`` list.
 
 Re-running this script fetches fresh revisions and overwrites the JSONL files
-cleanly — it is safe to re-run when you want updated dataset hashes.
+cleanly. It is safe to re-run when you want updated dataset hashes.
 
 GSM-Symbolic template enrichment (--gsm-templates-dir)
 -------------------------------------------------------
@@ -85,7 +85,7 @@ from tasks import (
 
 _DEFAULT_OUTPUT_DIRECTORY  = Path("data/items")
 # "p1", not "main": the Apple template repository ships templates/p1 and
-# templates/p2 only — with "main" the template-enrichment step finds nothing,
+# templates/p2 only. With "main" the template-enrichment step finds nothing,
 # no question_annotated fields are written, and Regime C reasoning silently
 # produces zero items. p1 is what the pilot used (data/items/PROVENANCE.json).
 _DEFAULT_GSM_CONFIG        = "p1"

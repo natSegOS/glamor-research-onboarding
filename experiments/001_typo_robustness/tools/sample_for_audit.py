@@ -239,7 +239,7 @@ def main() -> None:
 
         print(f"running judge on {len(sample)} items (cache: {cache_path}) ...")
         with ProgressBar(total=len(sample), description="judging") as progress:
-            # Aligned 1:1 with `sample` (None = skipped Regime-C MCQ) — the
+            # Aligned 1:1 with `sample` (None = skipped Regime-C MCQ). The
             # alignment contract of run_judge_on_sample is what makes this
             # zip safe; a decision list that silently dropped skipped rows
             # attached judge labels to the WRONG audit items.

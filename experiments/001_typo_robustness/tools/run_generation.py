@@ -42,7 +42,7 @@ from inference import (
     assert_revisions_pinned, get_model_specification, resolve_current_revision)
 from regimes import make_is_word
 
-# Default dictionary — built from SCOWL size-60 by tools/build_dictionary.py.
+# Default dictionary, built from SCOWL size-60 by tools/build_dictionary.py.
 # Never falls back to the 488-word demo list in real runs.
 _DEFAULT_DICTIONARY = Path(__file__).resolve().parent.parent / "data" / "wordlists" / "en_us_pinned.txt"
 
@@ -115,7 +115,7 @@ def _measure_max_model_length(configuration, specification, is_word) -> int:
     (often 10x+ larger) default context.
 
     Rebuilds the same requests ``run_experiment`` builds internally (cheap,
-    deterministic, CPU-only — see the shard_partition note in
+    deterministic, CPU-only. See the shard_partition note in
     run_experiment's docstring for the established precedent of redoing this
     step rather than threading it through); no exclusion_sidecar is passed
     here, so this pass logs nothing and cannot double-count exclusions.
@@ -151,7 +151,7 @@ _RUN_OUTPUT_GLOB_PATTERNS = (
 
 def _delete_previous_run_outputs(output_directory: Path, run_id: str) -> list[Path]:
     """Delete every prior pipeline output of ``run_id`` (generations,
-    exclusions, manifest — all workers' files) so --fresh regenerates from
+    exclusions, manifest, all workers' files) so --fresh regenerates from
     nothing. Only the known output suffixes are touched."""
     deleted = sorted(
         path
@@ -181,7 +181,7 @@ def main():
                 revision=resolve_current_revision(specification.huggingface_identifier))
             print(f"[run_generation] resolved unpinned revision to "
                   f"{specification.revision}")
-        except Exception as error:  # noqa: BLE001 — offline/no-auth is survivable here
+        except Exception as error:  # noqa: BLE001 (offline/no-auth is survivable here)
             print(f"[run_generation] WARNING: could not resolve current revision "
                   f"({error}); rows will carry the PIN_ME placeholder",
                   file=sys.stderr)

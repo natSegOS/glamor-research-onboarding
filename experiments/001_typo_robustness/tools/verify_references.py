@@ -1,7 +1,7 @@
 """Mechanical check that every bibliography-manifest row matches its PDF.
 
 The 2026-07-20 reference audit found roughly a third of the manifest rows in
-docs/REFERENCES.md carried a wrong title, author, edition, or identifier —
+docs/REFERENCES.md carried a wrong title, author, edition, or identifier,
 and one PDF was an entirely different paper. Those errors were invisible
 because nothing compared the manifest against the files. This tool closes
 that gap: it parses every row of the manifest, opens the named PDF, and
@@ -89,7 +89,7 @@ def parse_manifest_rows(manifest_markdown: str) -> list[ManifestRow]:
 
     The title is the first *italic* span of the reference column; the arXiv
     identifier (when present) is advisory context for the report, not a
-    pass/fail criterion — camera-ready PDFs often lack the arXiv margin stamp.
+    pass/fail criterion: camera-ready PDFs often lack the arXiv margin stamp.
     """
     rows = []
     for line in manifest_markdown.splitlines():

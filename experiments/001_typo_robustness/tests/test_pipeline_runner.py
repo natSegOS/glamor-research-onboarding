@@ -117,7 +117,7 @@ class TestIdempotentResume:
         assert len(load_generation_rows([tmp_path / "out.jsonl"])) == 2
 
     def test_a_shard_marked_complete_in_the_manifest_is_skipped_entirely(self, tmp_path):
-        """Breaking this re-submits finished shards to the engine — wasted GPU
+        """Breaking this re-submits finished shards to the engine: wasted GPU
         hours at best, duplicate rows at worst."""
         manifest = ShardManifest(tmp_path / "manifest.json")
         manifest.mark_shard_complete("shard1")
@@ -147,7 +147,7 @@ class TestIdempotentResume:
 # ---------------------------------------------------------------------------
 
 class _CrashAfterNEngine:
-    """Streams real results for the first N requests, then raises — simulating
+    """Streams real results for the first N requests, then raises, simulating
     an engine dying mid-shard (a real incident this test locks in against)."""
 
     revision = "crash-test"
@@ -187,7 +187,7 @@ class TestCrashRecovery:
 
     def test_resume_completes_exactly_the_missing_rows_with_no_duplicates(self, tmp_path):
         """Breaking this either regenerates finished rows (duplicates) or
-        skips crashed ones (holes) — both corrupt the matched-pair join."""
+        skips crashed ones (holes). Both corrupt the matched-pair join."""
         requests, manifest = self._crash_then_inspect(tmp_path)
         written_on_resume = run_shard(
             "shard1", requests, DeterministicDummyEngine(), tmp_path / "out.jsonl",
@@ -296,7 +296,7 @@ class TestExclusionRecordContent:
     _EDIT_BUDGET = 1
 
     def test_an_unperturbable_item_produces_a_fully_populated_record(self, is_word):
-        """Breaking this leaves exclusions untraceable — the audit could no
+        """Breaking this leaves exclusions untraceable: the audit could no
         longer say which item, condition, budget, or stage dropped a row."""
         from pipeline.experiment import PerturbationCondition, _build_requests_for_item_slice
         from tasks.reasoning import REASONING_INSTRUCTION, ReasoningItem

@@ -1,8 +1,8 @@
 """Measure real generation throughput on the current GPU.
 
 The pre-main-sweep benchmark deliverable (design/11 §11.2, design/07 §7.5):
-runs a bounded sample of the configured experiment's real requests — split
-between the reasoning and MCQ token budgets exactly as the real sweep is —
+runs a bounded sample of the configured experiment's real requests (split
+between the reasoning and MCQ token budgets exactly as the real sweep is)
 through the real vLLM engine, then reports output tokens/sec, rows/hour, and
 the projected wall-clock hours for a full run.
 

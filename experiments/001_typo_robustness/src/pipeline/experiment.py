@@ -3,7 +3,7 @@ attach tokenization metrics, run the models, and write generation rows.
 
 A single YAML file fully specifies a run (design/08 §8.2), which is what makes
 the pilot and main study differ only by configuration. The orchestrator is
-deliberately engine-agnostic — it accepts any built engine (or the
+deliberately engine-agnostic: it accepts any built engine (or the
 DeterministicDummyEngine), so the full pipeline is testable without a GPU.
 
 Key guarantees
@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 import yaml
-# loky (not concurrent.futures.ProcessPoolExecutor) — it pickles worker
+# loky (not concurrent.futures.ProcessPoolExecutor): it pickles worker
 # arguments with cloudpickle instead of stdlib pickle, which is required
 # here: real reasoning items carry a `ReasoningTemplate.answer_function`
 # built as a closure over a parsed answer expression
@@ -79,7 +79,7 @@ class DatasetConfig:
     Attributes
     ----------
     key:
-        Registry key — must be present in ``tasks.DATASET_REGISTRY``.
+        Registry key. Must be present in ``tasks.DATASET_REGISTRY``.
     item_count:
         Override the registry's ``default_n``; falls back to that default
         if not supplied.
@@ -135,7 +135,7 @@ class ExperimentConfiguration:
     is_confirmatory: bool = False
     # The pre-registered primary severity per task type (design/06 §6.3; the
     # k=2/k=4 amendment is logged in design/00 §0.5). Consumed by the Stage-1
-    # gates computation, not by generation — the sweep runs every budget in
+    # gates computation, not by generation: the sweep runs every budget in
     # ``conditions``.
     primary_edit_budget_reasoning: int = 2
     primary_edit_budget_mcq: int = 4
@@ -181,8 +181,8 @@ def build_exclusion_record(
 
     A pure function rather than a method on ``ExclusionSidecar``: request
     construction runs in parallel worker processes (see ``build_requests``),
-    and a worker must never hold a file handle or write to a shared path —
-    it builds records and returns them, and only the parent process ever
+    and a worker must never hold a file handle or write to a shared path.
+    It builds records and returns them, and only the parent process ever
     writes.
     """
     return {
@@ -205,7 +205,7 @@ class ExclusionSidecar:
     with the same level of provenance as a generated row (design/08 §8.4).
     Records are written immediately on append so a killed job does not lose
     them. Only the parent process ever constructs one of these or calls
-    ``write_all`` — see ``build_exclusion_record``.
+    ``write_all``. See ``build_exclusion_record``.
     """
 
     def __init__(self, path: Path) -> None:
@@ -234,7 +234,7 @@ class ExclusionSidecar:
 def load_task_items(configuration: ExperimentConfiguration) -> list:
     """Load task items by dispatching each entry in ``configuration.datasets``
     through the registry. Add or swap datasets by editing the config's
-    ``datasets:`` list — no code changes required."""
+    ``datasets:`` list. No code changes required."""
     if not configuration.datasets:
         raise ValueError(
             "ExperimentConfiguration.datasets is empty; set a 'datasets:' list "
@@ -254,15 +254,15 @@ def load_task_items(configuration: ExperimentConfiguration) -> list:
 
 # Below this many task items, ProcessPoolExecutor's worker-startup overhead
 # (spawning/forking processes, re-pickling shared arguments to each) costs
-# more than the parallel construction saves — run sequentially instead.
+# more than the parallel construction saves, so run sequentially instead.
 _MINIMUM_ITEMS_FOR_PARALLEL_BUILD = 20
 
 
 def _partition_into_slices(sequence: Sequence, slice_count: int) -> list[list]:
     """Split ``sequence`` into ``slice_count`` contiguous, disjoint,
     order-preserving slices (concatenating them in order reproduces
-    ``sequence``). Each slice is an independent unit of work for one worker —
-    disjoint and order-preserving is what lets ``build_requests`` parallelize
+    ``sequence``). Each slice is an independent unit of work for one worker.
+    Disjoint and order-preserving is what lets ``build_requests`` parallelize
     without any cross-worker coordination and still produce byte-identical
     output to the sequential version."""
     slice_count = max(1, slice_count)
@@ -293,8 +293,8 @@ def build_requests(
     it worthwhile (``_MINIMUM_ITEMS_FOR_PARALLEL_BUILD``): ``task_items`` is
     split into disjoint, order-preserving slices (``_partition_into_slices``),
     one per worker, and each worker (``_build_requests_for_item_slice``) is a
-    pure function — no shared file handles, no shared mutable state, nothing
-    to coordinate — that returns its requests and exclusion records rather
+    pure function (no shared file handles, no shared mutable state, nothing
+    to coordinate) that returns its requests and exclusion records rather
     than writing them. Only this (parent) process ever appends to the
     returned list or writes to ``exclusion_sidecar``. Slices are submitted
     and collected in order (``executor.map``, not ``as_completed``), so the
@@ -402,7 +402,7 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
                               ) -> tuple[list[GenerationRequest], list[dict]]:
     """Build engine-perturbed requests for one item under one condition, across
     its edit budgets. Returns ``(requests, exclusion_records)`` rather than
-    writing exclusions directly — see ``build_requests`` for why."""
+    writing exclusions directly. See ``build_requests`` for why."""
     if condition.selection_policy == SelectionPolicy.FRAGMENTATION_MATCHED:
         return _build_fragmentation_matched_requests(
             task_item, condition, gold_answer, clean_prompt, is_word, tokenizer, seed)
@@ -482,7 +482,7 @@ def _content_relative_scope_spans(task_item) -> Optional[dict]:
     """Translate the task loader's full-prompt scope spans into content_text
     coordinates. The regime builders perturb content_text, not the full
     prompt, so full-prompt offsets would point past the end of any question
-    shorter than the instruction — exactly what happened when the reasoning
+    shorter than the instruction, which is what happened when the reasoning
     instruction grew a worked exemplar and content-scope perturbation started
     excluding half of every dataset. Spans are clamped; the instruction span
     collapses to empty (instructions are never perturbed in this design).
@@ -525,8 +525,8 @@ def _build_fragmentation_matched_requests(
         task_item, condition, gold_answer, clean_prompt, is_word, tokenizer, seed,
         ) -> tuple[list[GenerationRequest], list[dict]]:
     """Method A counterfactual requests (design/02 §2.5, design/06 §6.8): per
-    edit budget, TWO Regime-A variants of the same target word — one Low and
-    one High fragmentation — differing only in their tokenization consequence.
+    edit budget, TWO Regime-A variants of the same target word (one Low and
+    one High fragmentation) differing only in their tokenization consequence.
     The stratum is part of the perturbation state vector so the two variants
     get distinct row IDs."""
     requests: list[GenerationRequest] = []
@@ -556,7 +556,7 @@ def _build_fragmentation_matched_requests(
             seed, condition.name, task_item.task_id, edit_budget)
 
         # A PerturbationError on one item must become an exclusion record,
-        # never propagate — an uncaught worker exception aborts the entire
+        # never propagate: an uncaught worker exception aborts the entire
         # parallel build (this killed the first Llama pilot run).
         try:
             # Pair-aware target selection: try candidates best-first until one
@@ -628,7 +628,7 @@ def _fragmentation_stratum_request(
             "token_inflation_ratio": tokenization.token_inflation_ratio(
                 tokenizer, content_text, perturbed_content),
             # Only the target word changed, so whole-text DL equals the
-            # builder-verified word-level DL — exactly the budget.
+            # builder-verified word-level DL: exactly the budget.
             "measured_dl": edit_budget,
             "subword_count_change": subword_change,
             "fragmentation_stratum": stratum,
@@ -719,7 +719,7 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits, mea
     analysis contrasts.
 
     Adds (Workstream 3):
-      ``measured_dl``       — actual DL distance between clean and perturbed
+      ``measured_dl``       : actual DL distance between clean and perturbed
                               content strings (verification stat; edit_budget in the
                               PSV is the operational lever). Passed in rather than
                               recomputed here: the regime builder that produced
@@ -729,7 +729,7 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits, mea
                               text (not single words) is expensive enough that
                               computing it twice per request measurably slows
                               request construction.
-      ``word_length_before`` — character count of the first edited word before the
+      ``word_length_before`` : character count of the first edited word before the
                                edit; controls for length confound in the mixed-effects
                                model (Workstream 9).
     """
@@ -771,7 +771,7 @@ def required_context_length(
     """Return vLLM's ``max_model_len``, sized from the request set a run will
     actually submit rather than trusted to the model's native context window.
 
-    Every request (every clean and perturbed prompt — see ``build_requests``)
+    Every request (every clean and perturbed prompt, see ``build_requests``)
     is chat-templated and tokenized with the model's own tokenizer, then
     paired with its family's completion budget (task families
     in ``REASONING_FAMILIES`` get ``max_new_tokens_reasoning``; everything
@@ -780,7 +780,7 @@ def required_context_length(
 
     ``safety_margin`` and ``round_to`` guard only against tokenizer/version
     drift between this measurement and the tokenizer the engine loads
-    internally — they never discount the measured requirement. Every request
+    internally. They never discount the measured requirement. Every request
     in a run is generated exactly once, so there is nothing to reuse and
     nothing to gain by shrinking below what was measured; the point of this
     function is solely to stop reserving KV-cache/CUDA-graph-capture memory
@@ -833,12 +833,12 @@ def run_experiment(
 
     ``shard_partition``, when given, is ``(worker_index, worker_count)``: this
     call handles only the subset of requests whose deterministic row_id hashes
-    into ``worker_index`` of ``worker_count`` buckets (design/07 §7.7 — "two
+    into ``worker_index`` of ``worker_count`` buckets (design/07 §7.7: "two
     GPUs can take different shards ... with no coordination beyond the shared
     output store"). Every worker still runs ``build_requests`` over the full
-    item set — partitioning happens only after, since perturbation
-    construction is what determines each request's row_id in the first place
-    — so this trades some redundant CPU-only construction work (cheap and
+    item set. Partitioning happens only after, since perturbation
+    construction is what determines each request's row_id in the first place.
+    This trades some redundant CPU-only construction work (cheap and
     parallelizable on its own) for zero cross-process coordination: each
     worker writes to its own ``..._w{worker_index}of{worker_count}_*`` files,
     so no two workers ever touch the same manifest or output path, and

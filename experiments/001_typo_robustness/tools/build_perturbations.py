@@ -7,9 +7,9 @@ required) to enumerate all (clean, perturbed) text pairs.
 
 The output is a JSONL file at ``--output-path`` with one record per pair.
 It is the input for:
-  1. tools/run_judge.py    — LLM-as-judge screening
-  2. tools/regime_audit_ui.html — human annotation interface
-  3. tools/run_generation.py  — actual generation (after audit gating)
+  1. tools/run_judge.py    : LLM-as-judge screening
+  2. tools/regime_audit_ui.html : human annotation interface
+  3. tools/run_generation.py  : actual generation (after audit gating)
 
 By separating perturbation-pair generation from model generation:
   - Validity is assessed before ANY GPU time is spent.
@@ -80,7 +80,7 @@ def main() -> None:
              for line in dict_path.read_text().splitlines() if line.strip()}
     is_word = make_is_word(words)
 
-    # DeterministicDummyEngine: no GPU, no generation — we only need the
+    # DeterministicDummyEngine: no GPU, no generation. We only need the
     # perturbation pairs, not the model outputs.
     dummy_engine = DeterministicDummyEngine()
     dummy_tokenizer = dummy_engine  # has no tokenizer; tokenization fields will be zeros

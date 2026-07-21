@@ -1,6 +1,6 @@
 """Generate an HTML preview of every perturbation condition for PI/auditor review.
 
-Runs entirely offline — no GPU, no HuggingFace access needed. Loads the real
+Runs entirely offline: no GPU, no HuggingFace access needed. Loads the real
 task items named by the config's ``datasets:`` list when their JSONL files are
 present on disk (falling back to synthetic reasoning items plus the built-in
 demo MCQ items when they are not), applies every condition in the config file,

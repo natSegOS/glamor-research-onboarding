@@ -90,7 +90,7 @@ def _row_state_triple(row: dict) -> tuple:
 
 class _RareLetterFragmentingTokenizer:
     """Fragments a word by its rare-letter count, so keyboard substitutions can
-    move a variant between fragmentation strata — FakeTokenizer's length-only
+    move a variant between fragmentation strata. FakeTokenizer's length-only
     rule cannot (substitutions never change length, so no High variant would
     ever exist and the fragmentation-matched condition could never emit rows)."""
 
@@ -125,14 +125,14 @@ def full_pipeline_run(tmp_path_factory):
 
 # ---------------------------------------------------------------------------
 # Rows-or-exclusions accounting: every (item, condition) attempt must end as
-# generation rows or as an exclusion record — never vanish silently.
+# generation rows or as an exclusion record, never vanish silently.
 # ---------------------------------------------------------------------------
 
 class TestConditionCoverage:
 
     def test_every_condition_class_yields_rows_or_exclusion_records(self, full_pipeline_run):
         """Breaking this means a whole condition class silently produced
-        nothing — neither data nor an auditable record of why."""
+        nothing: neither data nor an auditable record of why."""
         _summary, rows, exclusion_records = full_pipeline_run
         excluded_condition_names = {record["condition_name"] for record in exclusion_records}
         produced_state_triples = {_row_state_triple(row) for row in rows if not row["is_clean"]}
@@ -230,7 +230,7 @@ class TestAnalysisOverProducedRows:
 
     def test_matched_pairs_join_and_cells_carry_the_expected_columns(self, full_pipeline_run):
         """Breaking this means generation output and the analysis layer have
-        drifted apart — the study would run but not be summarisable."""
+        drifted apart: the study would run but not be summarisable."""
         _summary, rows, _exclusions = full_pipeline_run
         matched_pairs = result_analysis.join_matched_pairs(rows)
         assert matched_pairs
@@ -254,8 +254,8 @@ class TestAnalysisOverProducedRows:
 class TestParallelismDeterminism:
 
     def test_parallel_and_sequential_request_builds_are_identical(self, monkeypatch):
-        """Breaking this makes what gets generated depend on worker count —
-        parallelization is a performance detail, never a semantic one."""
+        """Breaking this makes what gets generated depend on worker count.
+        Parallelization is a performance detail, never a semantic one."""
         import pipeline.experiment as experiment_module
 
         configuration = _full_condition_configuration("parallel_check")
@@ -347,7 +347,7 @@ class TestParallelismDeterminism:
 
 
 # ---------------------------------------------------------------------------
-# Counterfactual word selection/application agreement — the two functions the
+# Counterfactual word selection/application agreement: the two functions the
 # fragmentation-matched pipeline path composes must share one notion of
 # "word", or selection picks targets that application cannot replace.
 # ---------------------------------------------------------------------------
@@ -368,7 +368,7 @@ class TestCounterfactualSelectionApplicationAgreement:
 
     def test_selection_and_application_agree_on_letter_digit_boundaries(self):
         """'Python' extracted from 'Python3' by the [A-Za-z]+ tokenizer must
-        be replaceable — \\b-style boundaries fail between 'n' and '3' and
+        be replaceable: \\b-style boundaries fail between 'n' and '3' and
         crashed the first Llama pilot on an MMLU item."""
         import tokenization
 
@@ -382,7 +382,7 @@ class TestCounterfactualSelectionApplicationAgreement:
 
 
 # ---------------------------------------------------------------------------
-# Confirmatory revision-pin guard — the run script's precondition for any
+# Confirmatory revision-pin guard: the run script's precondition for any
 # real (non-dummy) end-to-end run.
 # ---------------------------------------------------------------------------
 

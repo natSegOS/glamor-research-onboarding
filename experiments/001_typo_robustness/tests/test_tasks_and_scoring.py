@@ -134,7 +134,7 @@ class TestPromptScaffold:
 
     def test_exemplar_problems_never_leak_into_the_items_own_prompt(self):
         """Breaking this would let a hand-written exemplar shadow the real
-        question inside a single prompt — a contamination bug."""
+        question inside a single prompt: a contamination bug."""
         item = _one_synthetic_reasoning_item()
         for exemplar_problem, _solution in reasoning.REASONING_CHAT_EXEMPLARS:
             assert exemplar_problem not in item.full_prompt
@@ -346,7 +346,7 @@ class TestScoringRules:
 
     def test_refusal_followed_by_an_answer_is_still_valid(self):
         """Breaking this makes the inline classifier lexical instead of
-        structural — hedged-but-answered responses would stop counting."""
+        structural: hedged-but-answered responses would stop counting."""
         result = scoring.score_reasoning("I won't, but if I had to: #### 19", 19)
         assert result.parse_status == ParseStatus.VALID
         assert result.is_correct == 1
@@ -409,7 +409,7 @@ class TestFalsyZeroGoldAnswer:
 
 # ---------------------------------------------------------------------------
 # Synthetic-generator self-consistency and the GSM-Symbolic template
-# machinery — the guarantees Regime C's gold recomputation stands on.
+# machinery: the guarantees Regime C's gold recomputation stands on.
 # ---------------------------------------------------------------------------
 
 def _annotated_question(question_part: str, answer_expression: str) -> str:
@@ -504,7 +504,7 @@ class TestGsmSymbolicTemplateMachinery:
 
 
 # ---------------------------------------------------------------------------
-# Linguistic parse-status classifier — the formal four-way detector, run
+# Linguistic parse-status classifier: the formal four-way detector, run
 # offline against stub objects replicating the spaCy API surface it touches
 # (the same mechanism the retired test_linguistic_parse_status.py used).
 # ---------------------------------------------------------------------------
@@ -529,7 +529,7 @@ class _StubDocument:
 
 
 def _pipeline_for(*sentences):
-    """A callable stub returning a pre-built document — the entire spaCy
+    """A callable stub returning a pre-built document: the entire spaCy
     pipeline API surface the classifier uses."""
     document = _StubDocument([list(sentence) for sentence in sentences])
     return lambda _text: document
@@ -569,7 +569,7 @@ class TestLinguisticParseStatusClassifier:
             "Could you clarify?", None, pipeline) == ParseStatus.CLARIFICATION
 
     def test_first_person_negation_classifies_as_refusal(self):
-        """Breaking this collapses refusals into UNPARSEABLE — same ICR
+        """Breaking this collapses refusals into UNPARSEABLE: same ICR
         failure class, refusal component."""
         pipeline = _pipeline_for(_first_person_negated_sentence(_PERIOD))
         assert scoring.classify_parse_status_with_linguistic_pipeline(

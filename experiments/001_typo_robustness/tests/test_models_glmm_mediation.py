@@ -3,8 +3,8 @@
 These tests hold the statistical layer to KNOWN GROUND TRUTH built into
 simulated data. Breaking them means the paper's headline models either
 mislabel their estimator (the pre-2026-07-20 "linear model called logistic"
-failure), leak variance components into fixed-effect tables, or — the failure
-class that actually bit on the pilot — let between-item confounding flip the
+failure), leak variance components into fixed-effect tables, or (the failure
+class that actually bit on the pilot) let between-item confounding flip the
 mediation coefficient's sign.
 """
 
@@ -42,7 +42,7 @@ _SIMULATION_ITEMS = 120
 def _simulated_paired_frame(seed: int = 7) -> "pandas.DataFrame":
     """Matched clean/perturbed rows for _SIMULATION_ITEMS items with a known
     negative perturbation effect on the log-odds scale and item-level
-    heterogeneity — the shape the confirmatory model must recover."""
+    heterogeneity: the shape the confirmatory model must recover."""
     generator = random.Random(seed)
     records = []
     for item_index in range(_SIMULATION_ITEMS):
@@ -77,7 +77,7 @@ class TestConfirmatoryLadder:
         assert perturbation_effect["coef"] < 0
         # Magnitude is held to truth only on the glmer rungs. The GLM rung's
         # per-item dummies on 2-row panels carry the classic incidental-
-        # parameters bias (slope inflated several-fold) — a known property of
+        # parameters bias (slope inflated several-fold), a known property of
         # the FALLBACK, which is exactly why glmer is the estimator of record.
         if result.method != ConvergenceMethod.FIXED_EFFECTS_LOGISTIC_GLM:
             assert abs(perturbation_effect["coef"] - _TRUE_PERTURBATION_LOG_ODDS) < 0.8
@@ -88,8 +88,8 @@ class TestConfirmatoryLadder:
 
     def test_offline_environment_lands_on_the_glm_rung_with_a_recorded_reason(self):
         """Without an R/lme4 bridge the ladder must degrade to the loudly
-        labeled fixed-effects logistic GLM and say WHY in ladder_notes —
-        silent degradation is how the wrong estimator ships unnoticed."""
+        labeled fixed-effects logistic GLM and say WHY in ladder_notes.
+        Silent degradation is how the wrong estimator ships unnoticed."""
         bridge_reason = _probe_lme4_bridge()
         result = fit_crossed_mixed_effects_logistic(_simulated_paired_frame())
         if bridge_reason:   # no R locally: the CI environment of record

@@ -32,7 +32,7 @@ from analysis import statistics
 # The dimensions that define a reporting cell (design/06 §6.10). All are
 # r_-prefixed perturbation-state fields written by the runner, plus the model
 # and task family. model_id is included alongside model_revision because
-# unpinned runs share the PIN_ME revision placeholder — keying on revision
+# unpinned runs share the PIN_ME revision placeholder: keying on revision
 # alone would merge every unpinned model into one cell.
 CELL_DIMENSION_KEYS = (
     "model_id",
@@ -115,7 +115,7 @@ def summarize_all_cells(matched_pairs: Sequence[MatchedPair],
 
     Each row carries the cell's dimension values plus the full statistics block.
 
-    ``audit_outcomes`` — when provided, maps task_id to
+    ``audit_outcomes``, when provided, maps task_id to
     ``analysis.audit.ItemAuditOutcome``. Pairs whose item is flagged
     ``excluded_from_primary=True`` are removed from the cell before computing
     any statistics; ``n_audit_excluded`` in the output counts them.  When None
@@ -266,7 +266,7 @@ def write_cell_table(cell_summaries: Sequence[dict], output_path: Path) -> Path:
 
 def _import_pyplot():
     # matplotlib reads MPLBACKEND at import time, before matplotlib.use() below
-    # can override it — so a stray inherited value (e.g. Jupyter's own) would
+    # can override it, so a stray inherited value (e.g. Jupyter's own) would
     # crash the import itself. Force it first, regardless of environment.
     os.environ["MPLBACKEND"] = "Agg"
     try:
@@ -280,7 +280,7 @@ def _import_pyplot():
 
 def figure_clean_conditioned_failure_vs_edit_budget(
         cell_summaries: Sequence[dict], output_path: Path) -> Optional[Path]:
-    """Clean-conditioned failure vs edit budget, one line per operation — the
+    """Clean-conditioned failure vs edit budget, one line per operation: the
     severity-curve figure (design/08 §8.7, Figure 2)."""
     pyplot = _import_pyplot()
     if pyplot is None:

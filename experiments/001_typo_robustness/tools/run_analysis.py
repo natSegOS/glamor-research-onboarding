@@ -31,7 +31,7 @@ from enums import SemanticClass
 from pipeline.runner import load_generation_rows
 
 # Minimum Regime A row count below which the mediation model is not fit
-# (design/06 §6.8 — too few rows to estimate the mediator/outcome coefficients
+# (design/06 §6.8: too few rows to estimate the mediator/outcome coefficients
 # meaningfully).
 _MINIMUM_ROWS_FOR_MEDIATION_MODEL = 10
 
@@ -56,7 +56,7 @@ _CLEAN_TOKEN_INFLATION_RATIO = 1.0
 
 def _build_model_dataframe(rows):
     """Convert raw generation rows to a pandas DataFrame for the mixed-effects
-    models. token_inflation_ratio has no r_ prefix — the runner writes it as an
+    models. token_inflation_ratio has no r_ prefix: the runner writes it as an
     extra_field, not a perturbation-state-vector entry.
 
     ``edit_budget_k`` / ``precision`` / ``operation`` are the design/06 §6.6
@@ -117,7 +117,7 @@ def _run_statistical_models(rows, output_directory: Path) -> None:
     """Fit the confirmatory logistic GLMM, its linear-probability robustness
     appendix, and the mediation models (design/06 §6.6 and §6.8)."""
     # These imports are runtime-conditional (statsmodels + pandas are optional).
-    # Pyright reportMissingImports warnings here are expected — the packages are
+    # Pyright reportMissingImports warnings here are expected: the packages are
     # not in the dev-env requirements but ARE required for the confirmatory run.
     try:
         from analysis.models import (  # type: ignore[import]
@@ -166,7 +166,7 @@ def _run_statistical_models(rows, output_directory: Path) -> None:
         print(f"  Confirmatory GLMM failed: {error}", file=sys.stderr)
 
     # Robustness appendix: the linear-probability mixed model (risk-difference
-    # scale; no odds ratios — see LinearProbabilityMixedResult).
+    # scale; no odds ratios, see LinearProbabilityMixedResult).
     print("  Fitting linear-probability mixed model (appendix)...")
     try:
         linear_result = fit_linear_probability_mixed_model(data)

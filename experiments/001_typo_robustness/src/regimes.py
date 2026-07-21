@@ -5,7 +5,7 @@ Provenance
 ----------
 The three-regime separation is the framing contribution (design/01 §1.4,
 design/02 §2.4). It exists to prevent the most common critique of typo-
-robustness work — that the "typo" silently changed the question — by separating:
+robustness work (that the "typo" silently changed the question) by separating:
 
     Regime A  intent-preserving nonword typo
               The edit creates an invalid word; intent is preserved.
@@ -16,7 +16,7 @@ robustness work — that the "typo" silently changed the question — by separat
               the intent. Example: "France" -> "Finance". Motivated by ASR
               acoustic confusion (the dominant real-world real-word-shift error
               type), so the candidate pool includes phonetic homophones
-              ("weather"/"whether") alongside the orthographic DL band — see
+              ("weather"/"whether") alongside the orthographic DL band. See
               make_regime_b_real_word_shift below.
 
     Regime C  meaning-changing control
@@ -81,7 +81,7 @@ _OPERAND_DELTA_SCALES: tuple[int, ...] = (1, 2, 5)
 
 def load_wordlist(path: Optional[Path] = None) -> set[str]:
     """Load a set of lowercase words from a newline-delimited file. Defaults to
-    the bundled demo wordlist, which exists for smoke tests only — the real
+    the bundled demo wordlist, which exists for smoke tests only. The real
     study pins a full English dictionary (see make_is_word)."""
     resolved_path = Path(path) if path else _DEMO_WORDLIST_PATH
     return {line.strip().lower()
@@ -99,7 +99,7 @@ class WordSetPredicate:
     vocabulary.
 
     A plain closure (the prior implementation) can't cross into a worker
-    process via ``pickle`` — only module-level callables can — which is what
+    process via ``pickle`` (only module-level callables can), which is what
     makes ``build_requests`` (``pipeline/experiment.py``) parallelizable
     across a ``ProcessPoolExecutor``. Frozen + a ``frozenset`` field also
     keeps it hashable, which every ``lru_cache``-decorated function in
@@ -134,7 +134,7 @@ def derived_seed(base_seed: int, *parts) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Regime A — intent-preserving nonword typo.
+# Regime A: intent-preserving nonword typo.
 # ---------------------------------------------------------------------------
 
 def make_regime_a_nonword_typo(
@@ -195,7 +195,7 @@ def make_regime_a_nonword_typo(
 
 
 # ---------------------------------------------------------------------------
-# Regime A variant — discourse-particle filler-word insertion.
+# Regime A variant: discourse-particle filler-word insertion.
 # ---------------------------------------------------------------------------
 
 def make_regime_a_filler_insertion(
@@ -237,7 +237,7 @@ def make_regime_a_filler_insertion(
 
 
 # ---------------------------------------------------------------------------
-# Regime B — context-recoverable real-word shift.
+# Regime B: context-recoverable real-word shift.
 # ---------------------------------------------------------------------------
 
 def make_regime_b_real_word_shift(
@@ -264,11 +264,11 @@ def make_regime_b_real_word_shift(
     ``max_word_distance=1`` to restore the original orthographic-only DL=1
     behaviour for ablation comparisons.
 
-    ``phonetic_only`` restricts the candidate pool to CMU exact homophones —
+    ``phonetic_only`` restricts the candidate pool to CMU exact homophones,
     the pure acoustic-confusion proxy condition (SelectionPolicy.HOMOPHONE;
     crosswalks to the HIVE voice arm's clean+homophone operator). Items with
     no homophone-bearing word raise PerturbationError and land in the
-    exclusion sidecar, which is the honest record of that condition's yield.
+    exclusion sidecar, which records that condition's yield.
     """
     last_error: Optional[PerturbationError] = None
     selection_policy = (SelectionPolicy.HOMOPHONE if phonetic_only
@@ -309,7 +309,7 @@ def make_regime_b_real_word_shift(
 
 
 # ---------------------------------------------------------------------------
-# Regime C — meaning-changing controls, with the new gold known by construction.
+# Regime C: meaning-changing controls, with the new gold known by construction.
 # ---------------------------------------------------------------------------
 
 def make_regime_c_reasoning_operand_swap(
@@ -416,7 +416,7 @@ def make_regime_c_mcq_option_permutation(
     for general knowledge questions).
 
     Option-order sensitivity: Pezeshkpour & Hruschka (2023, arXiv:2308.11483)
-    report 13–75% performance gaps under option reordering — a model that
+    report 13–75% performance gaps under option reordering. A model that
     relies on option position rather than content will fail this control.
 
     Only permutations that move the gold content to a different label are

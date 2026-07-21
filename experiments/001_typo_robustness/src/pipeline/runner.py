@@ -10,7 +10,7 @@ The runner applies the model's chat template to every prompt before generation
 when the engine exposes ``apply_chat_template``. This guarantees the template
 is applied uniformly to clean and perturbed prompts alike and cannot be
 forgotten by a caller (design/05 §5.7). The DeterministicDummyEngine has no
-chat template, so dummy runs see the raw prompt — correct, since the dummy
+chat template, so dummy runs see the raw prompt. That is correct: the dummy
 answers by exact prompt lookup.
 """
 
@@ -41,7 +41,7 @@ _ROW_ID_HASH_HEX_LENGTH = 24
 _MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
 _MANIFEST_SHARD_STATISTICS_KEY = "shard_statistics"
 
-# DeterministicDummyEngine's revision id — a fixed, recognisable sentinel
+# DeterministicDummyEngine's revision id: a fixed, recognisable sentinel
 # (never a real HuggingFace revision SHA) so a generation row's provenance
 # makes it obvious the row came from the GPU-free dummy engine, not a model.
 DUMMY_ENGINE_REVISION = "dummy-engine-0"
@@ -101,7 +101,7 @@ class DeterministicDummyEngine:
 
     ``answer_function`` maps a prompt string to a generation string; the
     default echoes ``'#### 0'``. Has no chat template, so the runner sends it
-    the raw prompt — appropriate, since the dummy answers by exact prompt
+    the raw prompt, appropriate since the dummy answers by exact prompt
     lookup.
     """
 
@@ -130,7 +130,7 @@ class DeterministicDummyEngine:
         """Mirrors ``VllmEngine.generate_streaming``'s ``StreamedGeneration``
         yield contract so ``run_shard`` can drive either engine identically.
         Nothing here is actually concurrent (there is no GPU to schedule), so
-        this just yields every result in order — sufficient for exercising
+        this just yields every result in order, sufficient for exercising
         ``run_shard``'s incremental-write and resume behaviour in tests.
         Token counts are whitespace-word counts, good enough for tests.
         """
@@ -152,7 +152,7 @@ class ShardManifest:
     A resumed run loads this file and skips every shard already listed,
     so progress is never lost across session restarts (design/07 §7.7).
     The statistics (wall seconds, output tokens, tokens/sec) are what the
-    main-study compute budget is sized from (design/07 §7.5) — the per-row
+    main-study compute budget is sized from (design/07 §7.5). The per-row
     request_wall_seconds includes scheduler queue time and must not be summed.
     """
 
@@ -268,15 +268,15 @@ def run_shard(
     once, to every prompt.
 
     Every request already on disk (by ``row_id``) is skipped before
-    generation even starts, so re-running this function — after a crash, or
+    generation even starts, so re-running this function (after a crash, or
     as one of several parallel workers each handed a partition of the same
-    request list (design/07 §7.7) — never regenerates or duplicates a row.
+    request list, design/07 §7.7) never regenerates or duplicates a row.
 
     Rows are written and flushed to ``output_path`` as soon as each individual
     request finishes decoding (``engine.generate_streaming``), not after a
     fixed-size batch completes. A killed process therefore loses at most the
     handful of requests actually in flight at that moment, never an entire
-    batch — and, since vLLM's own continuous-batching scheduler (not a
+    batch. And, since vLLM's own continuous-batching scheduler (not a
     batch-size parameter here) decides how many requests run concurrently,
     this is also never slower than batching would have been.
 
@@ -374,7 +374,7 @@ def run_shard(
                 **request.extra_fields,
             }
 
-            # Inline scoring — always on (Workstream 5). Uses the full
+            # Inline scoring, always on (Workstream 5). Uses the full
             # four-way linguistic classifier when a spaCy pipeline is
             # provided; falls back to structural two-way otherwise.
             score_result = scoring.score(

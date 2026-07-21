@@ -1,7 +1,7 @@
 """Controlled-vocabulary enumerations for the typo-robustness study.
 
-Every string or discrete-numeric constant that identifies a category — operation
-names, selection policies, semantic classes, parse statuses, etc. — is defined
+Every string or discrete-numeric constant that identifies a category (operation
+names, selection policies, semantic classes, parse statuses, etc.) is defined
 here so that no bare string literal needs to be scattered across modules.
 
 All enums inherit from (str, Enum) with a __str__ override, which means:
@@ -99,8 +99,8 @@ class TaskFamily(_StrEnum):
 
     Contamination-contrast datasets (standard benchmarks, paired with primaries)
     ---------------------------------------------------------------------------
-    GSM8K                    openai/gsm8k — standard arithmetic reasoning
-    MMLU                     cais/mmlu — standard MCQ (4-option)
+    GSM8K                    openai/gsm8k, standard arithmetic reasoning
+    MMLU                     cais/mmlu, standard MCQ (4-option)
 
     Offline generators (unit tests / pilot / Regime C operand swap)
     ---------------------------------------------------------------
@@ -110,7 +110,7 @@ class TaskFamily(_StrEnum):
     Historical (backward-compat with old JSONL output only)
     --------------------------------------------------------
     GSM_SYMBOLIC             old tag written by early load_reasoning_jsonl versions;
-                             not in REASONING_FAMILIES — re-tag on load if present.
+                             not in REASONING_FAMILIES. Re-tag on load if present.
     """
     GSM_SYMBOLIC = "gsm_symbolic"               # historical; avoid in new code
     GSM_SYMBOLIC_OFFICIAL = "gsm_symbolic_official"
@@ -182,7 +182,7 @@ class FragmentationStratum(_StrEnum):
 class FinishReason(_StrEnum):
     """vLLM completion finish_reason values the pipeline distinguishes.
     TRUNCATED ("length") means the max_new_tokens budget cut the generation
-    off — the truncation-rate gate counts these rows."""
+    off. The truncation-rate gate counts these rows."""
     STOPPED = "stop"
     TRUNCATED = "length"
 
@@ -369,7 +369,7 @@ class UniversalDependenciesClosedClassPartOfSpeechTag(_StrEnum):
     and do not carry independent referential meaning.  They are excluded from
     the NER condition of the K_P(x) key-term rule: a preposition or article
     inside a named-entity span (e.g., "the" in "the United States" or "of" in
-    "State of California") is not a meaningful perturbation target — altering it
+    "State of California") is not a meaningful perturbation target: altering it
     produces ungrammatical output rather than a semantically distinct question.
 
     Source: Nivre et al. (2016) 'Universal Dependencies v1', LREC;

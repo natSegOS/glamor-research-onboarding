@@ -4,7 +4,7 @@ Each test guards the frozen annotation contract: which tokens count as
 answer-critical key terms, in what priority order, and the template-operand
 oracle that cross-checks the rule against known ground truth. Breaking any of
 them silently changes which words the informative_word and answer_critical
-policies are allowed to touch — after the datasets were frozen against the
+policies are allowed to touch, after the datasets were frozen against the
 old rule.
 """
 
@@ -85,7 +85,7 @@ class TestTokenIsKeyTerm:
         (dict(text="most", pos_="ADV", degree=["Sup"]), True),
         (dict(text="each", pos_="DET", pron_type=["Tot"]), True),
         # Main verbs carry the question's operation ("costs", "earns",
-        # "doubles") and are answer-critical by design — only copula/
+        # "doubles") and are answer-critical by design: only copula/
         # auxiliary verbs are excluded, not verbs in general.
         (dict(text="runs", pos_="VERB"), True),
         # A preposition with no special features is not a key term.
@@ -117,7 +117,7 @@ class TestComputeKeyTermSet:
             # A real spaCy pipeline tags a country name as a named entity (GPE);
             # ent_iob_="B" here reflects that, so "France" gets tier-1
             # (structurally guaranteed) priority ahead of the TF-IDF-ranked
-            # tier-2 tokens — the same priority a numeric operand or negation
+            # tier-2 tokens: the same priority a numeric operand or negation
             # gets, and for the same reason: it is answer-determining
             # regardless of corpus frequency.
             _KeyTermStubToken("France", pos_="PROPN", ent_iob_="B"),
@@ -161,8 +161,8 @@ class TestComputeKeyTermSet:
     def test_totality_quantifier_is_included(self):
         # A totality-quantifier DET is tier-2 (TF-IDF-ranked), not tier-1
         # (structurally guaranteed document order is reserved for named
-        # entities, numerals, and negation — see is_structurally_guaranteed
-        # in compute_key_term_set) — so only inclusion, not position, is
+        # entities, numerals, and negation, see is_structurally_guaranteed
+        # in compute_key_term_set), so only inclusion, not position, is
         # guaranteed here.
         tokens = [
             _KeyTermStubToken("each", pos_="DET", pron_type=["Tot"]),

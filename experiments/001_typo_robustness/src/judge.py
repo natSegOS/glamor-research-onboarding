@@ -340,12 +340,12 @@ def run_judge_on_sample(
     The alignment guarantee is the contract callers zip against: a Regime-C
     MCQ row (structurally guaranteed meaning-changing, no judge needed when
     ``skip_regime_c_mcq``) yields ``None`` in its position rather than being
-    silently dropped — dropping it shifted every later decision onto the
+    silently dropped. Dropping it shifted every later decision onto the
     wrong row in tools/sample_for_audit.py.
 
     Each row must carry: ``clean_prompt``, the perturbed text (either
-    ``perturbed_prompt`` — generation-row schema — or ``prompt`` — pairs-file
-    schema; see ``perturbed_text_of_row``), ``r_semantic_class``, and
+    ``perturbed_prompt``, the generation-row schema, or ``prompt``, the
+    pairs-file schema; see ``perturbed_text_of_row``), ``r_semantic_class``, and
     ``edit_script``. Only the CONTENT block is shown to the judge, never the
     shared instruction scaffold. Already-cached rows never re-invoke the engine.
     """

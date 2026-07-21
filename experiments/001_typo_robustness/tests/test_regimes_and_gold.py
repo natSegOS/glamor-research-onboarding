@@ -2,7 +2,7 @@
 
 Each test guards a CLASS of failures in the layer that turns clean items into
 regime-labeled perturbations. Breaking any of them mislabels regimes (the
-framing contribution) or scores rows against the wrong gold answer — the two
+framing contribution) or scores rows against the wrong gold answer: the two
 errors a hostile reviewer would consider fatal.
 """
 
@@ -90,7 +90,7 @@ class TestRegimeBConstruction:
 
     def test_real_word_shift_yields_distinct_valid_words(self, is_word):
         """Regime B's definition: every substituted word is a DIFFERENT valid
-        word — a nonword here is a mislabeled Regime-A item."""
+        word: a nonword here is a mislabeled Regime-A item."""
         _perturbed, _edits, metadata = regimes.make_regime_b_real_word_shift(
             REALISTIC_SENTENCE, 11, is_word, edit_budget=1)
         for before, after in metadata["edited_words"]:
@@ -147,7 +147,7 @@ class TestRegimeCGoldIntegrity:
 
     def test_regime_c_gold_of_zero_survives_the_request_builder(self, fake_tokenizer):
         """Falsy-zero regression: an operand swap CAN legitimately produce a
-        new gold of 0. The request builder must carry 0 forward — the
+        new gold of 0. The request builder must carry 0 forward. The
         pre-2026-07-20 `or`-chain silently fell back to the OLD gold and
         scored the row against the wrong answer."""
         from pipeline.experiment import PerturbationCondition, _build_synthetic_requests
@@ -175,7 +175,7 @@ class TestRegimeCGoldIntegrity:
 
     def test_mcq_permutation_tracks_gold_by_content_not_letter(self):
         """The permuted gold letter must point at the ORIGINAL gold content
-        and the option multiset must be unchanged — anything else double-
+        and the option multiset must be unchanged: anything else double-
         breaks the over-robustness control."""
         item = make_demonstration_multiple_choice_items()[0]
         _content, _edits, metadata = regimes.make_regime_c_mcq_option_permutation(item, 9)
@@ -237,7 +237,7 @@ class TestFragmentationCounterfactual:
         extractor ([A-Za-z]+) sees the word 'Python' there, but \\b-based
         application could not match it (digits are word characters to \\b)
         and raised mid-run. The contract is that anything the extractor can
-        select, the applier can apply — letter-lookarounds on both sides."""
+        select, the applier can apply: letter-lookarounds on both sides."""
         text = "only Python3 here"
         candidates = tokenization.ordered_counterfactual_candidate_words(
             text, lambda word: True)

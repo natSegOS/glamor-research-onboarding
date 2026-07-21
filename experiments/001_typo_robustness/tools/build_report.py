@@ -1,12 +1,12 @@
 """Build a self-contained, tabbed HTML dashboard from generation JSONL files.
 
-One file, five tabs, zero external dependencies (no CDN — opens offline):
+One file, five tabs, zero external dependencies (no CDN, opens offline):
 
-  Overview   — headline stat tiles, the Stage-1 gate readout per task family
-  Results    — filterable per-cell table + a delta-vs-severity chart
-  Mediation  — per-family indirect-effect forest plot + the Method A contrast
-  Items      — filterable per-item drill-down with exact clean→perturbed diffs
-  Run        — shard throughput, exclusions breakdown, provenance
+  Overview   : headline stat tiles, the Stage-1 gate readout per task family
+  Results    : filterable per-cell table + a delta-vs-severity chart
+  Mediation  : per-family indirect-effect forest plot + the Method A contrast
+  Items      : filterable per-item drill-down with exact clean→perturbed diffs
+  Run        : shard throughput, exclusions breakdown, provenance
 
 All statistics are recomputed from the rows via the same analysis code the
 paper uses (analysis.results / analysis.gates); the mediation JSON is embedded

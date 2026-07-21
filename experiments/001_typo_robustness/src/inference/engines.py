@@ -28,8 +28,8 @@ class StreamedGeneration:
     """One finished generation from ``generate_streaming``.
 
     ``request_wall_seconds`` is submit-to-finish wall time for this request.
-    Under continuous batching that includes scheduler queue time, so it is an
-    honest per-request latency, not a decode cost — throughput comes from the
+    Under continuous batching that includes scheduler queue time, so it is a
+    per-request latency, not a decode cost. Throughput comes from the
     shard-level totals the runner records.
     """
     prompt_index: int
@@ -50,7 +50,7 @@ _GREEDY_TEMPERATURE = 0.0
 _GREEDY_TOP_P       = 1.0
 
 # vLLM 0.10's prefix-prefill Triton kernel fails to compile at scale on
-# pre-Ampere GPUs (Turing/T4 = compute capability 7.5) — a GPU-architecture
+# pre-Ampere GPUs (Turing/T4 = compute capability 7.5). This is a GPU-architecture
 # property, not a model property, so it is detected here at engine init rather
 # than configured per roster entry.
 _MINIMUM_COMPUTE_CAPABILITY_FOR_PREFIX_CACHING = (8, 0)
@@ -74,8 +74,8 @@ def apply_chat_template(
 
     Standalone so it can be applied identically to a bare HF tokenizer (e.g.
     for pre-flight context-length sizing in pipeline.experiment, before a vLLM
-    engine exists) and to the tokenizer vLLM ends up loading internally —
-    both are the same model's ``AutoTokenizer``, so the two never diverge.
+    engine exists) and to the tokenizer vLLM ends up loading internally.
+    Both are the same model's ``AutoTokenizer``, so the two never diverge.
 
     ``system_message`` is included only when the tokenizer's chat template
     declares a "system" role slot; otherwise it is prepended to the user turn
@@ -83,8 +83,8 @@ def apply_chat_template(
 
     ``exemplar_turns`` are fixed few-shot (user, assistant) message pairs
     inserted before the final user turn (design/05 §5.7: identical across all
-    conditions and models, never perturbed). Chat-form exemplars — where the
-    model sees assistant turns that literally end in the required format —
+    conditions and models, never perturbed). Chat-form exemplars (where the
+    model sees assistant turns that literally end in the required format)
     measured far stronger format compliance on small instruct models than the
     same exemplars inlined into the instruction text.
     """
@@ -150,8 +150,8 @@ class VllmEngine:
         self.tokenizer = self._language_model.get_tokenizer()
 
         # Monotonic counter for vLLM engine request IDs (generate_streaming),
-        # unique across every call for the lifetime of this engine instance —
-        # several shards may stream through the same engine object in one run.
+        # unique across every call for the lifetime of this engine instance.
+        # Several shards may stream through the same engine object in one run.
         self._next_request_id = 0
 
     def _greedy_sampling_params(self, max_new_tokens: int):
@@ -174,7 +174,7 @@ class VllmEngine:
         """Generate greedily for a batch of ALREADY CHAT-TEMPLATED prompts.
 
         Blocks until every prompt in ``prompts`` has finished, then returns all
-        outputs at once — appropriate for a single small one-off call (e.g. the
+        outputs at once. Appropriate for a single small one-off call (e.g. the
         LLM-judge in judge.py), but not for the main sweep: a caller that wants
         to persist each row as soon as it is ready (surviving a mid-run crash
         with minimal lost work) should use ``generate_streaming`` instead.
@@ -187,13 +187,13 @@ class VllmEngine:
             self, prompts: Sequence[str], max_new_tokens: int,
     ) -> Iterator[StreamedGeneration]:
         """Generate greedily, yielding a ``StreamedGeneration`` the instant
-        each prompt's decoding finishes — not only once every prompt in
+        each prompt's decoding finishes, not only once every prompt in
         ``prompts`` has, and not in submission order.
 
         Drives vLLM's engine directly (``add_request`` + ``step``) instead of
         the blocking bulk ``LLM.generate`` call that ``generate`` above uses.
-        vLLM's own scheduler is unchanged — it still decides how many requests
-        run concurrently via continuous batching — this only changes *when*
+        vLLM's own scheduler is unchanged (it still decides how many requests
+        run concurrently via continuous batching). This only changes *when*
         the caller is handed a finished result: as soon as that one request is
         done, rather than after the slowest request in the batch. That lets a
         caller (``pipeline.runner.run_shard``) persist and flush each row

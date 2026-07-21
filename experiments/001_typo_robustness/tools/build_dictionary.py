@@ -2,7 +2,7 @@
 
 This is a one-time pre-processing step (design/04 §4.7, design/10 §10).
 It builds the vocabulary that ``regimes.make_is_word`` uses to decide whether a
-candidate perturbation lands on a real English word — which determines whether a
+candidate perturbation lands on a real English word, which determines whether a
 Regime A (nonword) typo accidentally becomes a Regime B (real-word shift) item.
 The script records the SCOWL version, dialect, size band, and file SHA-256 in a
 provenance sidecar so the is_word boundary is reproducible and auditable.
@@ -33,16 +33,16 @@ full bundle: it merges only the ``words`` sub-category, for ``english`` (the
 dialect-neutral core) plus the one requested dialect.
 
 The reason is what ``is_word`` is *for*: deciding whether an edited token is
-a real word a reader would recognise as a distinct, meaningful word — the
+a real word a reader would recognise as a distinct, meaningful word: the
 distinction that separates Regime A (nonword typo) from Regime B (context-recoverable
 real-word shift). ``abbreviations``/``upper``/``proper-names`` and the
 ``special`` category exist in SCOWL to keep a *spell-checker* from flagging
-"Mr.", "TCP", or "IV" as misspelled — a different question, and one whose
+"Mr.", "TCP", or "IV" as misspelled: a different question, and one whose
 entries (mostly short, lower-cased abbreviations and roman numerals) are not
 "real words" in the reader-recognition sense this predicate needs. Measured
 effect of including them anyway: at size band 60, the full ``mk-list`` bundle
 counts 100% of all single letters, 51.8% of two-letter strings, and 7.3% of
-three-letter strings as "real words" — which would (a) inflate false "landed
+three-letter strings as "real words", which would (a) inflate false "landed
 on a real word" rejections when constructing Regime A items, and (b) let
 Regime B accept a substitution into an abbreviation or proper name as if it
 were a context-recoverable real-word shift, which it is not. ``contractions``
@@ -53,7 +53,7 @@ enter the vocabulary regardless.
 This still keeps every citability/reproducibility property the SCOWL choice
 was made for: SCOWL is still the sole source, ``--scowl-dialect`` (default:
 ``american``) still selects exactly one dialect category (never merged with
-others — see below), and the exact files plus their SHA-256 are still
+others, see below), and the exact files plus their SHA-256 are still
 recorded in ``PROVENANCE.json``. It is simply a narrower, and more construct-
 valid, slice of SCOWL than the stock ``mk-list`` bundle.
 
@@ -61,14 +61,14 @@ Dialect scoping (single dialect only)
 --------------------------------------
 SCOWL's own documentation (``scowl/README.in``) is explicit that files should
 be combined as the ``english`` spelling category plus **one** dialect category
-("american", "british", "british_z", "canadian", or "australian") — never
+("american", "british", "british_z", "canadian", or "australian"), never
 several dialects at once. Merging multiple dialects together (e.g. american +
 british + canadian + australian, as an earlier version of this script did by
 filtering on the numeric size suffix alone, ignoring the file-name prefix) is
 not SCOWL's documented usage: it silently pulls in every dialect's spelling
 variants (color/colour, realize/realise, ...) into a single is_word boundary
 and is not something a reader familiar with SCOWL would recognize as "the
-size-60 SCOWL list" — undermining exactly the citability/reproducibility
+size-60 SCOWL list", undermining exactly the citability/reproducibility
 argument for using SCOWL in the first place.
 
 Download
@@ -88,7 +88,7 @@ Note: as of this writing, 2020.12.07 is the newest version for which SCOWL
 publishes a prebuilt word-list archive in this format.  The upstream project's
 newer releases (tracked at github.com/en-wl/wordlist) ship built Hunspell/
 Aspell dictionaries only, not the flat SCOWL ``final/`` word lists this script
-consumes — so pinning to 2020.12.07 is not staleness, it is the latest
+consumes, so pinning to 2020.12.07 is not staleness, it is the latest
 available prebuilt SCOWL release.  Re-check SourceForge
 (https://sourceforge.net/projects/wordlist/files/SCOWL/) before a real study
 run in case that has changed.
@@ -131,14 +131,14 @@ def _matching_word_list_files(
     forms), ``proper-names``, ``abbreviations``, ``contractions``, and the
     ``special`` category (``hacker`` jargon, ``roman-numerals``). Those
     sub-categories exist in SCOWL so a *spell-checker* doesn't flag "Mr.",
-    "TCP", or "IV" as misspelled — a different question from the one
+    "TCP", or "IV" as misspelled: a different question from the one
     ``regimes.make_is_word`` asks, which is whether an edited token is a real
     word a reader would recognise as a distinct, meaningful English word
     (this decides the Regime A/Regime B boundary; design/04 §4.7). Measured
     effect of including them: at SCOWL's size-60 band, the full ``mk-list``
     bundle counts 100% of all single letters, 51.8% of all two-letter
     strings, and 7.3% of all three-letter strings as "real words" (mostly
-    lower-cased abbreviations and roman numerals) — which inflates false
+    lower-cased abbreviations and roman numerals), which inflates false
     "landed on a real word" rejections in Regime A's construction and would,
     if used the other way, let Regime B accept a substitution into an
     abbreviation or proper name as a "context-recoverable real-word shift,"

@@ -99,7 +99,7 @@ class TestEngineContractAcrossAllPolicies:
     @pytest.mark.parametrize("operation", [
         Operation.SUBSTITUTE, Operation.DELETE, Operation.INSERT, Operation.TRANSPOSE])
     def test_zero_budget_is_identity(self, operation, is_word):
-        """k=0 must return the input untouched — a nonzero-effect 'clean'
+        """k=0 must return the input untouched: a nonzero-effect 'clean'
         arm would corrupt every matched pair in the study."""
         perturbed, edits = perturb(
             REALISTIC_SENTENCE, operation, Unit.CHAR, Scope.ANYWHERE, 0,
@@ -135,7 +135,7 @@ class TestEngineContractAcrossAllPolicies:
     @given(seed=strategies.integers(min_value=0, max_value=10_000))
     def test_keyboard_policy_draws_only_qwerty_neighbors_case_preserved(self, seed):
         """Every substitution must come from the QWERTY adjacency graph with
-        case preserved — the citable MulTypo replacement operation. Breaking
+        case preserved: the citable MulTypo replacement operation. Breaking
         this severs the keyboard-plausibility claim of Regime A."""
         is_word = DEMO_IS_WORD
         _perturbed, edits = _perturb_realistic(
@@ -150,7 +150,7 @@ class TestPolicyPoolFidelity:
     def test_real_word_policy_produces_distinct_valid_words(
             self, small_vocabulary_is_word):
         """The real_word pool must contain only in-vocabulary words distinct
-        from the source — otherwise Regime B items are mislabeled."""
+        from the source. Otherwise Regime B items are mislabeled."""
         perturbed, edits = perturb(
             "the cat sat", Operation.SUBSTITUTE, Unit.WORD, Scope.ANYWHERE, 1,
             SelectionPolicy.REAL_WORD, SemanticClass.B, 3,
@@ -161,7 +161,7 @@ class TestPolicyPoolFidelity:
         assert edit.word_after in perturbed
 
     def test_homophone_policy_draws_only_cmu_exact_homophones(self, is_word):
-        """The HOMOPHONE pool must be exactly the CMU same-pronunciation set —
+        """The HOMOPHONE pool must be exactly the CMU same-pronunciation set:
         an orthographic neighbor sneaking in would mislabel the pure
         acoustic-confusion condition."""
         pytest.importorskip("pronouncing")
@@ -176,7 +176,7 @@ class TestPolicyPoolFidelity:
 
     def test_homophone_policy_fails_loudly_when_no_word_has_a_homophone(
             self, small_vocabulary_is_word):
-        """With no homophone-bearing word the policy must raise — silently
+        """With no homophone-bearing word the policy must raise: silently
         substituting an orthographic neighbor would corrupt the condition."""
         with pytest.raises(PerturbationError):
             perturb("the cat sat", Operation.SUBSTITUTE, Unit.WORD,
@@ -186,7 +186,7 @@ class TestPolicyPoolFidelity:
     def test_filler_policy_inserts_only_frozen_particles_as_standalone_tokens(
             self, is_word):
         """Fillers must come from the frozen 4-particle set and land between
-        words — any other token or position voids the 'definitionally
+        words: any other token or position voids the 'definitionally
         intent-preserving' claim."""
         perturbed, edits = _perturb_realistic(
             SelectionPolicy.FILLER_WORD, Operation.INSERT, 13, is_word,
@@ -198,7 +198,7 @@ class TestPolicyPoolFidelity:
             assert f" {edit.word_after} " in perturbed
 
     def test_whitespace_merge_records_the_merged_token(self, is_word):
-        """The missed-space merge must record the fused token as word_after —
+        """The missed-space merge must record the fused token as word_after:
         that field is what lets the Regime-A builder reject merges that land
         on real words ('a part' → 'apart')."""
         perturbed, edits = _perturb_realistic(
@@ -213,7 +213,7 @@ class TestDistanceOracle:
 
     @staticmethod
     def _reference_osa_distance(first: str, second: str) -> int:
-        """Dependency-free OSA dynamic program — the oracle the C-optimized
+        """Dependency-free OSA dynamic program: the oracle the C-optimized
         rapidfuzz delegate is held to."""
         rows, columns = len(first) + 1, len(second) + 1
         table = [[0] * columns for _ in range(rows)]
@@ -255,7 +255,7 @@ class TestDistanceOracle:
            second=strategies.text(alphabet="abcde", max_size=8))
     def test_distance_matches_pure_python_oracle_on_random_sphere(
             self, first, second):
-        """rapidfuzz's OSA must agree with the dependency-free DP everywhere —
+        """rapidfuzz's OSA must agree with the dependency-free DP everywhere:
         this is what makes the C dependency auditable."""
         assert damerau_levenshtein_distance(first, second) == (
             self._reference_osa_distance(first, second))
@@ -274,13 +274,13 @@ class TestAdversarialInputs:
             self, text, operation, policy, is_word):
         """Inputs with no eligible edit position must raise PerturbationError
         (→ exclusion sidecar), never return corrupted or unchanged text as if
-        perturbed — silent failures here poison matched pairs."""
+        perturbed. Silent failures here poison matched pairs."""
         with pytest.raises(PerturbationError):
             perturb(text, operation, Unit.CHAR, Scope.ANYWHERE, 1,
                     policy, SemanticClass.A, 3, is_word=is_word)
 
     def test_budget_larger_than_eligible_positions_raises(self, is_word):
-        """A budget the text cannot absorb must fail loudly — partial
+        """A budget the text cannot absorb must fail loudly: partial
         application would break budget exactness."""
         with pytest.raises(PerturbationError):
             perturb("hi", Operation.DELETE, Unit.CHAR, Scope.ANYWHERE, 3,
@@ -309,7 +309,7 @@ class TestAdversarialInputs:
 
     def test_scope_preconditions_are_enforced(self, is_word):
         """answer_critical without key_terms, and content/instruction without
-        scope_spans, must raise — guessing a scope would silently perturb the
+        scope_spans, must raise: guessing a scope would silently perturb the
         wrong region."""
         with pytest.raises(PerturbationError):
             perturb(REALISTIC_SENTENCE, Operation.SUBSTITUTE, Unit.CHAR,
@@ -325,7 +325,7 @@ class TestAdversarialInputs:
            seed=strategies.integers(min_value=0, max_value=1_000))
     def test_arbitrary_unicode_never_crashes_the_engine(self, text, seed):
         """On arbitrary text (emoji, RTL, control chars) the engine either
-        satisfies its full contract or raises PerturbationError — no third
+        satisfies its full contract or raises PerturbationError: no third
         outcome, no exception of any other type."""
         is_word = DEMO_IS_WORD
         try:

@@ -6,8 +6,8 @@ This package implements Stage 0 of the three-stage pipeline:
     Stage 1  experiment     →  raw generation outputs            (pipeline/)
     Stage 2  scoring        →  scored generation outputs         (scoring.py)
 
-Stage 0 uses a pinned, deterministic linguistic pipeline — spaCy with a
-versioned English model (see data/items/annotation_PROVENANCE.json) — to
+Stage 0 uses a pinned, deterministic linguistic pipeline (spaCy with a
+versioned English model, see data/items/annotation_PROVENANCE.json) to
 compute the formally-defined key-term set K_P(x) for every item before the
 experiment runs.  The annotations are written into the JSONL item files and
 committed as frozen artifacts, so the experiment is a pure consumer and no

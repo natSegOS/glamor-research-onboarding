@@ -81,7 +81,7 @@ _MODEL_SPECIFICATIONS: tuple[ModelSpecification, ...] = (
     ModelSpecification(
         "mistral_7b", "mistralai/Mistral-7B-Instruct-v0.3", REVISION_PLACEHOLDER, Precision.FP16),
 
-    # Cross-family regime-audit judge. Gemma 2 9B is from Google DeepMind —
+    # Cross-family regime-audit judge. Gemma 2 9B is from Google DeepMind:
     # a distinct pre-training corpus and architecture from every generation
     # model in this study (Llama = Meta, Qwen = Alibaba, Mistral = Mistral AI).
     # Cross-family selection is required so that the judge's own tendencies

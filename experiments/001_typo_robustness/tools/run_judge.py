@@ -20,7 +20,7 @@ Design constraints:
     reported as a calibration statistic only; the judge is NEVER the final authority.
 
 What happens to flagged pairs (the analysis-time exclusion path):
-    Flagged pairs are NOT removed from the generation queue — removing them
+    Flagged pairs are NOT removed from the generation queue: removing them
     there would change deterministic row IDs and break resume semantics, and
     it would let an LLM judge silently veto items, which design/09 §9.7
     forbids. Instead, flagged pairs are routed to the human audit with
@@ -35,7 +35,7 @@ Usage:
         --judge-cache data/perturbations/judge_cache.jsonl \\
         --output-flagged data/perturbations/pilot_flagged.jsonl
 
-To skip actual inference (dry run — mark all as unchecked):
+To skip actual inference (dry run, mark all as unchecked):
 
     python tools/run_judge.py --pairs ... --dry-run
 """

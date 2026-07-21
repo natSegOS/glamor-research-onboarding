@@ -2,17 +2,17 @@
 
 Provenance
 ----------
-Confirmatory model — a **logistic** mixed model, never a linear one:
-  Jaeger (2008) — why binary accuracy demands a logit link, not a linear model.
-  Baayen, Davidson & Bates (2008) — crossed random effects for items and models.
-  Barr, Levy, Scheepers & Tily (2013) — maximal random effects, and the
+Confirmatory model: a **logistic** mixed model, never a linear one.
+  Jaeger (2008): why binary accuracy demands a logit link, not a linear model.
+  Baayen, Davidson & Bates (2008): crossed random effects for items and models.
+  Barr, Levy, Scheepers & Tily (2013): maximal random effects, and the
   convergence-simplification guidance (pp. 275–276) the ladder below encodes.
 The estimator is ``lme4::glmer`` (binomial, logit link, bobyqa optimizer)
-reached through the rpy2 bridge — the same estimator the cited literature is
+reached through the rpy2 bridge, the same estimator the cited literature is
 built on. When no R installation is present the ladder degrades to the
 pure-Python fixed-factor logistic GLM rung with a loud ``method`` label.
 
-Mediation — the general algorithm of Imai, Keele & Tingley (2010):
+Mediation: the general algorithm of Imai, Keele & Tingley (2010):
   a mixed linear model for the (continuous) mediator, a mixed **logistic**
   model (by-item intercept) for the binary outcome, and effects computed on
   the probability scale by the paper's quasi-Bayesian Monte Carlo algorithm
@@ -74,7 +74,7 @@ def _with_token_inflation_excess(data):
 class MixedEffectsLogisticResult:
     """Summary of the confirmatory logistic mixed model (or its GLM fallback).
 
-    ``fixed_effects`` values carry ``coef`` (log-odds), ``or`` (exp(coef) — a
+    ``fixed_effects`` values carry ``coef`` (log-odds), ``or`` (exp(coef), a
     real odds ratio, because every rung of this ladder is logistic),
     ``std_error``, and ``p`` (Wald z). ``ladder_notes`` records why each
     earlier rung was rejected, so a non-maximal ``method`` is self-explaining.
@@ -97,7 +97,7 @@ class LinearProbabilityMixedResult:
     """Robustness-appendix estimator: linear mixed model on the 0/1 outcome.
 
     Coefficients are risk differences (probability-scale changes). There is
-    deliberately no odds-ratio field — exponentiating a linear-probability
+    deliberately no odds-ratio field: exponentiating a linear-probability
     coefficient produces a number with no interpretation, which is exactly the
     mislabeling this dataclass exists to prevent.
     """
@@ -125,11 +125,11 @@ class MediationResult:
 
     ``proportion_mediated`` is a ratio with the total effect in the
     denominator; it explodes near a zero total (VanderWeele), so it is
-    reported only when the bootstrapped total-effect CI excludes zero —
-    otherwise it is None and ``proportion_mediated_reason`` says why.
+    reported only when the bootstrapped total-effect CI excludes zero.
+    Otherwise it is None and ``proportion_mediated_reason`` says why.
 
     ``treatment_on_mediator_coef`` is the mediator model's α (mediator units);
-    ``mediator_on_outcome_coef`` is the outcome model's β — log-odds per
+    ``mediator_on_outcome_coef`` is the outcome model's β: log-odds per
     mediator unit on the quasi-Bayes path, probability per unit on the
     offline fallback path (see ``estimator``).
     """
@@ -147,7 +147,7 @@ class MediationResult:
     bootstrap_ci_total: Optional[tuple] = None
     proportion_mediated_reason: Optional[str] = None
     # Which estimator produced these numbers (quasi-Bayes mixed-logistic vs
-    # labeled offline fallback) — set by compute_mediation_proportion.
+    # labeled offline fallback), set by compute_mediation_proportion.
     estimator: str = ""
 
 
@@ -292,7 +292,7 @@ def _random_effect_ladder(model_count: int) -> list[tuple[ConvergenceMethod, str
     """The pre-registered random-effects simplification ladder (Barr 2013).
 
     With a single model in the data (the pilot case) the by-model grouping
-    factor has one level — lme4 refuses it, correctly — so the by-model terms
+    factor has one level (lme4 refuses it, correctly), so the by-model terms
     are omitted and rungs that then render identically are deduplicated.
     """
     has_multiple_models = model_count > 1
@@ -340,8 +340,8 @@ def fit_crossed_mixed_effects_logistic(data) -> MixedEffectsLogisticResult:
 
     Rungs 1–4 are ``lme4::glmer`` fits with progressively simpler random
     effects (see ``_random_effect_ladder``); a rung is accepted only when it
-    converges with a non-singular random-effects estimate. Rung 5 — also the
-    offline fallback when no R/lme4 bridge exists — is a logistic GLM with
+    converges with a non-singular random-effects estimate. Rung 5 (also the
+    offline fallback when no R/lme4 bridge exists) is a logistic GLM with
     item and model as fixed factors. Every rejected rung leaves a note in
     ``ladder_notes``.
 
@@ -420,13 +420,13 @@ def _pack_glmer_result(glmer_fit: _GlmerFit, method: ConvergenceMethod,
 def _fit_fixed_effects_logistic_glm(data, fixed_terms, n_observations: int,
                                     n_items: int, n_models: int,
                                     ladder_notes: list) -> MixedEffectsLogisticResult:
-    """Rung 5: logistic GLM with item and model as fixed factors — the
+    """Rung 5: logistic GLM with item and model as fixed factors, the
     design/06 §6.6 step-(3) contingency and the offline fallback.
 
     Caveat (why this is a fallback and never the estimator of record): with
     few rows per item, per-item dummies in a logit carry the classic
-    incidental-parameters bias — slope magnitudes inflate several-fold on
-    2-row panels — so this rung's coefficients are directionally informative
+    incidental-parameters bias (slope magnitudes inflate several-fold on
+    2-row panels), so this rung's coefficients are directionally informative
     but not magnitude-faithful. Confirmatory artifacts come from the glmer
     rungs (see tests/test_models_glmm_mediation.py for the demonstration)."""
     import numpy
@@ -486,7 +486,7 @@ def _fit_fixed_effects_logistic_glm(data, fixed_terms, n_observations: int,
 # ---------------------------------------------------------------------------
 
 def fit_linear_probability_mixed_model(data) -> LinearProbabilityMixedResult:
-    """Linear mixed model on the 0/1 outcome — the risk-difference-scale
+    """Linear mixed model on the 0/1 outcome: the risk-difference-scale
     robustness check reported in the appendix, never the confirmatory model.
 
     By-item random intercept and is_perturbed slope, statsmodels ``MixedLM``.
@@ -565,7 +565,7 @@ def _pack_linear_probability_result(fitted, n_observations: int) -> LinearProbab
 
 def _fit_failure_exceptions() -> tuple:
     """Exceptions statsmodels/numpy raise for a numerical fit failure (singular
-    matrix, non-convergence, quasi-complete separation) — expected, and what
+    matrix, non-convergence, quasi-complete separation). Expected, and what
     the ladders and bootstrap absorb. Anything else is a real bug in the
     calling code and must propagate."""
     import numpy
@@ -575,7 +575,7 @@ def _fit_failure_exceptions() -> tuple:
 
 # Estimator labels serialized with every mediation result. The item structure
 # is load-bearing here: a pooled (no-item-effect) outcome model flips the
-# mediator coefficient's sign on the pilot data (between-item confounding —
+# mediator coefficient's sign on the pilot data (between-item confounding:
 # items that tokenize long are not exchangeable with items that tokenize
 # short), so both estimators below condition on the item.
 MEDIATION_ESTIMATOR_QUASIBAYES = (
@@ -647,8 +647,8 @@ class _MediationDecomposition:
     """One estimator's decomposition. On both estimator paths the three
     effects satisfy total = direct + indirect exactly."""
     treatment_on_mediator: float      # α (mediator units)
-    mediator_on_outcome: float        # β (log-odds per unit — quasi-Bayes path;
-                                      #    probability per unit — offline fallback)
+    mediator_on_outcome: float        # β (log-odds per unit, quasi-Bayes path;
+                                      #    probability per unit, offline fallback)
     indirect_effect: float
     direct_effect: float
 
@@ -698,8 +698,8 @@ def _fit_offline_fallback_decomposition(
         data, mediator_column: str) -> _MediationDecomposition:
     """Offline fallback: within-item linear α·β, with the item fixed effects
     absorbed exactly by demeaning every variable within its item (the "within"
-    estimator). Uses only within-item variation — the same identification
-    logic as the paired McNemar design — so between-item confounding cannot
+    estimator). Uses only within-item variation (the same identification
+    logic as the paired McNemar design), so between-item confounding cannot
     touch it, and the pure-numpy least squares makes a B = 1,000 cluster
     bootstrap cost seconds. A linear-probability approximation, labeled as
     such in the result; confirmatory artifacts use the quasi-Bayesian
@@ -854,7 +854,7 @@ def _bootstrap_fallback_intervals(
     estimator's indirect effect, total effect, and proportion mediated.
 
     Each resampled item gets a fresh task_id so an item drawn twice counts as
-    two clusters — filtering the original frame with ``isin`` would silently
+    two clusters. Filtering the original frame with ``isin`` would silently
     deduplicate and understate the variance.
     """
     import numpy

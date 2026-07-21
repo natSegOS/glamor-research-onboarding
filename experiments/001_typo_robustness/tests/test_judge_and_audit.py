@@ -80,7 +80,7 @@ def _rating(item_id: str, annotator_id: str, intent_preserved: bool,
 
 
 # ---------------------------------------------------------------------------
-# 1. Judge JSON parsing — the regex contract and vocabulary validation.
+# 1. Judge JSON parsing: the regex contract and vocabulary validation.
 # ---------------------------------------------------------------------------
 
 class TestJudgeResponseParsing:
@@ -141,7 +141,7 @@ class TestJudgeResponseParsing:
 
 
 # ---------------------------------------------------------------------------
-# 2. Decision cache — content-addressed round-trip through disk.
+# 2. Decision cache: content-addressed round-trip through disk.
 # ---------------------------------------------------------------------------
 
 class TestJudgeDecisionCache:
@@ -205,7 +205,7 @@ class TestJudgeDecisionCache:
 
 
 # ---------------------------------------------------------------------------
-# 3. run_judge_on_sample alignment — the Stage-2-critical contract that
+# 3. run_judge_on_sample alignment: the Stage-2-critical contract that
 #    tools/sample_for_audit.py zips against.
 # ---------------------------------------------------------------------------
 
@@ -248,7 +248,7 @@ class TestRunJudgeOnSampleAlignment:
 
 
 # ---------------------------------------------------------------------------
-# 4. perturbed_text_of_row — tolerance for both row schemas.
+# 4. perturbed_text_of_row: tolerance for both row schemas.
 # ---------------------------------------------------------------------------
 
 class TestPerturbedTextSchemaTolerance:
@@ -291,7 +291,7 @@ class TestPerturbedTextSchemaTolerance:
 
 
 # ---------------------------------------------------------------------------
-# 5. Fleiss' kappa — golden values and malformed-input rejection.
+# 5. Fleiss' kappa: golden values and malformed-input rejection.
 # ---------------------------------------------------------------------------
 
 class TestFleissKappaGoldens:
@@ -331,7 +331,7 @@ class TestFleissKappaGoldens:
 
 
 # ---------------------------------------------------------------------------
-# 6. Audit resolution — majority vote, adjudication, the Regime-A-only
+# 6. Audit resolution: majority vote, adjudication, the Regime-A-only
 #    exclusion rule, and the two-kappa gate.
 # ---------------------------------------------------------------------------
 

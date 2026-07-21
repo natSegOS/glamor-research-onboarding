@@ -35,7 +35,7 @@ from enums import McNemarTestMethod, SampleSizeMethod
 class TestMcNemar:
 
     def test_dispatch_rule_is_count_based_and_fixed(self):
-        """Exact mid-p below 25 discordants, asymptotic at/above — the rule is
+        """Exact mid-p below 25 discordants, asymptotic at/above: the rule is
         fixed in advance; drifting it would let the test be chosen after
         seeing the p-value."""
         assert mcnemar_test(10, 5).method == McNemarTestMethod.EXACT_MIDP
@@ -54,7 +54,7 @@ class TestMcNemar:
            recovered=strategies.integers(min_value=0, max_value=200))
     def test_symmetry_and_probability_bounds_hold_everywhere(self, broke, recovered):
         """McNemar is symmetric in (broke, recovered) and always yields a
-        valid probability — an asymmetry would bias the two-sided test."""
+        valid probability: an asymmetry would bias the two-sided test."""
         forward = mcnemar_test(broke, recovered)
         backward = mcnemar_test(recovered, broke)
         assert forward.p_value == pytest.approx(backward.p_value)
@@ -72,7 +72,7 @@ class TestSampleSizeGoldens:
             self, delta, discordant, expected_simple, expected_connor):
         """The design tables use the SIMPLE planning approximation (628/873/
         314); Connor eq. (3) gives 626/870/312. The reference audit found
-        these attributed to the wrong formula — this test pins both so the
+        these attributed to the wrong formula. This test pins both so the
         attribution can never silently swap again."""
         assert mcnemar_sample_size(delta, discordant,
                                    method=SampleSizeMethod.SIMPLE) == expected_simple
@@ -83,7 +83,7 @@ class TestSampleSizeGoldens:
     @given(delta=strategies.floats(min_value=0.01, max_value=0.2),
            headroom=strategies.floats(min_value=1.05, max_value=8.0))
     def test_connor_never_exceeds_the_simple_approximation(self, delta, headroom):
-        """√(p_d − δ²) ≤ √p_d, so Connor ≤ simple everywhere — the direction
+        """√(p_d − δ²) ≤ √p_d, so Connor ≤ simple everywhere: the direction
         the design relies on when it plans with the simple formula."""
         discordant = min(delta * headroom, 1.0)
         assert (mcnemar_sample_size(delta, discordant, method=SampleSizeMethod.CONNOR)
@@ -105,7 +105,7 @@ class TestSampleSizeGoldens:
 class TestPairedTableAndMetrics:
 
     def test_quadrants_partition_the_items_exactly(self):
-        """a+b+c+d must equal n for every input — a lost pair silently biases
+        """a+b+c+d must equal n for every input: a lost pair silently biases
         every downstream metric."""
         table = build_paired_table([1, 1, 0, 0, 1], [1, 0, 1, 0, 0])
         assert (table.both_correct, table.broke, table.recovered, table.both_wrong) == (
@@ -119,7 +119,7 @@ class TestPairedTableAndMetrics:
             build_paired_table([1, 0], [1])
 
     def test_metric_definitions_and_degenerate_guards(self):
-        """Δ, CCF, retention, discordant rate — exact definitional values on a
+        """Δ, CCF, retention, discordant rate: exact definitional values on a
         crafted table, and NaN (never a crash or a fake 0) on degenerate input."""
         clean, perturbed = [1, 1, 1, 0], [1, 0, 0, 0]
         assert paired_degradation(clean, perturbed) == pytest.approx(0.5)
@@ -160,8 +160,8 @@ class TestBootstrapIntervals:
             bootstrap_confidence_interval_paired([1], [0], "delta")
 
     def test_summarize_cell_reports_everything_a_reader_needs_to_recompute(self):
-        """The per-cell block must carry raw counts + test + interval —
-        design/06 §6.10's reporting standard."""
+        """The per-cell block must carry raw counts + test + interval
+        (design/06 §6.10's reporting standard)."""
         summary = summarize_cell([1, 1, 0, 1, 0, 1], [1, 0, 0, 1, 0, 0],
                                  resamples=200)
         for required_key in ("n", "broke", "recovered", "delta", "delta_ci_low",
@@ -187,7 +187,7 @@ class TestMultiplicityAdjustments:
 
     def test_nan_entries_neither_crash_nor_consume_correction_budget(self):
         """A cell with no computable test must stay NaN in place while the
-        rest are adjusted as a 2-test family — including it would make every
+        rest are adjusted as a 2-test family. Including it would make every
         real correction too harsh."""
         adjusted = benjamini_hochberg_adjusted_p_values([0.01, float("nan"), 0.04])
         assert math.isnan(adjusted[1])
