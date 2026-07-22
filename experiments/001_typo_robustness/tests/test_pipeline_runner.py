@@ -332,3 +332,148 @@ class TestExclusionRecordContent:
         assert record["edit_budget"] == self._EDIT_BUDGET
         assert record["failure_stage"]
         assert record["failure_reason"]
+
+
+# ---------------------------------------------------------------------------
+# Truncated generations and the linguistic classifier.  A chain of thought
+# cut off by the token budget is not an interactional failure: the T4
+# rehearsal's 256-token MCQ budget produced dangling first-person clauses
+# that the refusal rule matched, inflating the M9 diagnostic.
+# ---------------------------------------------------------------------------
+
+class _FinishReasonEngine:
+    """Yields a fixed unparseable generation with a chosen finish_reason."""
+
+    def __init__(self, finish_reason):
+        self.finish_reason = finish_reason
+
+    def generate_streaming(self, prompts, max_new_tokens):
+        for index, _prompt in enumerate(prompts):
+            yield StreamedGeneration(
+                prompt_index=index,
+                text="I am unable to finish this",
+                output_token_count=max_new_tokens,
+                finish_reason=self.finish_reason,
+                request_wall_seconds=0.0,
+            )
+
+
+class _RecordingLinguisticPipeline:
+    """Stands in for spaCy: records invocation, parses to zero sentences."""
+
+    def __init__(self):
+        self.was_invoked = False
+
+    def __call__(self, text):
+        self.was_invoked = True
+
+        class _Document:
+            sents = ()
+        return _Document()
+
+
+class TestTruncatedRowsAreNeverInteractionalFailures:
+
+    def _run_with(self, tmp_path, finish_reason):
+        pipeline = _RecordingLinguisticPipeline()
+        manifest = ShardManifest(tmp_path / "manifest.json")
+        run_shard(
+            "shard1", [_make_request("t1")], _FinishReasonEngine(finish_reason),
+            tmp_path / "out.jsonl", manifest, model_id="m",
+            model_revision="rev1", linguistic_pipeline=pipeline)
+        [row] = load_generation_rows([tmp_path / "out.jsonl"])
+        return pipeline, row
+
+    def test_a_truncated_generation_skips_the_refusal_classifier(self, tmp_path):
+        """Breaking this classifies budget-truncated chains of thought as
+        refusals again (678 mmlu_pro rows in the T4 rehearsal)."""
+        pipeline, row = self._run_with(tmp_path, FinishReason.TRUNCATED)
+        assert not pipeline.was_invoked
+        assert row["parse_status"] == "unparseable"
+
+    def test_a_stopped_generation_still_reaches_the_classifier(self, tmp_path):
+        """The guard must not over-fire: completed unparseable generations
+        are exactly what the four-way classifier exists for."""
+        pipeline, _row = self._run_with(tmp_path, FinishReason.STOPPED)
+        assert pipeline.was_invoked
+
+
+# ---------------------------------------------------------------------------
+# Exclusion-sidecar idempotence.  Request construction recomputes the same
+# exclusions on every resume; before the dedup the resumed rehearsal models
+# each carried every exclusion record twice (identical except timestamp).
+# ---------------------------------------------------------------------------
+
+class TestExclusionSidecarResumeIdempotence:
+
+    _RECORD = {
+        "timestamp": 1.0, "task_id": "t1", "condition_name": "c",
+        "edit_budget": 2, "failure_stage": "perturbation",
+        "failure_reason": "r", "item_length": 10, "word_before": "", "attempt": 0,
+    }
+
+    def test_a_resumed_run_does_not_reappend_known_exclusions(self, tmp_path):
+        """Breaking this double-counts exclusions in the report after every
+        resume (a real T4 rehearsal artifact)."""
+        from pipeline.experiment import ExclusionSidecar
+        path = tmp_path / "exclusions.jsonl"
+
+        first_run = ExclusionSidecar(path)
+        first_run.write_all([dict(self._RECORD)])
+        resumed_run = ExclusionSidecar(path)
+        resumed_run.write_all([{**self._RECORD, "timestamp": 2.0}])
+
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
+        assert len(lines) == 1
+        assert resumed_run.count == 1
+
+    def test_distinct_exclusions_are_still_all_written(self, tmp_path):
+        """The dedup must not over-fire and swallow genuinely new records."""
+        from pipeline.experiment import ExclusionSidecar
+        path = tmp_path / "exclusions.jsonl"
+        sidecar = ExclusionSidecar(path)
+        sidecar.write_all([
+            dict(self._RECORD), {**self._RECORD, "task_id": "t2"}])
+        assert sidecar.count == 2
+        assert len(path.read_text().splitlines()) == 2
+
+
+# ---------------------------------------------------------------------------
+# Generation-parameter resume guard.  row_id does not encode token budgets,
+# so resuming an output directory after a budget change would silently skip
+# every row; the manifest must refuse instead.
+# ---------------------------------------------------------------------------
+
+class TestManifestGenerationParameterGuard:
+
+    _PARAMETERS = {
+        "max_new_tokens_reasoning": 512, "max_new_tokens_multiple_choice": 512}
+
+    def _completed_manifest(self, tmp_path):
+        manifest = ShardManifest(
+            tmp_path / "manifest.json", generation_parameters=self._PARAMETERS)
+        manifest.mark_shard_complete("shard1")
+        return tmp_path / "manifest.json"
+
+    def test_resuming_with_changed_budgets_raises(self, tmp_path):
+        """Breaking this lets a budget change resume into an old directory,
+        skipping every existing row and mixing budgets in one file."""
+        path = self._completed_manifest(tmp_path)
+        with pytest.raises(ValueError, match="fresh output directory"):
+            ShardManifest(path, generation_parameters={
+                **self._PARAMETERS, "max_new_tokens_multiple_choice": 256})
+
+    def test_resuming_with_identical_budgets_is_honoured(self, tmp_path):
+        """The guard must not over-fire and discard real progress."""
+        path = self._completed_manifest(tmp_path)
+        reloaded = ShardManifest(path, generation_parameters=dict(self._PARAMETERS))
+        assert reloaded.is_shard_complete("shard1")
+
+    def test_a_legacy_manifest_without_parameters_still_resumes(self, tmp_path):
+        """Manifests written before this guard carry no parameters block;
+        they must stay resumable (the rehearsal v1 directories)."""
+        manifest = ShardManifest(tmp_path / "manifest.json")
+        manifest.mark_shard_complete("shard1")
+        reloaded = ShardManifest(
+            tmp_path / "manifest.json", generation_parameters=self._PARAMETERS)
+        assert reloaded.is_shard_complete("shard1")

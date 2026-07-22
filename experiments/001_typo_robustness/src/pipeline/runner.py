@@ -40,6 +40,7 @@ SCHEMA_VERSION = "1.1"
 _ROW_ID_HASH_HEX_LENGTH = 24
 _MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
 _MANIFEST_SHARD_STATISTICS_KEY = "shard_statistics"
+_MANIFEST_GENERATION_PARAMETERS_KEY = "generation_parameters"
 
 # DeterministicDummyEngine's revision id: a fixed, recognisable sentinel
 # (never a real HuggingFace revision SHA) so a generation row's provenance
@@ -154,13 +155,22 @@ class ShardManifest:
     The statistics (wall seconds, output tokens, tokens/sec) are what the
     main-study compute budget is sized from (design/07 §7.5). The per-row
     request_wall_seconds includes scheduler queue time and must not be summed.
+
+    ``generation_parameters``, when given, is recorded in the manifest and
+    checked on resume: a row's deterministic row_id does not encode the token
+    budgets, so resuming an output directory after a budget change would
+    silently skip every existing row and leave a file that mixes budgets.
+    A mismatch raises instead; a changed budget requires a fresh directory.
     """
 
-    def __init__(self, manifest_path: Path) -> None:
+    def __init__(
+            self, manifest_path: Path,
+            generation_parameters: Optional[dict] = None) -> None:
 
         self.manifest_path = Path(manifest_path)
         self.completed_shard_ids: set[str] = set()
         self.shard_statistics: dict[str, dict] = {}
+        self.generation_parameters = generation_parameters
 
         if self.manifest_path.exists():
             stored_data = json.loads(self.manifest_path.read_text())
@@ -169,6 +179,17 @@ class ShardManifest:
             # regenerating every row (this happened: a committed 1.0 manifest
             # made a fresh clone generate nothing).
             if stored_data.get("schema") == SCHEMA_VERSION:
+                stored_parameters = stored_data.get(
+                    _MANIFEST_GENERATION_PARAMETERS_KEY)
+                if (generation_parameters is not None
+                        and stored_parameters is not None
+                        and stored_parameters != generation_parameters):
+                    raise ValueError(
+                        f"manifest {self.manifest_path} records generation "
+                        f"parameters {stored_parameters} but this run uses "
+                        f"{generation_parameters}; resuming would mix "
+                        f"incomparable rows in one file. Point the run at a "
+                        f"fresh output directory.")
                 self.completed_shard_ids = set(
                     stored_data.get(_MANIFEST_COMPLETED_SHARDS_KEY, []))
                 self.shard_statistics = stored_data.get(
@@ -187,17 +208,15 @@ class ShardManifest:
         self.completed_shard_ids.add(shard_id)
         if statistics is not None:
             self.shard_statistics[shard_id] = statistics
-        self.manifest_path.write_text(
-            json.dumps(
-                {
-                    "schema": SCHEMA_VERSION,
-                    _MANIFEST_COMPLETED_SHARDS_KEY: sorted(
-                        self.completed_shard_ids),
-                    _MANIFEST_SHARD_STATISTICS_KEY: self.shard_statistics,
-                },
-                indent=1,
-            )
-        )
+        manifest_data = {
+            "schema": SCHEMA_VERSION,
+            _MANIFEST_COMPLETED_SHARDS_KEY: sorted(self.completed_shard_ids),
+            _MANIFEST_SHARD_STATISTICS_KEY: self.shard_statistics,
+        }
+        if self.generation_parameters is not None:
+            manifest_data[_MANIFEST_GENERATION_PARAMETERS_KEY] = (
+                self.generation_parameters)
+        self.manifest_path.write_text(json.dumps(manifest_data, indent=1))
 
 
 def _existing_row_ids(output_path: Path) -> set[str]:
@@ -380,9 +399,14 @@ def run_shard(
             score_result = scoring.score(
                 generated_text, request.gold_answer, request.task_family)
             if (linguistic_pipeline is not None
-                    and score_result.parse_status == ParseStatus.UNPARSEABLE):
+                    and score_result.parse_status == ParseStatus.UNPARSEABLE
+                    and generation.finish_reason != FinishReason.TRUNCATED):
                 # Upgrade UNPARSEABLE to CLARIFICATION/REFUSAL when the
-                # linguistic classifier finds evidence.
+                # linguistic classifier finds evidence. Never for truncated
+                # generations: a chain of thought cut off by the token budget
+                # is not an interactional failure, and classifying its dangling
+                # first-person clauses as refusals inflated the M9 diagnostic
+                # in the T4 rehearsal (design/04 §4.5).
                 refined = scoring.classify_parse_status_with_linguistic_pipeline(
                     generated_text, score_result.parsed_answer, linguistic_pipeline)
                 score_result = scoring.ScoreResult(

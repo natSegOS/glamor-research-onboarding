@@ -206,21 +206,45 @@ class ExclusionSidecar:
     Records are written immediately on append so a killed job does not lose
     them. Only the parent process ever constructs one of these or calls
     ``write_all``. See ``build_exclusion_record``.
+
+    Writes are idempotent across resumes: request construction recomputes the
+    identical exclusions on every run, so a record whose timestamp-stripped
+    form is already in the file is skipped rather than appended again (the
+    T4 rehearsal's resumed models each logged every exclusion twice).
     """
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._count = 0
+        self._seen_records: set[str] = set()
+        if self.path.exists():
+            for line in self.path.read_text().splitlines():
+                if line.strip():
+                    self._seen_records.add(self._record_key(json.loads(line)))
+        self._count = len(self._seen_records)
+
+    @staticmethod
+    def _record_key(record: dict) -> str:
+        """A record's identity, ignoring the write-time timestamp."""
+        return json.dumps(
+            {key: value for key, value in record.items() if key != "timestamp"},
+            sort_keys=True)
 
     def write_all(self, records: Sequence[dict]) -> None:
-        """Append every record in ``records``, in order, in one write."""
-        if not records:
+        """Append every not-yet-logged record in ``records``, in order, in
+        one write."""
+        new_records = []
+        for record in records:
+            key = self._record_key(record)
+            if key not in self._seen_records:
+                self._seen_records.add(key)
+                new_records.append(record)
+        if not new_records:
             return
         with self.path.open("a") as fh:
-            for record in records:
+            for record in new_records:
                 fh.write(json.dumps(record) + "\n")
-        self._count += len(records)
+        self._count += len(new_records)
 
     @property
     def count(self) -> int:
@@ -880,7 +904,12 @@ def run_experiment(
         [request for request in requests if request.task_family not in REASONING_FAMILIES])
 
     manifest = ShardManifest(
-        output_directory / f"{configuration.run_id}{worker_suffix}_manifest.json")
+        output_directory / f"{configuration.run_id}{worker_suffix}_manifest.json",
+        generation_parameters={
+            "max_new_tokens_reasoning": configuration.max_new_tokens_reasoning,
+            "max_new_tokens_multiple_choice":
+                configuration.max_new_tokens_multiple_choice,
+        })
     output_path = output_directory / f"{configuration.run_id}{worker_suffix}_generations.jsonl"
 
     total_new_rows = 0
