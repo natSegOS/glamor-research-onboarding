@@ -52,7 +52,7 @@ The reference implementation in Apple's `ml-gsm-symbolic` repo uses exactly this
 
 The prompt template instructs the model to answer with a single letter, which maximizes parseability. The instruction itself is part of the held-constant template (Document 03 §3.3) and, except in the instruction-location module, is never perturbed.
 
-**max_new_tokens.** Provisionally 256 (MMLU-Pro benefits from brief reasoning before the letter). Logged and frozen.
+**max_new_tokens.** 512, equal to the reasoning budget (raised from the provisional 256 after the T4 dress rehearsal; §0.5 2026-07-22). At 256 the Llama models truncated 21–38% of MMLU-Pro chains of thought and 678/682 truncated rows scored wrong, pinning their MMLU-Pro accuracy at the 10-option chance floor; a single budget across task families also removes the budget itself as a family confound. Greedy decoding stops at EOS, so the higher cap costs extra decode time only on rows that would otherwise have truncated. Logged and frozen.
 
 ## 4.4 Why deterministic scoring matters for the statistics
 
@@ -66,6 +66,8 @@ A typo can cause a model to ask "did you mean France?" rather than answer. This 
 - Log it separately so ICR (Document 02 §2.6, M9) captures the interactional-failure rate distinctly.
 
 This dual accounting keeps the headline accuracy numbers conservative (clarifications count against the model) while the ICR diagnostic preserves the qualitative distinction. A reviewer asking "did the drop come from wrong answers or from refusals?" is answered by data.
+
+**Truncated generations are never classified as clarification or refusal** (§0.5 2026-07-22). A chain of thought cut off by the token budget can end mid-clause in surface forms the refusal rule matches ("I am unable to…"), which is a budget artifact, not an interactional failure. A generation with `finish_reason = length` and no parseable answer stays `unparseable` (still incorrect, still in ICR); the linguistic classifier runs only on generations that finished. The truncation rate is reported separately as its own diagnostic.
 
 ## 4.6 Key-term lists for informative-word targeting and answer-critical location
 
@@ -104,7 +106,7 @@ Templated reasoning data letting us recompute `y'*` exactly for Regime C is a se
 
 These are set in the Stage-2 pilot (Document 11) and then frozen:
 
-- `max_new_tokens` per task (provisional 512 reasoning / 256 MCQ).
+- `max_new_tokens` per task (512 for both families; set from pilot + rehearsal truncation evidence, §0.5 2026-07-22).
 - The exact subject-stratified MMLU-Pro subsample size and composition.
 - The wordlist and POS-tagger versions for nonword and key-term checks.
 - The empirical clean accuracy `A₀` per model, used to (a) validate fresh-instance comparability and (b) condition the quantization analysis.
