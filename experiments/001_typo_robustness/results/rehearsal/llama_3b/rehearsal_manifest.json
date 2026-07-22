@@ -1,0 +1,23 @@
+{
+ "schema": "1.1",
+ "completed_shards": [
+  "rehearsal_multiple_choice",
+  "rehearsal_reasoning"
+ ],
+ "shard_statistics": {
+  "rehearsal_reasoning": {
+   "rows": 1538,
+   "wall_seconds": 986.5,
+   "output_tokens": 170708,
+   "output_tokens_per_second": 173.0,
+   "rows_per_hour": 5612.5
+  },
+  "rehearsal_multiple_choice": {
+   "rows": 1548,
+   "wall_seconds": 338.4,
+   "output_tokens": 74636,
+   "output_tokens_per_second": 220.5,
+   "rows_per_hour": 16467.5
+  }
+ }
+}
