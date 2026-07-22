@@ -133,6 +133,12 @@ class VllmEngine:
             enable_prefix_caching=(
                 specification.enable_prefix_caching and gpu_supports_prefix_caching),
             seed=seed,
+            # vLLM's default 4 GiB pinned CPU swap starves low-RAM hosts (the
+            # free Colab T4 VM has 12.7 GB total, and the OOM killer took out
+            # three models at spaCy-load time). This workload never preempts
+            # to CPU: greedy decoding, and the GPU KV cache alone covers the
+            # full request set with >100x concurrency headroom.
+            swap_space=0.5,
         )
         max_num_seqs = specification.max_num_seqs or (
             None if gpu_supports_prefix_caching else _PRE_AMPERE_MAX_NUM_SEQS)
