@@ -218,6 +218,12 @@ def call_loader(
             items = spec.loader(Path(path), task_family=spec.task_family, item_count=item_count)
         except TypeError:
             items = spec.loader(Path(path), spec.task_family)
+        if len(items) < item_count:
+            raise ValueError(
+                f"Dataset {spec.key!r} pool at {path} holds only {len(items)} items "
+                f"but the config requests item_count={item_count}. Re-run "
+                "tools/build_task_items.py with large enough --reasoning-items/"
+                "--mcq-items to rebuild the pools before this run.")
         return items[:item_count]
 
     # Synthetic offline generator: positional (item_count, seed).

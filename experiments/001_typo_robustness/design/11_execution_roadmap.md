@@ -18,7 +18,7 @@ A stage-gated plan from where the repo is now to a submittable paper. Each stage
 - **Do:** build the `src/` modules including `asr_generate.py` (Doc 08), wire vLLM (Doc 07), write the unit tests. Run the pilot in two parts: (1) keyboard arm: Llama-3.2-1B on 200 paired GSM-Symbolic items at `k=1`, Regime A, keyboard-neighbor; (2) ASR arm: run the TTS+Whisper pipeline on the same 200 items (quiet + 10 dB noisy), produce Regime B candidates, run the 1B model, confirm the pipeline produces sensible transcriptions and parseable outputs.
 - **Deliverables:** passing test suite; pilot results; a 1-hour throughput benchmark on the target GPU.
 - **Decision thresholds (these fix the locked-but-provisional numbers):**
-  - **Discordant rate `p_d`** → fixes `N` (Doc 06 §6.3): `p_d ≤ 0.19` confirms `N=600`; `0.19<p_d≤0.30` raises `N` or relaxes MDE to ~6 pp; `p_d<0.05` moves the primary condition to `k=3/4`.
+  - **Discordant rate `p_d`** → fixes `N` (Doc 06 §6.3): `p_d ≤ 0.19` confirms `N=600`; `0.19<p_d≤0.30` raises `N` or relaxes MDE to ~6 pp; `p_d<0.05` moves the primary condition to `k=3/4`. *(Outcome: `N` fixed at 720 per dataset, uniform — Doc 06 §6.3 gate outcome, 00 §0.5 2026-07-23.)*
   - **Throughput** → confirms or revises the compute tier (Doc 07 §7.5). If measured tok/s is far below the conservative estimate, drop to the fallback design earlier.
   - **`max_new_tokens`** → set to the 99th percentile of clean-correct lengths and freeze (Doc 04 §4.9).
   - **Clean `A₀`** → validate fresh-instance comparability against GSM-Symbolic bands (Doc 04 §4.2); if `A₀` is implausibly low, fix prompting/scoring before proceeding.

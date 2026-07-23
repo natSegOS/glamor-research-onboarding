@@ -21,7 +21,7 @@ seed: 1729
 # SHAs. Re-running overwrites cleanly and updates the SHAs (safe and idempotent).
 # To add a dataset, register it in tasks/registry.py and append its key here.
 #
-# Primary confirmatory (N=600, McNemar-powered):
+# Primary confirmatory (N=720, McNemar-powered):
 #   gsm_symbolic_jsonl  : fresh arithmetic reasoning (contamination-controlled)
 #   mmlu_pro_jsonl      : 10-option MCQ, subject-stratified
 #

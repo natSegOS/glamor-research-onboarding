@@ -19,7 +19,7 @@ The acoustic ASR arm is deferred. Its text-side proxies run in this arm (homopho
 ## Quickstart (no GPU)
 
 ```bash
-python3 -m pytest tests/ -q        # 275 tests, offline, no network or GPU
+python3 -m pytest tests/ -q        # 306 tests, offline, no network or GPU
 python3 tools/verify_references.py # bibliography manifest vs actual PDFs
 ```
 
@@ -50,7 +50,7 @@ Configs:
 |---|---|
 | `configs/pilot.yaml` | Stage-1 pilot (frozen; 100 items, one model) |
 | `configs/rehearsal.yaml` | Full-run dress rehearsal: every condition and dataset of the main run at small N, intended for the whole model roster |
-| `configs/main.yaml` | Confirmatory run (600 items per cell; refuses to start with unpinned revisions) |
+| `configs/main.yaml` | Confirmatory run (720 items per dataset; refuses to start with unpinned revisions) |
 
 ## Pre-registration gates
 

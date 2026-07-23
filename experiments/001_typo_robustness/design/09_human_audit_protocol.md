@@ -38,7 +38,7 @@ n = z²·p(1−p) / margin²  =  1.96² · 0.25 / margin²
 
 **Locked decision: audit 385 stratified-random items per regime** (A, B, C) = ~1,155 items, each by 3 annotators = ~3,465 judgments. At a few seconds per binary judgment this is a few hours per annotator, a realistic one-week task. Stratify the sample across tasks, edit budgets, and operations so the audited rate is representative of the full perturbation set, not just the easy cells.
 
-This `n = 385` is derived from the ±5 pp margin exactly as `N = 600` is derived from the 5 pp MDE (Document 06 §6.3): both numbers are consequences of a stated precision target, not round-number guesses.
+This `n = 385` is derived from the ±5 pp margin exactly as the main-study per-cell `N` is derived from the 5 pp MDE (Document 06 §6.3): both numbers are consequences of a stated precision target, not round-number guesses.
 
 ## 9.4 Agreement thresholds (the quality gate)
 

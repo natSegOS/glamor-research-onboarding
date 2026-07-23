@@ -29,8 +29,12 @@ experiments/001_typo_robustness/
 │   └── test_reproducibility.py
 ├── configs/
 │   ├── pilot.yaml               ← Stage-2 pilot config
+│   ├── rehearsal.yaml           ← full-grid dress rehearsal at small N
 │   ├── main.yaml                ← full design
-│   └── fallback_t4.yaml         ← free-T4 study (Doc 07 §7.6)
+│   └── run_profile.yaml         ← run-time settings for tools/run_pipeline.py
+│                                  (the free-T4 fallback of Doc 07 §7.6 is a
+│                                  model/condition subset of main.yaml, not a
+│                                  separate config file)
 ├── data/
 │   ├── items/                   ← frozen task items + gold answers
 │   ├── perturbations/           ← generated state vectors + edit scripts

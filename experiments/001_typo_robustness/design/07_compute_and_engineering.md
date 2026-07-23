@@ -6,7 +6,7 @@ This document records the compute decisions and the arithmetic behind them, so t
 
 ## 7.1 The efficiency problem stated as arithmetic
 
-The full design is ~210k generations (Document 03 §3.6). The naive Experiment-000 loop generates one prompt at a time with `transformers.generate`: fine for 315 generations, hopeless for 210k. The governing equation for wall-clock time is:
+The full design was planned at ~210k generations (Document 03 §3.6; as implemented and re-baselined it is ≈660k at N=720 — see §7.5). The naive Experiment-000 loop generates one prompt at a time with `transformers.generate`: fine for 315 generations, hopeless for 210k. The governing equation for wall-clock time is:
 
 ```
 time ≈ (number_of_generations × mean_output_tokens) / effective_throughput_tok_per_s / 3600   [hours]
@@ -46,7 +46,7 @@ The KV cache also consumes VRAM and grows with batch size × context length. vLL
 
 **Default: USC lab GPU cluster (confirmed by Zizhao).**
 
-Zizhao confirmed in the post-design-suite meeting that the lab has access to a more powerful GPU through USC. This makes the full ~250k-generation design (Document 03 §3.6) straightforwardly feasible with no personal compute cost.
+Zizhao confirmed in the post-design-suite meeting that the lab has access to a more powerful GPU through USC. This makes the full design (~250k generations as planned in Document 03 §3.6; ≈660k as implemented, §7.5) straightforwardly feasible with no personal compute cost.
 
 **Access logistics.** Zizhao is checking whether external collaborators (you, as a non-USC student) can be granted direct cluster access. Two workflows, depending on the outcome:
 
@@ -75,14 +75,16 @@ Time for a given generation count, at mean output 200 tokens (a deliberately hig
 - **Full study** (~250k generations, keyboard + ASR arms) on the USC cluster at a blended ~400+ tok/s on a server-class GPU: ≈ 250,000 × 200 / 400 / 3600 ≈ **35 GPU-hours**, i.e. a single overnight batch run.
 - Because MCQ answers are short (often <50 tokens with the single-letter instruction) and prefix caching cuts the effective prefill cost, the *real* numbers will be better than these estimates. We treat the estimates as upper bounds and re-baseline after the pilot.
 
-**Re-baseline after the 2026-07-22 dress rehearsal (measured, supersedes the estimates above; §0.5).** The condition grid as implemented in `configs/main.yaml` (12 conditions × edit budgets × 600 items × 4 datasets × 8 models, ~68,750 rows/model) is ≈ **550k generations**, 2.2× the ~250k planning figure, because the pre-registration hardening added conditions (homophone, missed-space, filler) and the k grid. Measured T4 rehearsal wall times (3,086 rows/model, the ×25 rule maps rehearsal → main): llama_1b 7.5 min, llama_3b 22 min, 7–8B AWQ ≈ 68 min (1.3 s/row on Turing's non-Marlin AWQ path). Main-run T4-equivalents: ~3 h (1B), ~9 h (3B), ~28 h each (7–8B AWQ), so 7–8B models belong on the cluster; an A40/A100-class GPU with Marlin AWQ kernels, prefix caching, and larger batches is conservatively 4–8× a T4, putting the full 8-model sweep in the **15–35 GPU-hour** range. The 256→512 MCQ budget raise adds decode time only on rows that previously truncated (greedy stops at EOS): bounded by ~+6% total output tokens at rehearsal truncation rates.
+**Re-baseline after the 2026-07-22 dress rehearsal (measured, supersedes the estimates above; §0.5).** The condition grid as implemented in `configs/main.yaml` (12 conditions × edit budgets × 600 items × 4 datasets × 8 models, ~68,750 rows/model at the time of measurement) was ≈ **550k generations**, 2.2× the ~250k planning figure, because the pre-registration hardening added conditions (homophone, missed-space, filler) and the k grid. Measured T4 rehearsal wall times (3,086 rows/model, the ×25 rule maps rehearsal → main): llama_1b 7.5 min, llama_3b 22 min, 7–8B AWQ ≈ 68 min (1.3 s/row on Turing's non-Marlin AWQ path). Main-run T4-equivalents: ~3 h (1B), ~9 h (3B), ~28 h each (7–8B AWQ), so 7–8B models belong on the cluster; an A40/A100-class GPU with Marlin AWQ kernels, prefix caching, and larger batches is conservatively 4–8× a T4, putting the full 8-model sweep in the **15–35 GPU-hour** range. The 256→512 MCQ budget raise adds decode time only on rows that previously truncated (greedy stops at EOS): bounded by ~+6% total output tokens at rehearsal truncation rates.
+
+**v3 update (2026-07-23, §0.5).** The N 600 → 720 amendment scales the same grid ×1.2: ~82,500 rows/model, ≈ **660k generations**, and the cluster-sweep estimate to ≈ **18–42 GPU-hours**. The 512 → 768 token-budget raise again costs decode time only on rows that would otherwise truncate (≤ ~6% of output tokens at rehearsal-v2 truncation rates). These are the operative planning figures.
 
 ## 7.6 The free-T4-only fallback (if USC cluster access is delayed)
 
 If the USC cluster is unavailable and no paid alternative is accessible, the study still runs and still supports the primary contribution. The plan (Document 03 §3.7, made concrete here):
 
 - **Models:** Llama-3.2-1B (fp16), Llama-3.2-3B (fp16), Llama-3.1-8B (AWQ-4bit). The fp16 7–8B arm is dropped, so the quantization sub-study shrinks to an "AWQ-8B vs the fp16 small models" framing: weaker, but the primary mediation contribution does not need it.
-- **Modules:** Module 1 (mediation) at full `N=600`, both tasks, all three runnable models. Module 3 regimes A and C, `k∈{1,4}`. Module 2 collapses to a single qualitative quantization observation.
+- **Modules:** Module 1 (mediation) at full `N` (720; §0.5 2026-07-23), both tasks, all three runnable models. Module 3 regimes A and C, `k∈{1,4}`. Module 2 collapses to a single qualitative quantization observation.
 - **Budget:** see §7.5 (≈ **13 GPU-hours**, 2–3 free sessions).
 - **Session-limit handling:** free Colab caps sessions near 12 h and can disconnect; §7.7 checkpointing makes this safe.
 - **What survives:** the full RQ1 mediation claim (the paper's headline) at full statistical power, plus a bounded RQ3 selectivity claim. What is lost: the strong RQ2 quantization contribution and the descriptive RQ4 breadth. The paper is still publishable as a mechanism paper; it is just narrower. This is the floor (Document 03 §3.7).
@@ -130,7 +132,7 @@ From the Experiment-000 scaffolding to the Experiment-001 runner:
 | Question | Decision | Why |
 |---|---|---|
 | Inference engine | vLLM offline batched | 10×+ over serial HF; prefix caching fits matched-pair design |
-| Default hardware | USC lab GPU cluster (confirmed) | full ~250k-gen study in a single overnight run; no personal cost |
+| Default hardware | USC lab GPU cluster (confirmed) | full ≈660k-gen study (§7.5 re-baseline) in ≈18–42 GPU-h; no personal cost |
 | Fallback hardware | Free Colab T4 / Colab Pro | 1B/3B fp16 + 8B AWQ; ~13 GPU-h; supports primary claim if cluster delayed |
 | Parallelism | continuous batching + idempotent shards across GPUs | matches "many independent generations" workload |
 | Model parallelism | none | models fit on one GPU |
