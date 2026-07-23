@@ -36,6 +36,7 @@ from pipeline import (
     load_task_items,
     required_context_length,
     run_experiment,
+    run_is_complete,
 )
 from inference import VllmEngine
 from inference import (
@@ -67,18 +68,26 @@ def parse_arguments():
         "--fresh", action="store_true",
         help="delete this run's previous outputs (generations, exclusions, "
              "manifest) before generating. Without it the runner resumes: rows "
-             "already on disk — including ones committed to the repo — are "
+             "already on disk (including ones committed to the repo) are "
              "kept and skipped.")
     parser.add_argument(
         "--shard-index", type=int, default=None,
         help="this worker's index (0-based) for parallel generation across "
              "GPUs/sessions; requires --shard-count. Each worker writes its own "
-             "'..._w{index}of{count}_generations.jsonl' — start one process per "
+             "'..._w{index}of{count}_generations.jsonl'; start one process per "
              "GPU with the same --config/--model and a distinct --shard-index, "
              "and merge the outputs afterward (design/07 §7.7).")
     parser.add_argument(
         "--shard-count", type=int, default=None,
         help="total number of parallel workers; requires --shard-index.")
+    parser.add_argument(
+        "--skip-if-complete", dest="skip_if_complete", action="store_true", default=True,
+        help="if every shard for this run is already recorded complete in the "
+             "manifest, exit before loading the tokenizer/model at all (default: on).")
+    parser.add_argument(
+        "--no-skip-if-complete", dest="skip_if_complete", action="store_false",
+        help="always load the model, even if the manifest says this run is complete "
+             "(the row-level resume in run_shard still applies).")
     arguments = parser.parse_args()
     if (arguments.shard_index is None) != (arguments.shard_count is None):
         parser.error("--shard-index and --shard-count must be given together")
@@ -168,6 +177,20 @@ def main():
     configuration = ExperimentConfiguration.from_yaml(arguments.config)
     specification = get_model_specification(arguments.model)
 
+    shard_partition = (
+        (arguments.shard_index, arguments.shard_count)
+        if arguments.shard_index is not None else None)
+
+    # Cheap manifest-only check: skip straight past revision resolution,
+    # tokenizer, model, and spaCy loading entirely when this run already has
+    # every shard written (design/07 §7.7's per-row skip in run_shard still
+    # protects a partially-complete run; this is the earlier, coarser gate).
+    if (not arguments.fresh and arguments.skip_if_complete
+            and run_is_complete(arguments.output_directory, configuration, shard_partition)):
+        print(f"[run_generation] {arguments.model!r} already complete in "
+              f"{arguments.output_directory}; skipping model load")
+        return
+
     # The pin assertion: a confirmatory run may not start against an unpinned
     # (non-reproducible) model revision.
     if configuration.is_confirmatory:
@@ -205,10 +228,6 @@ def main():
     linguistic_pipeline = _load_linguistic_pipeline(arguments.no_spacy)
     if linguistic_pipeline is not None:
         print(f"[run_generation] spaCy loaded ({_SPACY_MODEL_NAME})")
-
-    shard_partition = (
-        (arguments.shard_index, arguments.shard_count)
-        if arguments.shard_index is not None else None)
 
     summary = run_experiment(
         configuration=configuration,

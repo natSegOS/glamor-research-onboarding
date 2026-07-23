@@ -15,6 +15,7 @@ from pipeline.runner import (
     ShardManifest,
     chat_exemplar_turns_for_family,
     deterministic_row_id,
+    run_is_complete,
     run_shard,
     load_generation_rows,
 )

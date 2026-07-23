@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import types
 
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from pipeline.runner import (
     ShardManifest,
     deterministic_row_id,
     load_generation_rows,
+    run_is_complete,
     run_shard,
 )
 
@@ -258,9 +260,7 @@ class TestFreshDeletionScope:
     _UNRELATED_FILE_NAMES = ("pilot_results.zip", "pilot_notes.txt")
 
     def test_fresh_deletes_exactly_the_run_outputs_and_spares_the_rest(self, tmp_path):
-        """Breaking this regresses to the prefix-glob bug: --fresh would
-        destroy a user's unrelated files that happen to share the run prefix,
-        or leave stale run outputs behind to poison the rerun."""
+        """Breaking this reintroduces the prefix-glob bug described above."""
         run_generation = _load_run_generation_tool_module()
         for file_name in self._RUN_OUTPUT_FILE_NAMES + self._UNRELATED_FILE_NAMES:
             (tmp_path / file_name).write_text("{}")
@@ -477,3 +477,170 @@ class TestManifestGenerationParameterGuard:
         reloaded = ShardManifest(
             tmp_path / "manifest.json", generation_parameters=self._PARAMETERS)
         assert reloaded.is_shard_complete("shard1")
+
+
+# ---------------------------------------------------------------------------
+# run_is_complete: the cheap, manifest-only precheck tools/run_generation.py
+# uses to skip loading a model at all for a finished run. Must read only the
+# manifest file, never a tokenizer, engine, or the request set.
+# ---------------------------------------------------------------------------
+
+class TestRunIsComplete:
+
+    _PARAMETERS = {
+        "max_new_tokens_reasoning": 512, "max_new_tokens_multiple_choice": 256}
+
+    def _configuration(self, run_id="run"):
+        return types.SimpleNamespace(run_id=run_id, **self._PARAMETERS)
+
+    def test_false_when_no_manifest_exists(self, tmp_path):
+        """Breaking this (e.g. defaulting True) would skip loading a model
+        for a run that has never generated anything."""
+        assert run_is_complete(tmp_path, self._configuration()) is False
+
+    def test_true_once_both_shard_types_are_marked_complete(self, tmp_path):
+        configuration = self._configuration()
+        manifest = ShardManifest(
+            tmp_path / "run_manifest.json", generation_parameters=self._PARAMETERS)
+        manifest.mark_shard_complete("run_reasoning")
+        manifest.mark_shard_complete("run_multiple_choice")
+        assert run_is_complete(tmp_path, configuration) is True
+
+    def test_false_when_only_one_shard_type_is_complete(self, tmp_path):
+        """Breaking this skips model load while the other shard type's rows
+        are still missing, leaving the run silently incomplete forever."""
+        configuration = self._configuration()
+        manifest = ShardManifest(
+            tmp_path / "run_manifest.json", generation_parameters=self._PARAMETERS)
+        manifest.mark_shard_complete("run_reasoning")
+        assert run_is_complete(tmp_path, configuration) is False
+
+    def test_honours_shard_partition_suffixes(self, tmp_path):
+        """Each parallel worker has its own manifest; a finished worker 0
+        must not make an unfinished worker 1 look complete."""
+        configuration = self._configuration()
+        manifest = ShardManifest(
+            tmp_path / "run_w0of2_manifest.json", generation_parameters=self._PARAMETERS)
+        manifest.mark_shard_complete("run_w0of2_reasoning")
+        manifest.mark_shard_complete("run_w0of2_multiple_choice")
+
+        assert run_is_complete(tmp_path, configuration, shard_partition=(0, 2)) is True
+        assert run_is_complete(tmp_path, configuration, shard_partition=(1, 2)) is False
+
+    def test_raises_on_a_generation_parameter_mismatch(self, tmp_path):
+        """Same contract as ShardManifest itself: a token-budget change must
+        surface as an error, not a silent 'incomplete' or 'complete'."""
+        manifest = ShardManifest(
+            tmp_path / "run_manifest.json", generation_parameters=self._PARAMETERS)
+        manifest.mark_shard_complete("run_reasoning")
+        manifest.mark_shard_complete("run_multiple_choice")
+
+        changed_configuration = self._configuration()
+        changed_configuration.max_new_tokens_multiple_choice = 512
+        with pytest.raises(ValueError, match="fresh output directory"):
+            run_is_complete(tmp_path, changed_configuration)
+
+
+# ---------------------------------------------------------------------------
+# --skip-if-complete wiring in tools/run_generation.py: the flag must default
+# on, --fresh must override it, and a complete run must return before the
+# tokenizer/engine/spaCy loads that make this script GPU-heavy.
+# ---------------------------------------------------------------------------
+
+class TestSkipIfCompleteWiring:
+
+    def test_flag_defaults_to_enabled(self, monkeypatch):
+        run_generation = _load_run_generation_tool_module()
+        monkeypatch.setattr("sys.argv", [
+            "run_generation.py", "--config", "c.yaml", "--model", "m",
+            "--output-directory", "out"])
+        assert run_generation.parse_arguments().skip_if_complete is True
+
+    def test_no_skip_if_complete_disables_it(self, monkeypatch):
+        run_generation = _load_run_generation_tool_module()
+        monkeypatch.setattr("sys.argv", [
+            "run_generation.py", "--config", "c.yaml", "--model", "m",
+            "--output-directory", "out", "--no-skip-if-complete"])
+        assert run_generation.parse_arguments().skip_if_complete is False
+
+    def test_main_returns_before_any_model_load_when_already_complete(
+            self, tmp_path, monkeypatch, capsys):
+        """Must short-circuit before constructing a tokenizer or a VllmEngine."""
+        run_generation = _load_run_generation_tool_module()
+
+        config_path = tmp_path / "rehearsal.yaml"
+        config_path.write_text(
+            "run_id: run\n"
+            "seed: 1729\n"
+            "max_new_tokens_reasoning: 512\n"
+            "max_new_tokens_multiple_choice: 256\n"
+            "conditions: []\n")
+        output_directory = tmp_path / "out"
+        output_directory.mkdir()
+        manifest = ShardManifest(
+            output_directory / "run_manifest.json",
+            generation_parameters={
+                "max_new_tokens_reasoning": 512,
+                "max_new_tokens_multiple_choice": 256})
+        manifest.mark_shard_complete("run_reasoning")
+        manifest.mark_shard_complete("run_multiple_choice")
+
+        monkeypatch.setattr(
+            run_generation, "_measure_max_model_length",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("model load was not skipped")))
+
+        monkeypatch.setattr("sys.argv", [
+            "run_generation.py", "--config", str(config_path),
+            "--model", "qwen_1b5_pilot",
+            "--output-directory", str(output_directory)])
+
+        run_generation.main()
+
+        assert "already complete" in capsys.readouterr().out
+
+    def test_fresh_overrides_skip_if_complete(self, tmp_path, monkeypatch):
+        """--fresh means regenerate, so it must reach the (mocked) model-load
+        path even when the manifest says the run is already complete."""
+        run_generation = _load_run_generation_tool_module()
+
+        config_path = tmp_path / "rehearsal.yaml"
+        config_path.write_text(
+            "run_id: run\n"
+            "seed: 1729\n"
+            "max_new_tokens_reasoning: 512\n"
+            "max_new_tokens_multiple_choice: 256\n"
+            "conditions: []\n")
+        output_directory = tmp_path / "out"
+        output_directory.mkdir()
+        manifest = ShardManifest(
+            output_directory / "run_manifest.json",
+            generation_parameters={
+                "max_new_tokens_reasoning": 512,
+                "max_new_tokens_multiple_choice": 256})
+        manifest.mark_shard_complete("run_reasoning")
+        manifest.mark_shard_complete("run_multiple_choice")
+
+        # qwen_1b5_pilot has an unpinned (PIN_ME) revision, so a real run would
+        # resolve it over the network here; stub it out to stay hermetic.
+        monkeypatch.setattr(
+            run_generation, "resolve_current_revision", lambda *a, **k: "deadbeef")
+
+        reached_model_load = []
+        monkeypatch.setattr(
+            run_generation, "_measure_max_model_length",
+            lambda *a, **k: reached_model_load.append(True) or 0)
+        monkeypatch.setattr(
+            run_generation, "VllmEngine",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("stop before the real engine construction")))
+
+        monkeypatch.setattr("sys.argv", [
+            "run_generation.py", "--config", str(config_path),
+            "--model", "qwen_1b5_pilot",
+            "--output-directory", str(output_directory), "--fresh"])
+
+        with pytest.raises(AssertionError, match="stop before"):
+            run_generation.main()
+
+        assert reached_model_load == [True]
