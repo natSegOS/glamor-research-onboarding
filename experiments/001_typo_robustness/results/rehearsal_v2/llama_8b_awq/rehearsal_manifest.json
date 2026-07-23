@@ -1,0 +1,27 @@
+{
+ "schema": "1.1",
+ "completed_shards": [
+  "rehearsal_multiple_choice",
+  "rehearsal_reasoning"
+ ],
+ "shard_statistics": {
+  "rehearsal_reasoning": {
+   "rows": 1538,
+   "wall_seconds": 2973.9,
+   "output_tokens": 171901,
+   "output_tokens_per_second": 57.8,
+   "rows_per_hour": 1861.8
+  },
+  "rehearsal_multiple_choice": {
+   "rows": 1548,
+   "wall_seconds": 1780.4,
+   "output_tokens": 252529,
+   "output_tokens_per_second": 141.8,
+   "rows_per_hour": 3130.1
+  }
+ },
+ "generation_parameters": {
+  "max_new_tokens_reasoning": 512,
+  "max_new_tokens_multiple_choice": 512
+ }
+}
