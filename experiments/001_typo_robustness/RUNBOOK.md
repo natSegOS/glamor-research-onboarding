@@ -77,13 +77,27 @@ clone with `requirements-gpu.txt` and `requirements-stats.txt` installed.
 Set `output_root` in the profile to a local or NFS path instead of a Drive
 path.
 
+With multiple GPUs, the simplest speedup is one model per GPU: every
+process runs the same pipeline with a different model override, into the
+same `output_root` (per-model subdirectories never collide):
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python3 tools/run_pipeline.py generate --models qwen_7b   &
+CUDA_VISIBLE_DEVICES=1 python3 tools/run_pipeline.py generate --models mistral_7b &
+CUDA_VISIBLE_DEVICES=2 python3 tools/run_pipeline.py generate --models llama_8b  &
+wait
+python3 tools/run_pipeline.py analyze
+python3 tools/run_pipeline.py report
+```
+
 To split one model across multiple GPUs/processes, use
 `tools/run_generation.py` directly (`run_pipeline.py generate` does not
-shard):
+shard); pin each worker to its own GPU:
 
 ```bash
 for i in 0 1 2 3; do
-  python3 tools/run_generation.py --config configs/main.yaml --model llama_8b_awq \
+  CUDA_VISIBLE_DEVICES=$i python3 tools/run_generation.py \
+      --config configs/main.yaml --model llama_8b_awq \
       --output-directory results/main/llama_8b_awq \
       --shard-index $i --shard-count 4 &
 done

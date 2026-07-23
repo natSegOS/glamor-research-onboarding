@@ -47,13 +47,17 @@ datasets:
 
 is_confirmatory: false
 
-max_new_tokens_reasoning: 512
-# MCQ raised from the provisional 256 after the T4 dress rehearsal: at 256 the
-# Llama models truncated 21-38% of MMLU-Pro chains of thought (678/682 truncated
-# rows scored wrong, pinning llama mmlu_pro at the 10% chance floor). One shared
-# budget across families also removes budget as a family confound. Amendment
-# logged in design/00 section 0.5 (2026-07-22).
-max_new_tokens_multiple_choice: 512
+max_new_tokens_reasoning: 768
+# Raised 512 -> 768 (uniform across families) after rehearsal v2: at 512 the
+# Llama models still truncated 11-25% of mmlu_pro chains of thought
+# (llama_8b_awq 191/775 rows), while the p99 output length of *correct* clean
+# answers was 440 tokens, so 768 is ~1.75x p99. Truncation only affects rows
+# that would exceed the budget (~3% of rows), so the cost is <=~6% of output
+# tokens. One shared budget across families keeps budget out of the family
+# contrast. History: 256 -> 512 amendment logged in design/00 section 0.5
+# (2026-07-22) after 21-38% mmlu_pro truncation in rehearsal v1; 512 -> 768
+# logged there dated 2026-07-23.
+max_new_tokens_multiple_choice: 768
 
 # Primary severity per task type (design/06 §6.3 contingency, applied from the
 # pilot's p_d estimates; amendment logged in design/00 §0.5).

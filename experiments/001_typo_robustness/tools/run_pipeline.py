@@ -177,12 +177,22 @@ def cmd_data(profile: dict) -> None:
         "rebuild_data: true" if force_rebuild else "committed data not found")
     print(f"[run_pipeline] rebuilding data ({reason}) ...")
 
+    # The item store must hold at least as many items as the largest
+    # item_count any dataset in the experiment config will load from it.
+    item_build_count = max(
+        (entry.item_count or 0 for entry in configuration.datasets or []), default=0)
+    if not item_build_count:
+        raise ValueError(
+            f"{profile['experiment_config']} has no datasets with item_count; "
+            "cannot size the item rebuild")
+
     with tempfile.TemporaryDirectory() as work_dir:
         work_dir = Path(work_dir)
         templates_dir = _clone_gsm_symbolic_templates(work_dir)
         _run(_python(
             "tools/build_task_items.py",
-            "--reasoning-items", "100", "--mcq-items", "100",
+            "--reasoning-items", str(item_build_count),
+            "--mcq-items", str(item_build_count),
             "--gsm-config", "p1", "--seed", "1729",
             "--output-directory", str(_ITEMS_DIRECTORY),
             "--gsm-templates-dir", str(templates_dir)))

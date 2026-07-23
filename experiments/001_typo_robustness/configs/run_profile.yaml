@@ -22,16 +22,19 @@ models:
   - llama_3b
   - qwen_7b_awq
   - llama_8b_awq
+  - qwen_7b
+  - llama_8b
+  - mistral_7b
 
 # Where results are written. One subdirectory per model is created under
 # output_root. On Colab, point this at Google Drive (an absolute
 # /content/drive/MyDrive/... path) so results survive a runtime restart;
 # locally, a plain relative path is fine.
-output_root: results/rehearsal_v2
+output_root: results/rehearsal_v3
 
 # Where the combined analysis (cell table, GLMM, mediation, figures) and the
 # HTML report are written.
-analysis_dir: analysis/rehearsal_v2
+analysis_dir: analysis/rehearsal_v3
 
 # false = reuse committed data/items + dictionary; true = rebuild from
 # HuggingFace/SCOWL. A confirmatory experiment_config (is_confirmatory:
