@@ -1,0 +1,43 @@
+# Run profile: every knob a person running this study needs to touch lives
+# here. Nothing else in this repo should need editing to start a run.
+#
+# tools/run_pipeline.py reads this file. Override any single field without
+# editing it:
+#   --models qwen_7b,mistral_7b     (CLI flag beats this file)
+#   TYPO_MODELS=qwen_7b,mistral_7b  (env var beats this file, CLI beats both)
+#
+# See `python tools/run_pipeline.py list-models` for every available model
+# key and its HuggingFace identifier/precision.
+
+# Which experiment config to run: the perturbation grid, datasets, and token
+# budgets. One of configs/pilot.yaml, configs/rehearsal.yaml, configs/main.yaml.
+experiment_config: configs/rehearsal.yaml
+
+# Which models to run this session, by roster key (src/inference/roster.py).
+# To parallelize across multiple Google accounts/Colab sessions, give each
+# account its own copy of this file with a single model in this list.
+models:
+  - qwen_1b5_pilot
+  - llama_1b
+  - llama_3b
+  - qwen_7b_awq
+  - llama_8b_awq
+
+# Where results are written. One subdirectory per model is created under
+# output_root. On Colab, point this at Google Drive (an absolute
+# /content/drive/MyDrive/... path) so results survive a runtime restart;
+# locally, a plain relative path is fine.
+output_root: results/rehearsal_v2
+
+# Where the combined analysis (cell table, GLMM, mediation, figures) and the
+# HTML report are written.
+analysis_dir: analysis/rehearsal_v2
+
+# false = reuse committed data/items + dictionary; true = rebuild from
+# HuggingFace/SCOWL. A confirmatory experiment_config (is_confirmatory:
+# true, i.e. configs/main.yaml) always rebuilds regardless of this setting.
+rebuild_data: false
+
+# Skip loading a model whose output is already complete on disk. Turn off
+# only to force a real check if a manifest might be stale.
+skip_if_complete: true
