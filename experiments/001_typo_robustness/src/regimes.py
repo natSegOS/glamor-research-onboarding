@@ -5,7 +5,7 @@ Provenance
 ----------
 The three-regime separation is the framing contribution (design/01 §1.4,
 design/02 §2.4). It exists to prevent the most common critique of typo-
-robustness work — that the "typo" silently changed the question — by separating:
+robustness work (that the "typo" silently changed the question) by separating:
 
     Regime A  intent-preserving nonword typo
               The edit creates an invalid word; intent is preserved.
@@ -16,7 +16,7 @@ robustness work — that the "typo" silently changed the question — by separat
               the intent. Example: "France" -> "Finance". Motivated by ASR
               acoustic confusion (the dominant real-world real-word-shift error
               type), so the candidate pool includes phonetic homophones
-              ("weather"/"whether") alongside the orthographic DL band — see
+              ("weather"/"whether") alongside the orthographic DL band. See
               make_regime_b_real_word_shift below.
 
     Regime C  meaning-changing control
@@ -81,7 +81,7 @@ _OPERAND_DELTA_SCALES: tuple[int, ...] = (1, 2, 5)
 
 def load_wordlist(path: Optional[Path] = None) -> set[str]:
     """Load a set of lowercase words from a newline-delimited file. Defaults to
-    the bundled demo wordlist, which exists for smoke tests only — the real
+    the bundled demo wordlist, which exists for smoke tests only. The real
     study pins a full English dictionary (see make_is_word)."""
     resolved_path = Path(path) if path else _DEMO_WORDLIST_PATH
     return {line.strip().lower()
@@ -99,7 +99,7 @@ class WordSetPredicate:
     vocabulary.
 
     A plain closure (the prior implementation) can't cross into a worker
-    process via ``pickle`` — only module-level callables can — which is what
+    process via ``pickle`` (only module-level callables can), which is what
     makes ``build_requests`` (``pipeline/experiment.py``) parallelizable
     across a ``ProcessPoolExecutor``. Frozen + a ``frozenset`` field also
     keeps it hashable, which every ``lru_cache``-decorated function in
@@ -134,7 +134,7 @@ def derived_seed(base_seed: int, *parts) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Regime A — intent-preserving nonword typo.
+# Regime A: intent-preserving nonword typo.
 # ---------------------------------------------------------------------------
 
 def make_regime_a_nonword_typo(
@@ -195,7 +195,7 @@ def make_regime_a_nonword_typo(
 
 
 # ---------------------------------------------------------------------------
-# Regime A variant — discourse-particle filler-word insertion.
+# Regime A variant: discourse-particle filler-word insertion.
 # ---------------------------------------------------------------------------
 
 def make_regime_a_filler_insertion(
@@ -237,7 +237,7 @@ def make_regime_a_filler_insertion(
 
 
 # ---------------------------------------------------------------------------
-# Regime B — context-recoverable real-word shift.
+# Regime B: context-recoverable real-word shift.
 # ---------------------------------------------------------------------------
 
 def make_regime_b_real_word_shift(
@@ -250,6 +250,7 @@ def make_regime_b_real_word_shift(
         max_attempts: int = 64,
         edit_budget: int = 1,
         max_word_distance: int = 2,
+        phonetic_only: bool = False,
 ) -> tuple[str, list[Edit], dict]:
     """Substitute ``edit_budget`` word(s) for valid-word neighbors, using the
     union of an orthographic band (DL ≤ ``max_word_distance``) and phonetic
@@ -262,15 +263,23 @@ def make_regime_b_real_word_shift(
     the original.  ``max_word_distance=2`` is the Regime B default; call with
     ``max_word_distance=1`` to restore the original orthographic-only DL=1
     behaviour for ablation comparisons.
+
+    ``phonetic_only`` restricts the candidate pool to CMU exact homophones,
+    the pure acoustic-confusion proxy condition (SelectionPolicy.HOMOPHONE;
+    crosswalks to the HIVE voice arm's clean+homophone operator). Items with
+    no homophone-bearing word raise PerturbationError and land in the
+    exclusion sidecar, which records that condition's yield.
     """
     last_error: Optional[PerturbationError] = None
+    selection_policy = (SelectionPolicy.HOMOPHONE if phonetic_only
+                        else SelectionPolicy.REAL_WORD)
 
     for attempt in range(max_attempts):
         attempt_seed = derived_seed(seed, SemanticClass.B, attempt)
         try:
             perturbed_text, edits = perturb(
                 text, Operation.SUBSTITUTE, Unit.WORD, scope, edit_budget,
-                SelectionPolicy.REAL_WORD, SemanticClass.B, attempt_seed,
+                selection_policy, SemanticClass.B, attempt_seed,
                 protected_spans=protected_spans,
                 scope_spans=scope_spans, is_word=is_word,
                 max_word_distance=max_word_distance)
@@ -291,6 +300,7 @@ def make_regime_b_real_word_shift(
                 "edited_words": edited_words,
                 "damerau_levenshtein_distance": damerau_levenshtein_distance(text, perturbed_text),
                 "max_word_distance": max_word_distance,
+                "phonetic_only": phonetic_only,
             }
             return perturbed_text, edits, metadata
 
@@ -299,7 +309,7 @@ def make_regime_b_real_word_shift(
 
 
 # ---------------------------------------------------------------------------
-# Regime C — meaning-changing controls, with the new gold known by construction.
+# Regime C: meaning-changing controls, with the new gold known by construction.
 # ---------------------------------------------------------------------------
 
 def make_regime_c_reasoning_operand_swap(
@@ -405,7 +415,9 @@ def make_regime_c_mcq_option_permutation(
     annotation of ``gold_letter_if_negated`` and was semantically underdetermined
     for general knowledge questions).
 
-    Positional-bias literature: Ko et al. (2020); Pezeshkpour & Hruschka (2023).
+    Option-order sensitivity: Pezeshkpour & Hruschka (2023, arXiv:2308.11483)
+    report 13–75% performance gaps under option reordering. A model that
+    relies on option position rather than content will fail this control.
 
     Only permutations that move the gold content to a different label are
     accepted, so the gold letter is guaranteed to change (design/04 §4.7).

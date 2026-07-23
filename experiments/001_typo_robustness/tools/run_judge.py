@@ -15,25 +15,29 @@ Design constraints:
     calling the judge again, so partial runs and reruns are cheap.
   - **Agree/disagree flag**: if the judge classifies a pair as a different regime
     from the claimed regime (e.g. "C" when the engine claimed "A"), the pair is
-    flagged.  Flagged pairs are excluded from the generation queue (written to
-    ``{run_id}_flagged.jsonl``).
+    flagged and written to ``--output-flagged`` with its ``task_id`` attached.
   - **Fleiss' κ calibration**: the judge's agreement with human annotations is
     reported as a calibration statistic only; the judge is NEVER the final authority.
+
+What happens to flagged pairs (the analysis-time exclusion path):
+    Flagged pairs are NOT removed from the generation queue: removing them
+    there would change deterministic row IDs and break resume semantics, and
+    it would let an LLM judge silently veto items, which design/09 §9.7
+    forbids. Instead, flagged pairs are routed to the human audit with
+    priority (tools/sample_for_audit.py); items the HUMAN audit fails are
+    excluded from the primary endpoint at analysis time via the
+    ``audit_outcomes`` gate of ``analysis.results.summarize_all_cells``.
 
 Usage:
 
     python tools/run_judge.py \\
         --pairs data/perturbations/pilot_pairs.jsonl \\
-        --judge-model-revision google/gemma-2-9b-it@sha256:PINNED_SHA \\
         --judge-cache data/perturbations/judge_cache.jsonl \\
         --output-flagged data/perturbations/pilot_flagged.jsonl
 
-To skip actual inference (dry run — mark all as unchecked):
+To skip actual inference (dry run, mark all as unchecked):
 
     python tools/run_judge.py --pairs ... --dry-run
-
-After this step, pass ``--exclude-flagged data/perturbations/pilot_flagged.jsonl``
-to ``run_generation.py`` (not yet implemented; add when the flag is ready).
 """
 
 from __future__ import annotations
@@ -61,15 +65,18 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--pairs", required=True, type=Path,
                         help="perturbation-pairs JSONL from build_perturbations.py")
-    parser.add_argument("--judge-model-revision", default="google/gemma-2-9b-it",
-                        help="judge model revision string (pin SHA for confirmatory runs)")
+    parser.add_argument("--judge-model-revision", default="gemma2_9b_judge",
+                        help="roster key (preferred; honours the pinned revision) or a raw "
+                             "HuggingFace id, optionally '@<revision>' (confirmatory runs "
+                             "must use a pinned roster entry)")
     parser.add_argument("--judge-cache", type=Path,
                         default=Path("data/perturbations/judge_cache.jsonl"),
                         help="append-only content-addressed judge decision cache")
     parser.add_argument("--output-flagged", type=Path,
                         default=Path("data/perturbations/flagged.jsonl"),
                         help="JSONL of pairs flagged by the judge (regime disagreement or "
-                             "parse_failed); these are excluded from the generation queue")
+                             "parse_failed), with task_id attached; routed to the human "
+                             "audit — exclusion happens at analysis time, never here")
     parser.add_argument("--sample", type=int, default=None,
                         help="only judge this many pairs (for quick pilot screening)")
     parser.add_argument("--dry-run", action="store_true",
@@ -165,30 +172,41 @@ def main() -> None:
     # Run judge (uses cache for already-decided pairs).
     arguments.judge_cache.parent.mkdir(parents=True, exist_ok=True)
 
-    decisions = run_judge_on_sample(
+    aligned_decisions = run_judge_on_sample(
         engine=engine,
         judge_revision=arguments.judge_model_revision,
         sample_rows=translated_rows,
         cache_path=arguments.judge_cache,
     )
 
-    # Partition into agreeing and flagged decisions.
-    agreed = [decision for decision in decisions if decision.agrees_with_claimed_regime() is True]
-    flagged = [decision for decision in decisions if
-               decision.agrees_with_claimed_regime() is False or decision.parse_failed]
-    unchecked = len(rows) - len(decisions)  # skipped (Regime C MCQ)
+    # Decisions are aligned 1:1 with rows (None = skipped Regime-C MCQ), so
+    # each flagged decision can be written WITH its source row's identity.
+    judged_pairs = [(row, decision) for row, decision in zip(rows, aligned_decisions)
+                    if decision is not None]
+    agreed = [decision for _row, decision in judged_pairs
+              if decision.agrees_with_claimed_regime() is True]
+    flagged_pairs = [(row, decision) for row, decision in judged_pairs
+                     if decision.agrees_with_claimed_regime() is False or decision.parse_failed]
+    unchecked = sum(decision is None for decision in aligned_decisions)
 
     arguments.output_flagged.parent.mkdir(parents=True, exist_ok=True)
     with arguments.output_flagged.open("w") as fh:
-        for decision in flagged:
-            fh.write(json.dumps(decision.to_dict()) + "\n")
+        for row, decision in flagged_pairs:
+            fh.write(json.dumps({
+                **decision.to_dict(),
+                "task_id": row.get("task_id", ""),
+                "condition_name": row.get("condition_name", ""),
+            }) + "\n")
 
-    agreement_rate = len(agreed) / len(decisions) * 100 if decisions else float("nan")
-    parse_failed_count = sum(1 for decision in decisions if decision.parse_failed)
+    flagged = [decision for _row, decision in flagged_pairs]
+    agreement_rate = (len(agreed) / len(judged_pairs) * 100
+                      if judged_pairs else float("nan"))
+    parse_failed_count = sum(
+        1 for _row, decision in judged_pairs if decision.parse_failed)
 
     print(
         f"\n[run_judge] Summary\n"
-        f"  judged:         {len(decisions):>6}\n"
+        f"  judged:         {len(judged_pairs):>6}\n"
         f"  agreed:         {len(agreed):>6}  ({agreement_rate:.1f}%)\n"
         f"  flagged:        {len(flagged):>6}  (regime disagree or parse failed)\n"
         f"    of which parse_failed: {parse_failed_count}\n"
@@ -203,7 +221,7 @@ def main() -> None:
     )
 
     if (agreement_rate < _AGREEMENT_RATE_WARNING_THRESHOLD
-            and len(decisions) > _MINIMUM_DECISIONS_FOR_AGREEMENT_WARNING):
+            and len(judged_pairs) > _MINIMUM_DECISIONS_FOR_AGREEMENT_WARNING):
         print(
             f"  WARNING: agreement rate {agreement_rate:.1f}% is below 80%. "
             f"Check judge model and prompt version.",

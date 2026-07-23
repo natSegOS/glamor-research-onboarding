@@ -28,8 +28,8 @@ class StreamedGeneration:
     """One finished generation from ``generate_streaming``.
 
     ``request_wall_seconds`` is submit-to-finish wall time for this request.
-    Under continuous batching that includes scheduler queue time, so it is an
-    honest per-request latency, not a decode cost — throughput comes from the
+    Under continuous batching that includes scheduler queue time, so it is a
+    per-request latency, not a decode cost. Throughput comes from the
     shard-level totals the runner records.
     """
     prompt_index: int
@@ -50,7 +50,7 @@ _GREEDY_TEMPERATURE = 0.0
 _GREEDY_TOP_P       = 1.0
 
 # vLLM 0.10's prefix-prefill Triton kernel fails to compile at scale on
-# pre-Ampere GPUs (Turing/T4 = compute capability 7.5) — a GPU-architecture
+# pre-Ampere GPUs (Turing/T4 = compute capability 7.5). This is a GPU-architecture
 # property, not a model property, so it is detected here at engine init rather
 # than configured per roster entry.
 _MINIMUM_COMPUTE_CAPABILITY_FOR_PREFIX_CACHING = (8, 0)
@@ -67,18 +67,26 @@ def _gpu_compute_capability() -> tuple[int, int]:
 
 
 def apply_chat_template(
-        tokenizer, user_message: str, system_message: Optional[str] = None) -> str:
+        tokenizer, user_message: str, system_message: Optional[str] = None,
+        exemplar_turns: Sequence[tuple[str, str]] = ()) -> str:
     """Wrap a user message (and optionally a system message) in a tokenizer's
     own chat template (design/05 §5.7).
 
     Standalone so it can be applied identically to a bare HF tokenizer (e.g.
     for pre-flight context-length sizing in pipeline.experiment, before a vLLM
-    engine exists) and to the tokenizer vLLM ends up loading internally —
-    both are the same model's ``AutoTokenizer``, so the two never diverge.
+    engine exists) and to the tokenizer vLLM ends up loading internally.
+    Both are the same model's ``AutoTokenizer``, so the two never diverge.
 
     ``system_message`` is included only when the tokenizer's chat template
     declares a "system" role slot; otherwise it is prepended to the user turn
     with a blank line so the instruction is never silently dropped.
+
+    ``exemplar_turns`` are fixed few-shot (user, assistant) message pairs
+    inserted before the final user turn (design/05 §5.7: identical across all
+    conditions and models, never perturbed). Chat-form exemplars (where the
+    model sees assistant turns that literally end in the required format)
+    measured far stronger format compliance on small instruct models than the
+    same exemplars inlined into the instruction text.
     """
     messages = []
     template_str = getattr(tokenizer, "chat_template", "") or ""
@@ -88,6 +96,9 @@ def apply_chat_template(
             messages.append({"role": "system", "content": system_message})
         else:
             user_message = f"{system_message}\n\n{user_message}"
+    for exemplar_user_message, exemplar_assistant_message in exemplar_turns:
+        messages.append({"role": "user", "content": exemplar_user_message})
+        messages.append({"role": "assistant", "content": exemplar_assistant_message})
     messages.append({"role": "user", "content": user_message})
     return tokenizer.apply_chat_template(
         messages,
@@ -122,6 +133,12 @@ class VllmEngine:
             enable_prefix_caching=(
                 specification.enable_prefix_caching and gpu_supports_prefix_caching),
             seed=seed,
+            # vLLM's default 4 GiB pinned CPU swap starves low-RAM hosts (the
+            # free Colab T4 VM has 12.7 GB total, and the OOM killer took out
+            # three models at spaCy-load time). This workload never preempts
+            # to CPU: greedy decoding, and the GPU KV cache alone covers the
+            # full request set with >100x concurrency headroom.
+            swap_space=0.5,
         )
         max_num_seqs = specification.max_num_seqs or (
             None if gpu_supports_prefix_caching else _PRE_AMPERE_MAX_NUM_SEQS)
@@ -139,8 +156,8 @@ class VllmEngine:
         self.tokenizer = self._language_model.get_tokenizer()
 
         # Monotonic counter for vLLM engine request IDs (generate_streaming),
-        # unique across every call for the lifetime of this engine instance —
-        # several shards may stream through the same engine object in one run.
+        # unique across every call for the lifetime of this engine instance.
+        # Several shards may stream through the same engine object in one run.
         self._next_request_id = 0
 
     def _greedy_sampling_params(self, max_new_tokens: int):
@@ -151,17 +168,19 @@ class VllmEngine:
         )
 
     def apply_chat_template(
-            self, user_message: str, system_message: Optional[str] = None) -> str:
+            self, user_message: str, system_message: Optional[str] = None,
+            exemplar_turns: Sequence[tuple[str, str]] = ()) -> str:
         """Wrap a user message (and optionally a system message) in the model's
         own chat template (design/05 §5.7). See the module-level
         ``apply_chat_template`` for the shared implementation."""
-        return apply_chat_template(self.tokenizer, user_message, system_message)
+        return apply_chat_template(
+            self.tokenizer, user_message, system_message, exemplar_turns)
 
     def generate(self, prompts: Sequence[str], max_new_tokens: int) -> list[str]:
         """Generate greedily for a batch of ALREADY CHAT-TEMPLATED prompts.
 
         Blocks until every prompt in ``prompts`` has finished, then returns all
-        outputs at once — appropriate for a single small one-off call (e.g. the
+        outputs at once. Appropriate for a single small one-off call (e.g. the
         LLM-judge in judge.py), but not for the main sweep: a caller that wants
         to persist each row as soon as it is ready (surviving a mid-run crash
         with minimal lost work) should use ``generate_streaming`` instead.
@@ -174,13 +193,13 @@ class VllmEngine:
             self, prompts: Sequence[str], max_new_tokens: int,
     ) -> Iterator[StreamedGeneration]:
         """Generate greedily, yielding a ``StreamedGeneration`` the instant
-        each prompt's decoding finishes — not only once every prompt in
+        each prompt's decoding finishes, not only once every prompt in
         ``prompts`` has, and not in submission order.
 
         Drives vLLM's engine directly (``add_request`` + ``step``) instead of
         the blocking bulk ``LLM.generate`` call that ``generate`` above uses.
-        vLLM's own scheduler is unchanged — it still decides how many requests
-        run concurrently via continuous batching — this only changes *when*
+        vLLM's own scheduler is unchanged (it still decides how many requests
+        run concurrently via continuous batching). This only changes *when*
         the caller is handed a finished result: as soon as that one request is
         done, rather than after the slowest request in the batch. That lets a
         caller (``pipeline.runner.run_shard``) persist and flush each row

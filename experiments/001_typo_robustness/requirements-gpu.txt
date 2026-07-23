@@ -6,13 +6,11 @@
 # the Colab/cluster images of this era ship; pin exactly at pre-registration.
 vllm==0.10.0
 
-# Model loading / tokenizers / fallback HF generation engine. Held in the 4.x
-# line for compatibility with the pinned vLLM above; the 5.x series is a
-# breaking change and is deliberately avoided here.
+# Model loading / tokenizers. Held in the 4.x line for compatibility with the
+# pinned vLLM above; the 5.x series is a breaking change and is deliberately
+# avoided here. (accelerate and bitsandbytes were removed 2026-07-20: no HF
+# fallback engine exists in src/ — VllmEngine is the only backend — so neither
+# package is imported anywhere; vLLM's own dependency resolution brings in
+# what it needs.)
 transformers==4.53.2
-accelerate==1.14.0
-
-# bitsandbytes powers the nf4 stand-in in the HF fallback engine when AWQ wheels
-# are unavailable on a given machine (design/05 §5.4, HFEngine).
-bitsandbytes==0.49.2
 

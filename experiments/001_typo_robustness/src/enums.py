@@ -1,7 +1,7 @@
 """Controlled-vocabulary enumerations for the typo-robustness study.
 
-Every string or discrete-numeric constant that identifies a category — operation
-names, selection policies, semantic classes, parse statuses, etc. — is defined
+Every string or discrete-numeric constant that identifies a category (operation
+names, selection policies, semantic classes, parse statuses, etc.) is defined
 here so that no bare string literal needs to be scattered across modules.
 
 All enums inherit from (str, Enum) with a __str__ override, which means:
@@ -40,7 +40,13 @@ class SelectionPolicy(_StrEnum):
     KEYBOARD_NEIGHBOR = "keyboard_neighbor"
     INFORMATIVE_WORD = "informative_word"
     REAL_WORD = "real_word"
-    WHITESPACE = "whitespace"           # dormant; kept for old JSONL compatibility
+    # Regime B restricted to CMU-dictionary exact homophones (no orthographic
+    # band): the pure acoustic-confusion proxy. Crosswalks to the HIVE voice
+    # arm's clean+homophone operator (its Table 1, #13).
+    HOMOPHONE = "homophone"
+    # Whitespace split/merge. The merge direction ("missed-space") crosswalks
+    # to HIVE keyboard operator #21; the split direction stays dormant.
+    WHITESPACE = "whitespace"
     # Discourse-particle insertion: the frozen set {"uh", "um", "like", "so"}.
     # Intent is preserved definitionally (particles carry no propositional content);
     # no rejection sampling needed (Workstream 3). Novel versus prior work.
@@ -93,8 +99,8 @@ class TaskFamily(_StrEnum):
 
     Contamination-contrast datasets (standard benchmarks, paired with primaries)
     ---------------------------------------------------------------------------
-    GSM8K                    openai/gsm8k — standard arithmetic reasoning
-    MMLU                     cais/mmlu — standard MCQ (4-option)
+    GSM8K                    openai/gsm8k, standard arithmetic reasoning
+    MMLU                     cais/mmlu, standard MCQ (4-option)
 
     Offline generators (unit tests / pilot / Regime C operand swap)
     ---------------------------------------------------------------
@@ -104,7 +110,7 @@ class TaskFamily(_StrEnum):
     Historical (backward-compat with old JSONL output only)
     --------------------------------------------------------
     GSM_SYMBOLIC             old tag written by early load_reasoning_jsonl versions;
-                             not in REASONING_FAMILIES — re-tag on load if present.
+                             not in REASONING_FAMILIES. Re-tag on load if present.
     """
     GSM_SYMBOLIC = "gsm_symbolic"               # historical; avoid in new code
     GSM_SYMBOLIC_OFFICIAL = "gsm_symbolic_official"
@@ -176,7 +182,7 @@ class FragmentationStratum(_StrEnum):
 class FinishReason(_StrEnum):
     """vLLM completion finish_reason values the pipeline distinguishes.
     TRUNCATED ("length") means the max_new_tokens budget cut the generation
-    off — the truncation-rate gate counts these rows."""
+    off. The truncation-rate gate counts these rows."""
     STOPPED = "stop"
     TRUNCATED = "length"
 
@@ -239,22 +245,20 @@ class SampleSizeMethod(_StrEnum):
 
 
 class ConvergenceMethod(_StrEnum):
-    """Which step of the mixed-effects convergence fallback ladder succeeded.
+    """Which rung of the pre-registered convergence ladder produced the
+    confirmatory logistic GLMM (design/06 §6.6; Barr et al. 2013, pp. 275–276).
 
-    design/06 §6.6 pre-registers a *structural* contingency for a
-    non-converging maximal model (drop random-slope correlations, then the
-    by-model random slope, then treat ``model`` as a fixed effect) —
-    ``fit_crossed_mixed_effects_logistic`` does not implement that ladder.
-    What it actually tries, in order, is: statsmodels' own default
-    quasi-Newton cascade over the same maximal model, a derivative-free
-    fallback optimizer over the same model, and then a GLM approximation
-    that treats item/model as fixed factors (this last step is the one
-    design/06 §6.6 step 3 describes). These three names label that, not a
-    choice between "Laplace" and "variational Bayes" approximations —
-    statsmodels' ``MixedLM`` does not offer that choice."""
-    QUASI_NEWTON_CASCADE = "quasi_newton_cascade"
-    NELDER_MEAD_FALLBACK = "nelder_mead_fallback"
-    GLM_APPROXIMATION = "glm_approximation"
+    The first four rungs fit ``lme4::glmer`` (binomial, logit link, bobyqa)
+    through the rpy2 bridge, simplifying the random-effects structure one
+    pre-registered step at a time; the last rung is the pure-Python
+    fixed-factor logistic GLM that also serves as the offline fallback when
+    no R installation is available. A rung is accepted only when the fit
+    converges without a singular random-effects estimate."""
+    GLMER_MAXIMAL = "glmer_maximal"
+    GLMER_NO_RANDOM_CORRELATIONS = "glmer_no_random_correlations"
+    GLMER_NO_MODEL_SLOPE = "glmer_no_model_slope"
+    GLMER_INTERCEPTS_ONLY = "glmer_intercepts_only"
+    FIXED_EFFECTS_LOGISTIC_GLM = "fixed_effects_logistic_glm"
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +369,7 @@ class UniversalDependenciesClosedClassPartOfSpeechTag(_StrEnum):
     and do not carry independent referential meaning.  They are excluded from
     the NER condition of the K_P(x) key-term rule: a preposition or article
     inside a named-entity span (e.g., "the" in "the United States" or "of" in
-    "State of California") is not a meaningful perturbation target — altering it
+    "State of California") is not a meaningful perturbation target: altering it
     produces ungrammatical output rather than a semantically distinct question.
 
     Source: Nivre et al. (2016) 'Universal Dependencies v1', LREC;

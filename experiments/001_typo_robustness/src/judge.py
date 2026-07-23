@@ -314,6 +314,18 @@ def _extract_content_text(prompt: str) -> str:
     return prompt
 
 
+def perturbed_text_of_row(row: dict) -> str:
+    """The perturbed text of a row in either schema this project produces.
+
+    Generation rows (pipeline.runner) carry it as ``perturbed_prompt``;
+    the translated pairs files (tools/run_judge.py) carry it as ``prompt``.
+    Checking ``perturbed_prompt`` first matters: generation rows also carry a
+    ``prompt``-less schema, and a lookup that only knew one name silently
+    judged empty strings when handed the other (the sample_for_audit bug).
+    """
+    return row.get("perturbed_prompt") or row.get("prompt") or ""
+
+
 def run_judge_on_sample(
         engine: object,
         judge_revision: str,
@@ -321,67 +333,56 @@ def run_judge_on_sample(
         cache_path: Path,
         progress_callback: Optional[object] = None,
         skip_regime_c_mcq: bool = True,
-) -> list[JudgeDecision]:
-    """Run the judge on a list of generation rows and return decisions.
+) -> list[Optional[JudgeDecision]]:
+    """Run the judge on a list of rows; return decisions ALIGNED 1:1 with
+    ``sample_rows`` (``None`` marks a skipped row).
 
-    Each row must have: ``clean_prompt``, ``prompt`` (the perturbed prompt as
-    written by the runner), ``r_semantic_class``, and at least one edit in
-    ``edit_script``.
+    The alignment guarantee is the contract callers zip against: a Regime-C
+    MCQ row (structurally guaranteed meaning-changing, no judge needed when
+    ``skip_regime_c_mcq``) yields ``None`` in its position rather than being
+    silently dropped. Dropping it shifted every later decision onto the
+    wrong row in tools/sample_for_audit.py.
 
-    Bug fixes (Workstream 8):
-    - The perturbed text is read from ``row["prompt"]`` (how the runner writes
-      it), not from the non-existent ``row["perturbed_prompt"]`` field.
-    - Only the CONTENT block (question text) is shown to the judge, not the
-      full instruction + content prompt (which added noise to the judgment).
-    - Regime C MCQ items are skipped: their validity is guaranteed structurally
-      (the permutation is definitionally meaning-changing) and judging them
-      wastes inference.
-
-    Already-cached rows are returned from cache without calling the engine.
+    Each row must carry: ``clean_prompt``, the perturbed text (either
+    ``perturbed_prompt``, the generation-row schema, or ``prompt``, the
+    pairs-file schema; see ``perturbed_text_of_row``), ``r_semantic_class``, and
+    ``edit_script``. Only the CONTENT block is shown to the judge, never the
+    shared instruction scaffold. Already-cached rows never re-invoke the engine.
     """
 
     cache = JudgeDecisionCache(cache_path)
-    decisions: list[JudgeDecision] = []
+    aligned_decisions: list[Optional[JudgeDecision]] = []
 
     for row in sample_rows:
         claimed_regime = row.get("r_semantic_class", "")
 
-        # Skip Regime C MCQ: structurally guaranteed, no judge needed.
-        if (skip_regime_c_mcq and claimed_regime == SemanticClass.C
-                and row.get("task_family", "").startswith("mmlu")):
+        is_structurally_guaranteed_regime_c_mcq = (
+            skip_regime_c_mcq and claimed_regime == SemanticClass.C
+            and row.get("task_family", "").startswith("mmlu"))
+        if is_structurally_guaranteed_regime_c_mcq:
+            aligned_decisions.append(None)
+            if progress_callback is not None:
+                progress_callback(1)  # type: ignore[call-arg]
             continue
 
-        # Bug fix: runner writes the perturbed prompt as "prompt", not as
-        # "perturbed_prompt" (which was never written by the runner).
-        full_original = row.get("clean_prompt", "")
-        full_perturbed = row.get("prompt", "")  # perturbed prompt in the runner schema
-
-        # Bug fix: show content-only text, not the instruction+content full prompt.
-        original_text = _extract_content_text(full_original)
-        perturbed_text = _extract_content_text(full_perturbed)
+        original_text = _extract_content_text(row.get("clean_prompt", ""))
+        perturbed_text = _extract_content_text(perturbed_text_of_row(row))
 
         edit_script = row.get("edit_script", [])
-        if edit_script:
-            first_edit = edit_script[0]
-            edited_word_before = first_edit.get("word_before", "")
-            edited_word_after = first_edit.get("word_after", "")
-        else:
-            edited_word_before = ""
-            edited_word_after = ""
-
+        first_edit = edit_script[0] if edit_script else {}
         decision = judge_one(
             engine=engine,
             judge_revision=judge_revision,
             original_text=original_text,
             perturbed_text=perturbed_text,
             claimed_regime=claimed_regime,
-            edited_word_before=edited_word_before,
-            edited_word_after=edited_word_after,
+            edited_word_before=first_edit.get("word_before", ""),
+            edited_word_after=first_edit.get("word_after", ""),
             cache=cache,
         )
-        decisions.append(decision)
+        aligned_decisions.append(decision)
 
         if progress_callback is not None:
             progress_callback(1)  # type: ignore[call-arg]
 
-    return decisions
+    return aligned_decisions

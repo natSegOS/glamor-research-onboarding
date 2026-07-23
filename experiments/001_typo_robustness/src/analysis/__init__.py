@@ -28,6 +28,9 @@ from analysis.statistics import (
     ConfidenceInterval,
     bootstrap_confidence_interval_paired,
     summarize_cell,
+    BENJAMINI_HOCHBERG_FDR_Q,
+    benjamini_hochberg_adjusted_p_values,
+    holm_adjusted_p_values,
 )
 
 from analysis.results import (
@@ -53,6 +56,8 @@ from analysis.audit import (
 from analysis.models import (
     MixedEffectsLogisticResult,
     fit_crossed_mixed_effects_logistic,
+    LinearProbabilityMixedResult,
+    fit_linear_probability_mixed_model,
     MediationResult,
     compute_mediation_proportion,
 )

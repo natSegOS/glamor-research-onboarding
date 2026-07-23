@@ -20,7 +20,7 @@ from analysis import statistics
 
 # The primary endpoint's condition cell (design/06 §6.3): Regime-A
 # keyboard-neighbor substitution anywhere, at the primary edit budget.
-_PRIMARY_CONDITION_FILTERS = {
+PRIMARY_CONDITION_FILTERS = {
     "r_semantic_class": SemanticClass.A,
     "r_operation": Operation.SUBSTITUTE,
     "r_selection_policy": SelectionPolicy.KEYBOARD_NEIGHBOR,
@@ -81,7 +81,7 @@ def compute_stage_gates(rows: Sequence[dict],
             if not row.get("is_clean")
             and row.get("r_edit_budget") == primary_budget
             and all(row.get(field) == value
-                    for field, value in _PRIMARY_CONDITION_FILTERS.items())
+                    for field, value in PRIMARY_CONDITION_FILTERS.items())
             and (row.get("model_id"), row["model_revision"], row["task_id"])
             in clean_correct_by_key]
 

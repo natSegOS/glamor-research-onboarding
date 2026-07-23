@@ -1,6 +1,6 @@
-# 08 — Pipeline, Perturbation Engine, and Data Schema
+# 08: Pipeline, Perturbation Engine, and Data Schema
 
-This document specifies the software the study runs on, in enough detail to implement without further design decisions: the module layout, the perturbation-engine contract, the canonical output schema (one row per generation), and the unit-test plan that makes the perturbations auditable and reproducible. It does not contain final code — it is the spec the code is written against.
+This document specifies the software the study runs on, in enough detail to implement without further design decisions: the module layout, the perturbation-engine contract, the canonical output schema (one row per generation), and the unit-test plan that makes the perturbations auditable and reproducible. It does not contain final code; it is the spec the code is written against.
 
 ---
 
@@ -86,15 +86,15 @@ Guarantees the engine must satisfy (each is a unit test, §8.7):
 1. **Determinism:** same arguments + same seed → byte-identical `perturbed_text` and `edit_script`.
 2. **Budget exactness:** exactly `k` primitive edits are applied (or the call fails loudly if `k` exceeds eligible positions), so the severity axis is exact, not approximate.
 3. **k = 0 is identity:** `perturb(..., edit_budget=0)` returns `text` unchanged with an empty edit script.
-4. **Protected spans are inviolable:** no edit ever touches a protected span (this is how few-shot exemplars and the gold-answer marker stay clean — Document 05 §5.7, Document 04).
+4. **Protected spans are inviolable:** no edit ever touches a protected span (this is how few-shot exemplars and the gold-answer marker stay clean; Document 05 §5.7, Document 04).
 5. **Reconstructibility:** applying `edit_script` to `text` reproduces `perturbed_text` exactly, and the script records, per edit, `(op, word_index, char_index, before, after, old_char, new_char)`.
 6. **Policy fidelity:** keyboard_neighbor draws only from the QWERTY adjacency graph; uniform draws from the full alphabet; real_word guarantees a valid-word result; informative_word/answer_critical only edit positions inside `key_terms`.
 
-**Upstream library:** the keyboard-neighbor policy wraps **MulTypo** (Liu et al., 2025; github.com/cisnlp/multypo), which provides validated keyboard-layout-based typo generation; we cite it and use its adjacency model rather than reinventing one. We add the state-vector logging, edit-script reconstruction, protected-span handling, and regime hooks around it. The uniform policy uses the simpler Pruthi et al. (2019) swap/drop/key/add primitives for the ablation baseline.
+**Upstream library:** the keyboard-neighbor policy wraps **MulTypo** (Zhao et al., 2025; github.com/cisnlp/multypo), which provides validated keyboard-layout-based typo generation; we cite it and use its adjacency model rather than reinventing one. We add the state-vector logging, edit-script reconstruction, protected-span handling, and regime hooks around it. The uniform policy uses the simpler Pruthi et al. (2019) swap/drop/key/add primitives for the ablation baseline.
 
 ## 8.4 The canonical output schema (one row per generation)
 
-Every generation — clean or perturbed — produces exactly one row with these fields. This is the single source of truth that `stats.py` and `analyze.py` read. (Extends the Experiment-000 CSV schema, which already carries `model_id` and `quant_bits`.)
+Every generation, clean or perturbed, produces exactly one row with these fields. This is the single source of truth that `stats.py` and `analyze.py` read. (Extends the Experiment-000 CSV schema, which already carries `model_id` and `quant_bits`.)
 
 ```
 # provenance
@@ -167,4 +167,4 @@ This is the concrete content behind the reproducibility claim in Document 10.
 
 ## 8.9 Why this pipeline is auditable end to end
 
-The chain clean item → `r` → edit script → perturbed text → audit label → tokenizer metrics → generation → parsed answer → correctness is fully logged at every link, and every transformation is either deterministic (perturbation, scoring, token metrics) or human-recorded (audit). A skeptic can take any single row and verify: that the edit script reproduces the perturbed text, that the perturbed word is (non)word as claimed, that the regime label came from human audit, that the token counts are correct for that tokenizer, and that the parsed answer matches the scorer's rule. There is no step where the reader must trust an unverifiable judgment — which is exactly the property Document 10 needs.
+The chain clean item → `r` → edit script → perturbed text → audit label → tokenizer metrics → generation → parsed answer → correctness is fully logged at every link, and every transformation is either deterministic (perturbation, scoring, token metrics) or human-recorded (audit). A skeptic can take any single row and verify: that the edit script reproduces the perturbed text, that the perturbed word is (non)word as claimed, that the regime label came from human audit, that the token counts are correct for that tokenizer, and that the parsed answer matches the scorer's rule. There is no step where the reader must trust an unverifiable judgment, which is exactly the property Document 10 needs.

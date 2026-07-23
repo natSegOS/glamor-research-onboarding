@@ -8,6 +8,7 @@ __pycache__/
 
 .DS_Store
 *.mcp.json
+*.*mcp
 
 ## Hugging Face
 .cache/
@@ -227,3 +228,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+
+# Reference PDFs live in the private companion repo (glamor-typo-research-private);
+# redistribution rights for several publisher copies are unclear, so they stay off public GitHub.
+experiments/001_typo_robustness/references/

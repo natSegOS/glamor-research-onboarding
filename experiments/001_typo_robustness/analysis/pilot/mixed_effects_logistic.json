@@ -1,45 +1,48 @@
 {
   "converged": true,
-  "method": "quasi_newton_cascade",
-  "log_likelihood": -1528.905840409181,
-  "n_observations": 6663,
+  "method": "glmer_intercepts_only",
+  "log_likelihood": -1854.7740202098346,
+  "n_observations": 6653,
   "n_items": 400,
   "n_models": 1,
   "fixed_effects": {
     "is_perturbed": {
-      "coef": -0.03265745382957292,
-      "or": 0.9678700429883029,
-      "p": 0.04450765303196694
+      "coef": -0.3257863853473519,
+      "or": 0.7219593920657069,
+      "std_error": 0.23944500393200224,
+      "p": 0.17364341575738818
     },
     "token_inflation_excess": {
-      "coef": -0.3108166951674392,
-      "or": 0.7328481981742514,
-      "p": 0.10428521024386689
+      "coef": 0.27578274581480317,
+      "or": 1.3175615871619402,
+      "std_error": 2.73550584488526,
+      "p": 0.9196965287117392
     },
     "word_length_before": {
-      "coef": 0.002321125145315556,
-      "or": 1.0023238210417198,
-      "p": 0.06878728812223346
+      "coef": 0.042016605550710434,
+      "or": 1.0429117967317028,
+      "std_error": 0.019357801810382783,
+      "p": 0.029967046901621434
     },
     "subword_count_change": {
-      "coef": 0.00029093783194577774,
-      "or": 1.0002909801584614,
-      "p": 0.9516740166727656
+      "coef": -0.07008333265985672,
+      "or": 0.9323161242862378,
+      "std_error": 0.06947386591942176,
+      "p": 0.3130837024743639
     },
-    "is_perturbed Var": {
-      "coef": 0.03278640227243861,
-      "or": 1.0333297987704744,
-      "p": 0.8411035991355488
+    "edit_budget_k": {
+      "coef": -0.16886619306673634,
+      "or": 0.844621912093016,
+      "std_error": 0.05431421423145045,
+      "p": 0.0018768310702111793
     }
   },
   "random_effects_variance": {
-    "Group": {
-      "Group": 0.16560136895370953,
-      "is_perturbed": -0.020262291716694084
-    },
-    "is_perturbed": {
-      "Group": -0.020262291716694084,
-      "is_perturbed": 0.002479209628253856
-    }
-  }
+    "task_id (Intercept)": 19.0968918292228
+  },
+  "is_singular_fit": false,
+  "ladder_notes": [
+    "glmer_maximal: did not converge",
+    "glmer_no_random_correlations: did not converge"
+  ]
 }

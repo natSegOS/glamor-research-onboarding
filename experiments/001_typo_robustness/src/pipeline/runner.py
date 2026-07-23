@@ -10,7 +10,7 @@ The runner applies the model's chat template to every prompt before generation
 when the engine exposes ``apply_chat_template``. This guarantees the template
 is applied uniformly to clean and perturbed prompts alike and cannot be
 forgotten by a caller (design/05 §5.7). The DeterministicDummyEngine has no
-chat template, so dummy runs see the raw prompt — correct, since the dummy
+chat template, so dummy runs see the raw prompt. That is correct: the dummy
 answers by exact prompt lookup.
 """
 
@@ -25,8 +25,10 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional, Sequence
 
 from enums import (
-    Decoding, FinishReason, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES)
+    Decoding, FinishReason, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES,
+    REASONING_FAMILIES)
 from inference.engines import StreamedGeneration
+from tasks.reasoning import REASONING_CHAT_EXEMPLAR_TURNS
 import scoring
 
 
@@ -38,8 +40,9 @@ SCHEMA_VERSION = "1.1"
 _ROW_ID_HASH_HEX_LENGTH = 24
 _MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
 _MANIFEST_SHARD_STATISTICS_KEY = "shard_statistics"
+_MANIFEST_GENERATION_PARAMETERS_KEY = "generation_parameters"
 
-# DeterministicDummyEngine's revision id — a fixed, recognisable sentinel
+# DeterministicDummyEngine's revision id: a fixed, recognisable sentinel
 # (never a real HuggingFace revision SHA) so a generation row's provenance
 # makes it obvious the row came from the GPU-free dummy engine, not a model.
 DUMMY_ENGINE_REVISION = "dummy-engine-0"
@@ -99,7 +102,7 @@ class DeterministicDummyEngine:
 
     ``answer_function`` maps a prompt string to a generation string; the
     default echoes ``'#### 0'``. Has no chat template, so the runner sends it
-    the raw prompt — appropriate, since the dummy answers by exact prompt
+    the raw prompt, appropriate since the dummy answers by exact prompt
     lookup.
     """
 
@@ -128,7 +131,7 @@ class DeterministicDummyEngine:
         """Mirrors ``VllmEngine.generate_streaming``'s ``StreamedGeneration``
         yield contract so ``run_shard`` can drive either engine identically.
         Nothing here is actually concurrent (there is no GPU to schedule), so
-        this just yields every result in order — sufficient for exercising
+        this just yields every result in order, sufficient for exercising
         ``run_shard``'s incremental-write and resume behaviour in tests.
         Token counts are whitespace-word counts, good enough for tests.
         """
@@ -150,15 +153,24 @@ class ShardManifest:
     A resumed run loads this file and skips every shard already listed,
     so progress is never lost across session restarts (design/07 §7.7).
     The statistics (wall seconds, output tokens, tokens/sec) are what the
-    main-study compute budget is sized from (design/07 §7.5) — the per-row
+    main-study compute budget is sized from (design/07 §7.5). The per-row
     request_wall_seconds includes scheduler queue time and must not be summed.
+
+    ``generation_parameters``, when given, is recorded in the manifest and
+    checked on resume: a row's deterministic row_id does not encode the token
+    budgets, so resuming an output directory after a budget change would
+    silently skip every existing row and leave a file that mixes budgets.
+    A mismatch raises instead; a changed budget requires a fresh directory.
     """
 
-    def __init__(self, manifest_path: Path) -> None:
+    def __init__(
+            self, manifest_path: Path,
+            generation_parameters: Optional[dict] = None) -> None:
 
         self.manifest_path = Path(manifest_path)
         self.completed_shard_ids: set[str] = set()
         self.shard_statistics: dict[str, dict] = {}
+        self.generation_parameters = generation_parameters
 
         if self.manifest_path.exists():
             stored_data = json.loads(self.manifest_path.read_text())
@@ -167,6 +179,17 @@ class ShardManifest:
             # regenerating every row (this happened: a committed 1.0 manifest
             # made a fresh clone generate nothing).
             if stored_data.get("schema") == SCHEMA_VERSION:
+                stored_parameters = stored_data.get(
+                    _MANIFEST_GENERATION_PARAMETERS_KEY)
+                if (generation_parameters is not None
+                        and stored_parameters is not None
+                        and stored_parameters != generation_parameters):
+                    raise ValueError(
+                        f"manifest {self.manifest_path} records generation "
+                        f"parameters {stored_parameters} but this run uses "
+                        f"{generation_parameters}; resuming would mix "
+                        f"incomparable rows in one file. Point the run at a "
+                        f"fresh output directory.")
                 self.completed_shard_ids = set(
                     stored_data.get(_MANIFEST_COMPLETED_SHARDS_KEY, []))
                 self.shard_statistics = stored_data.get(
@@ -185,17 +208,15 @@ class ShardManifest:
         self.completed_shard_ids.add(shard_id)
         if statistics is not None:
             self.shard_statistics[shard_id] = statistics
-        self.manifest_path.write_text(
-            json.dumps(
-                {
-                    "schema": SCHEMA_VERSION,
-                    _MANIFEST_COMPLETED_SHARDS_KEY: sorted(
-                        self.completed_shard_ids),
-                    _MANIFEST_SHARD_STATISTICS_KEY: self.shard_statistics,
-                },
-                indent=1,
-            )
-        )
+        manifest_data = {
+            "schema": SCHEMA_VERSION,
+            _MANIFEST_COMPLETED_SHARDS_KEY: sorted(self.completed_shard_ids),
+            _MANIFEST_SHARD_STATISTICS_KEY: self.shard_statistics,
+        }
+        if self.generation_parameters is not None:
+            manifest_data[_MANIFEST_GENERATION_PARAMETERS_KEY] = (
+                self.generation_parameters)
+        self.manifest_path.write_text(json.dumps(manifest_data, indent=1))
 
 
 def _existing_row_ids(output_path: Path) -> set[str]:
@@ -221,13 +242,25 @@ def _existing_row_ids(output_path: Path) -> set[str]:
     return already_written_ids
 
 
-def _apply_chat_template_if_available(engine: object, prompt: str) -> str:
+def chat_exemplar_turns_for_family(task_family) -> tuple:
+    """The fixed few-shot (user, assistant) chat turns for a task family:
+    the reasoning exemplars for reasoning families, none for MCQ (whose
+    compliance needs no exemplars and is not gate-checked)."""
+
+    return (REASONING_CHAT_EXEMPLAR_TURNS
+            if task_family in REASONING_FAMILIES else ())
+
+
+def _apply_chat_template_if_available(
+        engine: object, prompt: str,
+        exemplar_turns: Sequence[tuple[str, str]] = ()) -> str:
     """Apply the engine's chat template if it exposes one; return the prompt
     unchanged for engines that do not (e.g. DeterministicDummyEngine).
     """
 
     if hasattr(engine, "apply_chat_template"):
-        return engine.apply_chat_template(prompt)  # type: ignore[union-attr]
+        return engine.apply_chat_template(  # type: ignore[union-attr]
+            prompt, exemplar_turns=exemplar_turns)
     return prompt
 
 
@@ -254,15 +287,15 @@ def run_shard(
     once, to every prompt.
 
     Every request already on disk (by ``row_id``) is skipped before
-    generation even starts, so re-running this function — after a crash, or
+    generation even starts, so re-running this function (after a crash, or
     as one of several parallel workers each handed a partition of the same
-    request list (design/07 §7.7) — never regenerates or duplicates a row.
+    request list, design/07 §7.7) never regenerates or duplicates a row.
 
     Rows are written and flushed to ``output_path`` as soon as each individual
     request finishes decoding (``engine.generate_streaming``), not after a
     fixed-size batch completes. A killed process therefore loses at most the
     handful of requests actually in flight at that moment, never an entire
-    batch — and, since vLLM's own continuous-batching scheduler (not a
+    batch. And, since vLLM's own continuous-batching scheduler (not a
     batch-size parameter here) decides how many requests run concurrently,
     this is also never slower than batching would have been.
 
@@ -306,7 +339,9 @@ def run_shard(
         return 0
 
     chat_templated_prompts = [
-        _apply_chat_template_if_available(engine, request.prompt)
+        _apply_chat_template_if_available(
+            engine, request.prompt,
+            chat_exemplar_turns_for_family(request.task_family))
         for _row_id, request in pending_requests
     ]
 
@@ -358,15 +393,20 @@ def run_shard(
                 **request.extra_fields,
             }
 
-            # Inline scoring — always on (Workstream 5). Uses the full
+            # Inline scoring, always on (Workstream 5). Uses the full
             # four-way linguistic classifier when a spaCy pipeline is
             # provided; falls back to structural two-way otherwise.
             score_result = scoring.score(
                 generated_text, request.gold_answer, request.task_family)
             if (linguistic_pipeline is not None
-                    and score_result.parse_status == ParseStatus.UNPARSEABLE):
+                    and score_result.parse_status == ParseStatus.UNPARSEABLE
+                    and generation.finish_reason != FinishReason.TRUNCATED):
                 # Upgrade UNPARSEABLE to CLARIFICATION/REFUSAL when the
-                # linguistic classifier finds evidence.
+                # linguistic classifier finds evidence. Never for truncated
+                # generations: a chain of thought cut off by the token budget
+                # is not an interactional failure, and classifying its dangling
+                # first-person clauses as refusals inflated the M9 diagnostic
+                # in the T4 rehearsal (design/04 §4.5).
                 refined = scoring.classify_parse_status_with_linguistic_pipeline(
                     generated_text, score_result.parsed_answer, linguistic_pipeline)
                 score_result = scoring.ScoreResult(

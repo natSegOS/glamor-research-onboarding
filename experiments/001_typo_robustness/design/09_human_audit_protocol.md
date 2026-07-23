@@ -1,4 +1,4 @@
-# 09 — Human Audit Protocol
+# 09: Human Audit Protocol
 
 The single most likely reason a typo-robustness paper gets rejected is the objection "your perturbations changed the meaning, so you measured task-redefinition, not robustness." This document is the defense: a human-audited, agreement-quantified, pre-registered procedure that assigns every perturbed item to a semantic regime by human judgment, with a fixed exclusion rule. The primary endpoint is computed only on audited intent-preserving items.
 
@@ -11,7 +11,7 @@ For each perturbed item the audit answers two binary questions:
 2. **Gold answer unchanged?** Should the correct answer be the same as for the clean item?
 
 The pair of answers maps to a regime:
-- Yes / Yes → **Regime A or B** (intent-preserving; A if the corrupted token is a nonword, B if a real word — the nonword/real-word split is deterministic from `regimes.py`, the audit only confirms intent).
+- Yes / Yes → **Regime A or B** (intent-preserving; A if the corrupted token is a nonword, B if a real word; the nonword/real-word split is deterministic from `regimes.py`, the audit only confirms intent).
 - No / No → **Regime C** (meaning genuinely changed).
 - Disagreement or "ambiguous" → flagged for adjudication, then included or excluded per §9.5.
 
@@ -36,15 +36,15 @@ n = z²·p(1−p) / margin²  =  1.96² · 0.25 / margin²
 - **±5 pp margin → n ≈ 385 items per regime.** (Locked.)
 - ±3 pp margin → n ≈ 1,068 per regime (used only if a tighter bound is needed and annotator time allows).
 
-**Locked decision: audit 385 stratified-random items per regime** (A, B, C) = ~1,155 items, each by 3 annotators = ~3,465 judgments. At a few seconds per binary judgment this is a few hours per annotator — a realistic one-week task. Stratify the sample across tasks, edit budgets, and operations so the audited rate is representative of the full perturbation set, not just the easy cells.
+**Locked decision: audit 385 stratified-random items per regime** (A, B, C) = ~1,155 items, each by 3 annotators = ~3,465 judgments. At a few seconds per binary judgment this is a few hours per annotator, a realistic one-week task. Stratify the sample across tasks, edit budgets, and operations so the audited rate is representative of the full perturbation set, not just the easy cells.
 
-This `n = 385` is derived from the ±5 pp margin exactly as `N = 600` is derived from the 5 pp MDE (Document 06 §6.3) — both numbers are consequences of a stated precision target, not round-number guesses.
+This `n = 385` is derived from the ±5 pp margin exactly as `N = 600` is derived from the 5 pp MDE (Document 06 §6.3): both numbers are consequences of a stated precision target, not round-number guesses.
 
 ## 9.4 Agreement thresholds (the quality gate)
 
 We report **Fleiss' κ** (three raters, nominal regime labels) per regime and overall, and interpret it on the Landis & Koch (1977) scale: 0.41–0.60 moderate, 0.61–0.80 substantial, 0.81–1.00 almost perfect.
 
-**Locked gate: Fleiss' κ ≥ 0.60 (substantial) per regime is required to proceed.** If κ < 0.60 for a regime, the perturbation generator for that regime is too ambiguous; we revise the guideline and/or the generator (e.g., tighten the real-word neighbor selection for B) and re-audit a fresh sample before the main sweep. We also report Cohen's κ pairwise as a cross-check. Reporting κ — and gating on it — is what converts "we think these are intent-preserving" into "annotators substantially agree these are intent-preserving, κ = X."
+**Locked gate: Fleiss' κ ≥ 0.60 (substantial) per regime is required to proceed.** If κ < 0.60 for a regime, the perturbation generator for that regime is too ambiguous; we revise the guideline and/or the generator (e.g., tighten the real-word neighbor selection for B) and re-audit a fresh sample before the main sweep. We also report Cohen's κ pairwise as a cross-check. Reporting κ, and gating on it, is what converts "we think these are intent-preserving" into "annotators substantially agree these are intent-preserving, κ = X."
 
 ## 9.5 Adjudication and the exclusion rule (locked)
 
@@ -61,11 +61,11 @@ We audit a 385-item-per-regime sample, not every perturbation. To justify applyi
 
 ## 9.7 The LLM-as-judge boundary (locked)
 
-LLM-as-judge is **not used for the primary endpoint or for regime assignment.** Documented reliability problems make it unsuitable as a final arbiter: position/verbosity/self-enhancement bias (Shi et al. 2024, "Judging the Judges," arXiv:2406.07791, 15 judges over ~150k evaluations), broad judgment biases (Chen et al., EMNLP 2024, aclanthology 2024.emnlp-main.474), and domain-expert disagreement (Szymanski et al., ACM IUI 2025 / arXiv:2410.20266: SMEs agreed with LLM judges only ~64% in mental health and ~68% in dietetics).
+LLM-as-judge is **not used for the primary endpoint or for regime assignment.** Documented reliability problems make it unsuitable as a final arbiter: position, verbosity, and self-enhancement biases (Zheng et al. 2023, "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena," arXiv:2306.05685); position bias confirmed systematically at scale (Shi et al. 2024, "Judging the Judges: A Systematic Study of Position Bias in LLM-as-a-Judge," arXiv:2406.07791; 15 judges, >150,000 evaluation instances); broad judgment biases shared by human and LLM judges (Chen et al., EMNLP 2024, aclanthology 2024.emnlp-main.474); and domain-expert disagreement (Szymanski et al., ACM IUI 2025 / arXiv:2410.20266: SMEs agreed with LLM judges only ~64% in mental health and ~68% in dietetics).
 
 Where an LLM judge *may* assist (clearly labeled, never final):
 - **Pre-screening** the audit pool to prioritize likely-ambiguous items for human attention.
-- The **appropriate-change-rate diagnostic** on Regime-C items (M7), where the new gold `y'*` is already known by construction (Document 04 §4.7), so the judge is only confirming a deterministic comparison — and even there, humans validate a 200-item subset.
+- The **appropriate-change-rate diagnostic** on Regime-C items (M7), where the new gold `y'*` is already known by construction (Document 04 §4.7), so the judge is only confirming a deterministic comparison; even there, humans validate a 200-item subset.
 
 Humans are the final arbiter on every regime label and on the primary endpoint. This boundary is exactly what the reliability literature recommends and is stated plainly in the paper.
 
@@ -77,4 +77,4 @@ Humans are the final arbiter on every regime label and on the primary endpoint. 
 - The guideline and worked examples (in an appendix), so the audit is reproducible by others.
 - Confirmation that the primary endpoint contains only audited intent-preserving items.
 
-Reporting all of this turns the audit from an invisible assumption into a visible, quantified, reproducible part of the method — which is precisely what makes the "your typos changed the meaning" objection answerable with a number instead of a rebuttal.
+Reporting all of this turns the audit from an invisible assumption into a visible, quantified, reproducible part of the method, which is precisely what makes the "your typos changed the meaning" objection answerable with a number instead of a rebuttal.

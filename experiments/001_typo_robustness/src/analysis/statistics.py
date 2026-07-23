@@ -171,6 +171,46 @@ def audit_sample_size(margin: float, confidence: float = 0.95) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Multiplicity control (design/06 §6.7), both locked decisions of design/00
+# §0.4: Benjamini–Hochberg FDR across the exploratory cell grid, Holm within
+# a model's pre-registered primary family.
+# ---------------------------------------------------------------------------
+
+BENJAMINI_HOCHBERG_FDR_Q = 0.05
+HOLM_PRIMARY_FAMILY_ALPHA = 0.05
+
+
+def _adjusted_p_values_ignoring_nan(p_values: Sequence, method: str) -> list:
+    """statsmodels ``multipletests`` over the non-NaN entries, with NaN
+    positions preserved (a cell with no computable test must not consume a
+    share of the correction budget, nor crash it)."""
+    from statsmodels.stats.multitest import multipletests
+
+    values = [float(p) if p == p else float("nan") for p in p_values]  # NaN-safe copy
+    testable_indices = [index for index, p in enumerate(values) if p == p]
+    if not testable_indices:
+        return values
+    _rejected, corrected, _alpha_sidak, _alpha_bonferroni = multipletests(
+        [values[index] for index in testable_indices], method=method)
+    adjusted = list(values)
+    for index, corrected_p in zip(testable_indices, corrected):
+        adjusted[index] = float(corrected_p)
+    return adjusted
+
+
+def benjamini_hochberg_adjusted_p_values(p_values: Sequence) -> list:
+    """Benjamini & Hochberg (1995) step-up FDR adjustment; compare the result
+    against BENJAMINI_HOCHBERG_FDR_Q."""
+    return _adjusted_p_values_ignoring_nan(p_values, method="fdr_bh")
+
+
+def holm_adjusted_p_values(p_values: Sequence) -> list:
+    """Holm (1979) step-down adjustment for strong FWER control within a
+    model's pre-registered primary comparison family."""
+    return _adjusted_p_values_ignoring_nan(p_values, method="holm")
+
+
+# ---------------------------------------------------------------------------
 # BCa item-paired bootstrap confidence intervals (design/06 §6.5).
 # ---------------------------------------------------------------------------
 
@@ -184,7 +224,7 @@ class ConfidenceInterval:
 
 
 # ``ConfidenceInterval.method`` when even the percentile bootstrap fails (a
-# fully degenerate cell — every item has the same outcome); the interval
+# fully degenerate cell, where every item has the same outcome); the interval
 # collapses to the point estimate with zero resamples, per the pre-registered
 # contingency in bootstrap_confidence_interval_paired's docstring.
 DEGENERATE_BOOTSTRAP_METHOD_LABEL = "degenerate"
@@ -257,7 +297,7 @@ def bootstrap_confidence_interval_paired(
         except ValueError:
             # scipy raises ValueError when BCa's acceleration/bias-correction
             # is undefined for degenerate data (see the docstring's
-            # degenerate-distribution guard) — expected, try the next method.
+            # degenerate-distribution guard). Expected, try the next method.
             continue
 
     return ConfidenceInterval(
@@ -331,7 +371,7 @@ def invalid_or_clarification_rate(parse_statuses: Sequence[str]) -> float:
 
 
 def discordant_rate(clean_correctness, perturbed_correctness) -> float:
-    """The discordant-pair rate (broke + recovered) / total — the quantity the
+    """The discordant-pair rate (broke + recovered) / total: the quantity the
     Stage-2 pilot measures to fix the per-cell sample size (design/06 §6.3)."""
     table = build_paired_table(clean_correctness, perturbed_correctness)
     return (table.broke + table.recovered) / table.total if table.total else float("nan")
@@ -340,7 +380,7 @@ def discordant_rate(clean_correctness, perturbed_correctness) -> float:
 def summarize_cell(clean_correctness: Sequence[int], perturbed_correctness: Sequence[int],
                    seed: int = 1729, resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES) -> dict:
     """One reporting block per cell (design/06 §6.10): point estimates, the
-    delta confidence interval, the raw 2x2 counts, and the McNemar test —
+    delta confidence interval, the raw 2x2 counts, and the McNemar test:
     everything a reader needs to recompute the cell.
 
     Cells smaller than the interval minimum report counts and point estimates

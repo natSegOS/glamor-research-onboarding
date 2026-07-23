@@ -1,122 +1,177 @@
 {
   "task_family:gsm8k": {
-    "total_effect": -0.015591578447192469,
-    "direct_effect": 0.027785579131686815,
-    "indirect_effect": -0.043377157578879284,
+    "estimator": "imai_quasibayes_mixed_logistic_conditional_on_median_item",
+    "total_effect": -0.0186234540706796,
+    "direct_effect": 0.00873113905470081,
+    "indirect_effect": -0.027354593125380407,
     "bootstrap_ci_indirect": [
-      -0.07125051290858907,
-      -0.013702930839304836
+      -0.0773883885855259,
+      -0.004411889678579105
     ],
     "bootstrap_ci_total": [
-      -0.06533833143548293,
-      0.043891004384718345
+      -0.09026916482820764,
+      0.019648890003234658
     ],
     "proportion_mediated": null,
     "proportion_mediated_reason": "total_effect_ci_includes_zero",
     "bootstrap_ci_proportion": [
-      -14.370902699819194,
-      29.543547519390312
+      -19.95780726461231,
+      15.159316700203714
     ],
-    "treatment_on_mediator_coef": 0.03226695935882879,
-    "mediator_on_outcome_coef": -1.3443212016508321,
-    "supplementary_indirect_effect": -0.012614409864455932,
-    "supplementary_proportion_mediated": 0.8055475278378306,
+    "treatment_on_mediator_coef": 0.03226696277696545,
+    "mediator_on_outcome_coef": -15.244762478438755,
+    "supplementary_indirect_effect": -0.005699430912454357,
+    "supplementary_proportion_mediated": 0.2529671619147251,
     "n_observations": 1300
   },
   "task_family:gsm_symbolic_official": {
-    "total_effect": -0.031149682655201356,
-    "direct_effect": -0.05039875930725639,
-    "indirect_effect": 0.019249076652055032,
+    "estimator": "imai_quasibayes_mixed_logistic_conditional_on_median_item",
+    "total_effect": -0.0004553543018003036,
+    "direct_effect": -0.00035435051933945563,
+    "indirect_effect": -0.00010100378246084795,
     "bootstrap_ci_indirect": [
-      -0.0020177400768162674,
-      0.03927149818865175
+      -0.0004736810681300817,
+      4.632258734243858e-06
     ],
     "bootstrap_ci_total": [
-      -0.08064484860085155,
-      0.02004791638076411
+      -0.002355619755333477,
+      1.9804531219613446e-05
     ],
     "proportion_mediated": null,
     "proportion_mediated_reason": "total_effect_ci_includes_zero",
     "bootstrap_ci_proportion": [
-      -7.630119202425684,
-      5.264294590296984
+      -2.1102078856897446,
+      3.137381139962917
     ],
-    "treatment_on_mediator_coef": 0.028261943355639797,
-    "mediator_on_outcome_coef": 0.6810952951759346,
-    "supplementary_indirect_effect": 0.005884476859370903,
-    "supplementary_proportion_mediated": -0.18908547557724903,
-    "n_observations": 1298
+    "treatment_on_mediator_coef": 0.028267009892249104,
+    "mediator_on_outcome_coef": -9.655453138425134,
+    "supplementary_indirect_effect": -8.036231097878206e-05,
+    "supplementary_proportion_mediated": 0.14207249103069114,
+    "n_observations": 1296
   },
   "task_family:mmlu": {
-    "total_effect": -0.01666155113488769,
-    "direct_effect": -0.0006603886649066932,
-    "indirect_effect": -0.016001162469980998,
+    "estimator": "imai_quasibayes_mixed_logistic_conditional_on_median_item",
+    "total_effect": -0.049451375785958346,
+    "direct_effect": -0.01861700253664412,
+    "indirect_effect": -0.030834373249314227,
     "bootstrap_ci_indirect": [
-      -0.03687671299009765,
-      0.0026922542599254204
+      -0.09285470667677154,
+      0.004020315209263078
     ],
     "bootstrap_ci_total": [
-      -0.049753326585427214,
-      0.014261955106934874
+      -0.212867737587369,
+      0.0685164932238287
     ],
     "proportion_mediated": null,
     "proportion_mediated_reason": "total_effect_ci_includes_zero",
     "bootstrap_ci_proportion": [
-      -7.181170943334605,
-      12.428047889412845
+      -7.3476226436942085,
+      8.741113706483517
     ],
-    "treatment_on_mediator_coef": 0.027195881071817297,
-    "mediator_on_outcome_coef": -0.5883671291151061,
-    "supplementary_indirect_effect": -0.014106387980409378,
-    "supplementary_proportion_mediated": 0.8515118768917279,
-    "n_observations": 1298
+    "treatment_on_mediator_coef": 0.02723989992784681,
+    "mediator_on_outcome_coef": -8.591776647822831,
+    "supplementary_indirect_effect": -0.03432607276146734,
+    "supplementary_proportion_mediated": 0.6943726388845478,
+    "n_observations": 1294
   },
   "task_family:mmlu_pro": {
-    "total_effect": -0.013949578308002399,
-    "direct_effect": -0.02474020825294003,
-    "indirect_effect": 0.010790629944937631,
+    "estimator": "imai_quasibayes_mixed_logistic_conditional_on_median_item",
+    "total_effect": -7.785735553654002e-05,
+    "direct_effect": -0.00014942714622563372,
+    "indirect_effect": 7.15697906890937e-05,
     "bootstrap_ci_indirect": [
-      -0.005716043729189886,
-      0.026641664103337376
+      -2.0172468324833093e-05,
+      0.0003583705954830477
     ],
     "bootstrap_ci_total": [
-      -0.05149876787588646,
-      0.018691216201967654
+      -0.0010422773438845154,
+      0.00045952133767232685
     ],
     "proportion_mediated": null,
     "proportion_mediated_reason": "total_effect_ci_includes_zero",
     "bootstrap_ci_proportion": [
-      -9.416353668939424,
-      7.084625195900749
+      -7.003444377521101,
+      5.479692749484588
     ],
-    "treatment_on_mediator_coef": 0.013114470065164665,
-    "mediator_on_outcome_coef": 0.8228033531907829,
-    "supplementary_indirect_effect": 0.009844909709715006,
-    "supplementary_proportion_mediated": -0.7040045796974455,
-    "n_observations": 1300
+    "treatment_on_mediator_coef": 0.013120963251059907,
+    "mediator_on_outcome_coef": 14.58063255729936,
+    "supplementary_indirect_effect": 6.466498018945444e-05,
+    "supplementary_proportion_mediated": -0.8535562311478514,
+    "n_observations": 1296
   },
   "pooled_all_families_supplementary": {
-    "total_effect": -0.019343579936810597,
-    "direct_effect": -0.008928743572792247,
-    "indirect_effect": -0.01041483636401835,
+    "estimator": "imai_quasibayes_mixed_logistic_conditional_on_median_item",
+    "total_effect": -0.00021664463337608926,
+    "direct_effect": -7.744082713643351e-05,
+    "indirect_effect": -0.00013920380623965575,
     "bootstrap_ci_indirect": [
-      -0.02145178721043654,
-      0.0019780026630035552
+      -0.0003714380339217081,
+      -2.8219803242162364e-05
     ],
     "bootstrap_ci_total": [
-      -0.041753497315380035,
-      0.0013724353246866098
+      -0.0007564895293171566,
+      2.3042013811166692e-05
     ],
     "proportion_mediated": null,
     "proportion_mediated_reason": "total_effect_ci_includes_zero",
     "bootstrap_ci_proportion": [
-      -3.7832491606262955,
-      6.058329384667206
+      -4.3959654493409985,
+      6.059503332625868
     ],
-    "treatment_on_mediator_coef": 0.025231689223779358,
-    "mediator_on_outcome_coef": -0.4127680977539542,
-    "supplementary_indirect_effect": -0.0013265333295323458,
-    "supplementary_proportion_mediated": 0.0685537116759675,
-    "n_observations": 5196
+    "treatment_on_mediator_coef": 0.025247684133873554,
+    "mediator_on_outcome_coef": -10.886427268184093,
+    "supplementary_indirect_effect": -4.677597522444904e-05,
+    "supplementary_proportion_mediated": 0.16435479954339646,
+    "n_observations": 5186
+  },
+  "h1b_policy:keyboard_neighbor": {
+    "estimator": "imai_quasibayes_mixed_logistic_conditional_on_median_item",
+    "total_effect": -0.00024390899648432012,
+    "direct_effect": -0.000131244661692881,
+    "indirect_effect": -0.00011266433479143912,
+    "bootstrap_ci_indirect": [
+      -0.00029855087509944074,
+      -1.9912009920524595e-05
+    ],
+    "bootstrap_ci_total": [
+      -0.0007309977659350084,
+      -1.6781107683612347e-05
+    ],
+    "proportion_mediated": 0.4619113538876039,
+    "proportion_mediated_reason": null,
+    "bootstrap_ci_proportion": [
+      0.04419698009110562,
+      3.1953258345297653
+    ],
+    "treatment_on_mediator_coef": 0.027451977767631863,
+    "mediator_on_outcome_coef": -9.994248698759126,
+    "supplementary_indirect_effect": -3.2247548364596727e-07,
+    "supplementary_proportion_mediated": 0.0010651507505974808,
+    "n_observations": 3200
+  },
+  "h1b_policy:filler_word": {
+    "estimator": "imai_quasibayes_mixed_logistic_conditional_on_median_item",
+    "total_effect": -3.543019147226842e-05,
+    "direct_effect": -3.366103458287327e-06,
+    "indirect_effect": -3.206408801398109e-05,
+    "bootstrap_ci_indirect": [
+      -0.00018173936532392572,
+      3.753797656394046e-05
+    ],
+    "bootstrap_ci_total": [
+      -0.0001488252855178,
+      2.9166583344629734e-05
+    ],
+    "proportion_mediated": null,
+    "proportion_mediated_reason": "total_effect_ci_includes_zero",
+    "bootstrap_ci_proportion": [
+      -19.99575483678698,
+      14.256464426559491
+    ],
+    "treatment_on_mediator_coef": 0.020980144914689258,
+    "mediator_on_outcome_coef": -13.36948075051278,
+    "supplementary_indirect_effect": -3.324880912235199e-06,
+    "supplementary_proportion_mediated": 0.08621155251414793,
+    "n_observations": 1200
   }
 }

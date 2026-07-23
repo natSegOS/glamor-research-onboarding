@@ -1,6 +1,6 @@
 """Uniform progress reporting for long-running pipeline steps.
 
-Uses tqdm when available — it auto-detects a Jupyter / Colab environment and
+Uses tqdm when available: it auto-detects a Jupyter / Colab environment and
 renders a rich notebook widget, or falls back to a terminal progress bar on the
 cluster. When tqdm is absent, a plain-text reporter prints one status line every
 ``print_interval_seconds`` seconds so the user always knows something is

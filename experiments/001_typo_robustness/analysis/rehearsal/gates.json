@@ -1,0 +1,44 @@
+{
+  "per_task_family": {
+    "gsm8k": {
+      "clean_accuracy": 0.65,
+      "primary_edit_budget": 2,
+      "primary_condition_pairs": 120,
+      "discordant_rate": 0.10833333333333334,
+      "delta": 0.025000000000000022,
+      "discordant_rate_bucket": "n600_confirmed",
+      "implied_n_at_5pp_mde": 338
+    },
+    "gsm_symbolic_official": {
+      "clean_accuracy": 0.5583333333333333,
+      "primary_edit_budget": 2,
+      "primary_condition_pairs": 120,
+      "discordant_rate": 0.15,
+      "delta": 0.050000000000000044,
+      "discordant_rate_bucket": "n600_confirmed",
+      "implied_n_at_5pp_mde": 469
+    },
+    "mmlu": {
+      "clean_accuracy": 0.5083333333333333,
+      "primary_edit_budget": 4,
+      "primary_condition_pairs": 120,
+      "discordant_rate": 0.19166666666666668,
+      "delta": -0.008333333333333415,
+      "discordant_rate_bucket": "raise_n_or_relax_mde",
+      "implied_n_at_5pp_mde": 600
+    },
+    "mmlu_pro": {
+      "clean_accuracy": 0.15833333333333333,
+      "primary_edit_budget": 4,
+      "primary_condition_pairs": 120,
+      "discordant_rate": 0.08333333333333333,
+      "delta": -0.05000000000000002,
+      "discordant_rate_bucket": "n600_confirmed",
+      "implied_n_at_5pp_mde": 260
+    }
+  },
+  "reasoning_format_compliance": 0.988296488946684,
+  "reasoning_format_compliance_target": 0.95,
+  "truncation_rate": 0.05184705119896306,
+  "p99_clean_correct_output_tokens": 385
+}

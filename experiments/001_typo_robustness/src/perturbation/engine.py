@@ -7,7 +7,7 @@ The primitive edit basis {insertion, deletion, substitution, transposition} is
 the Damerau-Levenshtein operation set (Damerau, 1964): the three Levenshtein
 operations plus adjacent transposition, which is included because transposition
 is a common human typing error. The keyboard-neighbor policy follows MulTypo
-(Liu et al., 2025). See docs/PROVENANCE.md §2.1–2.3 and design/02 §2.2.
+(Zhao et al., 2025). See docs/PROVENANCE.md §2.1–2.3 and design/02 §2.2.
 
 Contract (each clause is enforced by tests/test_perturbation_engine.py)
 -----------------------------------------------------------------------
@@ -29,7 +29,7 @@ The engine works on a list of [character, original_index] pairs. The
 original_index is the character's position in the *original* string (None for
 characters the engine inserts). Eligibility is decided against original indices,
 so an insertion or deletion earlier in the string cannot accidentally expose a
-protected character to a later edit — the protection travels with the character,
+protected character to a later edit. The protection travels with the character,
 not with its current position.
 """
 
@@ -52,7 +52,7 @@ LOWERCASE_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
 # Upper bound on entries retained by the small-output neighbor-lookup caches
 # below (each entry is a short tuple/frozenset of real words, not the large
-# intermediate candidate sets — see the module-level note above
+# intermediate candidate sets. See the module-level note above
 # _damerau_levenshtein_one_neighbors for why those are never cached). No real
 # run comes anywhere near this many distinct source words; it exists purely
 # as a bound so an unbounded cache can never again grow silently.
@@ -60,7 +60,7 @@ MAX_CACHED_NEIGHBOR_LOOKUPS = 100_000
 
 
 # The four primitive Damerau-Levenshtein operations (insert, delete, substitute,
-# transpose). WORD_SUBSTITUTE is excluded here — it is not a DL primitive, but
+# transpose). WORD_SUBSTITUTE is excluded here: it is not a DL primitive, but
 # a convenience op for whole-word replacement recorded distinctly in edit scripts.
 PRIMITIVE_OPERATIONS: tuple[Operation, ...] = (
     Operation.INSERT, Operation.DELETE, Operation.SUBSTITUTE, Operation.TRANSPOSE)
@@ -69,7 +69,8 @@ SELECTION_POLICIES: tuple[SelectionPolicy, ...] = (
     SelectionPolicy.KEYBOARD_NEIGHBOR,  # QWERTY-adjacent letter (MulTypo replacement)
     SelectionPolicy.INFORMATIVE_WORD,   # keyboard_neighbor, but restricted to key terms
     SelectionPolicy.REAL_WORD,          # whole-word substitution to a valid-word neighbor
-    SelectionPolicy.WHITESPACE,         # dormant: split/merge (kept for old-JSONL replay)
+    SelectionPolicy.HOMOPHONE,          # whole-word substitution to a CMU exact homophone
+    SelectionPolicy.WHITESPACE,         # split/merge; merge = the missed-space condition
     SelectionPolicy.FILLER_WORD,        # discourse-particle insertion (Workstream 3)
 )
 
@@ -117,8 +118,14 @@ def _load_phoneme_index() -> bool:
         return _phoneme_index_available
 
     try:
-        import pronouncing  # noqa: PLC0415 — lazy import by design
+        import pronouncing  # noqa: PLC0415 (lazy import by design)
 
+        # pronouncing lazily populates its module-level tables: before
+        # init_cmu() runs, `pronouncing.pronunciations` is None. Reading it
+        # eagerly (the pre-2026-07-20 code) mistook None for "package
+        # unavailable" and silently disabled the phonetic pool for the whole
+        # process. The pilot's Regime B ran orthographic-only because of it.
+        pronouncing.init_cmu()
         raw_pronunciations = pronouncing.pronunciations
         if not raw_pronunciations:
             _phoneme_index_available = False
@@ -155,7 +162,7 @@ def _cmu_homophone_neighbors(
     phoneme sequence (e.g. "weather" / "whether", "there" / "their").
 
     Falls back silently to an empty set when the ``pronouncing`` package is
-    absent, the word has no CMUdict entry, or ``is_word`` is not supplied — in
+    absent, the word has no CMUdict entry, or ``is_word`` is not supplied. In
     those cases the orthographic Damerau-Levenshtein band still applies.
 
     Cached per ``(word, is_word)``: a pure function of both (the same
@@ -166,7 +173,7 @@ def _cmu_homophone_neighbors(
     if is_word is None or not _load_phoneme_index():
         return frozenset()
 
-    import pronouncing  # noqa: PLC0415 — lazy import by design; already
+    import pronouncing  # noqa: PLC0415 (lazy import by design); already
     # cached in sys.modules once _load_phoneme_index() has returned True.
 
     phoneme_keys_for_word = (
@@ -221,7 +228,7 @@ def damerau_levenshtein_distance(first_string: str, second_string: str) -> int:
     other, where a substring may not be edited more than once.
 
     This is the restricted variant, not true unrestricted Damerau-Levenshtein
-    (which permits a substring to be edited more than once, and can differ —
+    (which permits a substring to be edited more than once, and can differ:
     e.g. "CA"->"ABC" is 3 under OSA, 2 under true DL). The name is kept as
     ``damerau_levenshtein_distance`` because that's the metric this codebase
     has always actually computed and every caller (`measured_dl`, regime
@@ -450,10 +457,11 @@ def perturb(
         is_eligible = _make_eligibility_test(
             character_cells, allowed_original_indices, locked_original_indices)
 
-        if selection_policy == SelectionPolicy.REAL_WORD:
+        if selection_policy in (SelectionPolicy.REAL_WORD, SelectionPolicy.HOMOPHONE):
             edit = _apply_real_word_substitution(
                 character_cells, random_generator, is_eligible, is_word,
-                max_word_distance=max_word_distance)
+                max_word_distance=max_word_distance,
+                phonetic_only=(selection_policy == SelectionPolicy.HOMOPHONE))
         elif selection_policy == SelectionPolicy.FILLER_WORD:
             edit = _apply_filler_word_insertion(
                 character_cells, random_generator, is_eligible)
@@ -590,7 +598,7 @@ def _apply_character_edit(character_cells, random_generator, is_eligible,
 
 
 def _apply_whitespace_edit(character_cells, random_generator, is_eligible, operation) -> Edit:
-    """Apply a whitespace split or merge — a common human and OCR/ASR error.
+    """Apply a whitespace split or merge, a common human and OCR/ASR error.
 
     An "insert"-flavored operation splits a word by inserting a space inside it;
     a "delete"-flavored operation merges two words by deleting the space between
@@ -614,17 +622,32 @@ def _apply_whitespace_edit(character_cells, random_generator, is_eligible, opera
         return Edit(Operation.INSERT, position, before="", after=" ",
                     word_index=word_index, word_before=word_before, word_after="")
 
-    # Merge: delete a space.
-    candidate_positions = _eligible_space_positions(character_cells, is_eligible)
+    # Merge: delete a space ("missed-space"). Only single inter-word spaces
+    # with letters on both sides qualify, so the merge always produces one
+    # concatenated token ("a week" → "aweek"), recorded as word_after so the
+    # Regime-A builder can apply its nonword test to the merged token (a merge
+    # that lands on a real word, e.g. "a part" → "apart", is rejected there
+    # and resampled).
+    candidate_positions = [
+        position
+        for position in _eligible_space_positions(character_cells, is_eligible)
+        if 0 < position < len(character_cells) - 1
+        and character_cells[position - 1][0].isalpha()
+        and character_cells[position + 1][0].isalpha()
+    ]
     if not candidate_positions:
         raise PerturbationError("no eligible whitespace-merge position")
 
     position = random_generator.choice(candidate_positions)
-    word_index, word_before = _word_containing_index(character_cells, max(0, position - 1))
+    word_index, left_word = _word_containing_index(character_cells, position - 1)
+    _, right_word = _word_containing_index(character_cells, position + 1)
     del character_cells[position]
+    _, merged_word = _word_containing_index(character_cells, position - 1)
 
     return Edit(Operation.DELETE, position, before=" ", after="",
-                word_index=word_index, word_before=word_before, word_after="")
+                word_index=word_index,
+                word_before=f"{left_word} {right_word}",
+                word_after=merged_word)
 
 
 def _apply_filler_word_insertion(character_cells, random_generator, is_eligible) -> Edit:
@@ -660,8 +683,12 @@ def _apply_filler_word_insertion(character_cells, random_generator, is_eligible)
     word_index, word_before = _word_containing_index(
         character_cells, max(0, position - 1))
 
+    # ``after`` records the EXACT inserted characters (particle + trailing
+    # space) so apply_edit_script replays byte-identically. Recording only
+    # the particle broke reconstruction (contract clause 5). ``word_after``
+    # carries the bare particle for the regime metadata.
     return Edit(Operation.INSERT, position + 1,
-                before="", after=filler_token,
+                before="", after=insertion_string,
                 word_index=word_index, word_before=word_before, word_after=filler_token)
 
 
@@ -674,7 +701,7 @@ def _damerau_levenshtein_one_neighbors(word: str) -> frozenset[str]:
     return tens of thousands of strings for one word, and an unbounded cache
     of those sets across every distinct word in a run has exhausted host
     memory in practice. ``_valid_real_word_neighbors`` below is the layer
-    that's actually worth caching — it's called once per distinct source word
+    that's actually worth caching: it's called once per distinct source word
     and returns a small, bounded result, which already prevents this
     (expensive but transient) generation from re-running for a repeated word.
     """
@@ -707,7 +734,7 @@ def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> fro
     result is the complete DL ≤ 2 neighbourhood, computed by expanding every
     level-1 variant by one additional DL-1 step.  The original word is excluded.
 
-    Deliberately uncached — see ``_damerau_levenshtein_one_neighbors`` above;
+    Deliberately uncached (see ``_damerau_levenshtein_one_neighbors`` above);
     at ``max_distance == 2`` this can hold on the order of 10^5 strings, and
     ``_valid_real_word_neighbors`` already caches the small result derived
     from it.
@@ -724,31 +751,40 @@ def _damerau_levenshtein_band_neighbors(word: str, max_distance: int = 1) -> fro
 def _valid_real_word_neighbors(
         word: str,
         max_word_distance: int,
-        is_word: Callable[[str], bool]) -> tuple[str, ...]:
+        is_word: Callable[[str], bool],
+        phonetic_only: bool = False) -> tuple[str, ...]:
     """Return the sorted, deduplicated valid-word neighbors of ``word``, drawn
     from the union of two pools:
 
-    1. **Orthographic band** — all strings within DL distance ``max_word_distance``
+    1. **Orthographic band**: all strings within DL distance ``max_word_distance``
        of the source word that are recognised as valid words.  At distance 1 this
        is the WikiTypos-style real-word shift (the original behaviour).  At
        distance 2 the band is wider, catching common substitutions like
        "France" → "Finance" that are orthographically close but not distance-1.
 
-    2. **Phonetic homophones** — words that share the source word's CMU
+    2. **Phonetic homophones**: words that share the source word's CMU
        pronunciation (exact homophones such as "weather"↔"whether").  These are
        the dominant ASR confusion type and are added to the candidate pool when
        the ``pronouncing`` package is installed.  If the package is absent the
        pool falls back to the orthographic band only.
 
-    Cached per ``(word, max_word_distance, is_word)``: the same word recurs
-    across many items, conditions, and rejection-sampling attempts within a
-    run, and this is the single most expensive step in Regime B construction.
+    ``phonetic_only`` restricts the pool to pool 2, the HOMOPHONE policy's
+    pure acoustic-confusion proxy. It never falls back to the orthographic
+    band: with ``pronouncing`` absent the pool is empty and the caller raises
+    PerturbationError, because silently substituting orthographic neighbors
+    would mislabel the condition.
+
+    Cached per argument tuple: the same word recurs across many items,
+    conditions, and rejection-sampling attempts within a run, and this is the
+    single most expensive step in Regime B construction.
     """
+    phonetic = _cmu_homophone_neighbors(word, is_word) - {word.lower()}
+    if phonetic_only:
+        return tuple(sorted(phonetic))
     orthographic = {
         candidate for candidate in _damerau_levenshtein_band_neighbors(word, max_word_distance)
         if is_word(candidate.lower()) and candidate.lower() != word.lower()
     }
-    phonetic = _cmu_homophone_neighbors(word, is_word) - {word.lower()}
     return tuple(sorted(orthographic | phonetic))
 
 
@@ -758,7 +794,8 @@ def _apply_real_word_substitution(
         is_eligible,
         is_word,
         *,
-        max_word_distance: int = 1) -> Edit:
+        max_word_distance: int = 1,
+        phonetic_only: bool = False) -> Edit:
     """Replace a whole word with a valid-word neighbor (see
     ``_valid_real_word_neighbors`` for how the candidate pool is built).
     Selection is deterministic given the random generator state.
@@ -779,7 +816,8 @@ def _apply_real_word_substitution(
         if not is_word(word.lower()):
             continue
 
-        valid_word_neighbors = _valid_real_word_neighbors(word, max_word_distance, is_word)
+        valid_word_neighbors = _valid_real_word_neighbors(
+            word, max_word_distance, is_word, phonetic_only)
         if not valid_word_neighbors:
             continue
 

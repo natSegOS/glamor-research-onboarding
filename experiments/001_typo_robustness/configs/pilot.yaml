@@ -2,7 +2,7 @@
 #
 # Purpose: validate the pipeline end-to-end, estimate per-cell discordant-pair
 # rates (which fix the main-study sample size via Connor 1987), and surface
-# failure modes — NOT to draw confirmatory conclusions.
+# failure modes, NOT to draw confirmatory conclusions.
 #
 # Pre-requisite: run tools/build_task_items.py once (with network access) to
 # pre-fetch and pin the JSONL files at the paths below.
@@ -10,7 +10,7 @@
 run_id: pilot
 seed: 1729
 
-# Dataset selection — registry-driven (tasks.DATASET_REGISTRY).
+# Dataset selection: registry-driven (tasks.DATASET_REGISTRY).
 # 100 items per dataset exercises all task paths and estimates discordant-pair
 # rates without requiring the full N=600 fetch on Colab. All four Core-4 datasets
 # are included so the pilot validates the full contamination-contrast structure.
@@ -84,7 +84,7 @@ conditions:
     source: synthetic
 
   # Method A counterfactual (design/02 §2.5, design/06 §6.8): paired Low/High
-  # fragmentation variants of the same word at the same budget — the primary
+  # fragmentation variants of the same word at the same budget: the primary
   # mediation contrast. Two perturbed requests per item x budget.
   - name: regime_a_fragmentation_matched
     semantic_class: A
@@ -94,7 +94,7 @@ conditions:
     edit_budgets: [1, 2]
     source: synthetic
 
-  # Regime B lever (a): config-only — higher word counts, same DL band.
+  # Regime B lever (a): config-only. Higher word counts, same DL band.
   - name: regime_b_real_word
     semantic_class: B
     operation: substitute
@@ -105,9 +105,9 @@ conditions:
 
   # Regime C: deterministic meaning-change perturbations with computationally
   # verifiable gold answers (design/04 §4.7).
-  #   MCQ items:       option-label permutation — gold tracked by content,
-  #                    not by letter (Ko et al. 2020; Pezeshkpour & Hruschka 2023).
-  #   Reasoning items: operand swap on synthetic-template items only — new gold
+  #   MCQ items:       option-label permutation, gold tracked by content,
+  #                    not by letter (Pezeshkpour & Hruschka 2023, arXiv:2308.11483).
+  #   Reasoning items: operand swap on synthetic-template items only, new gold
   #                    recomputed via the template answer function.
   # The operation/scope/selection_policy fields are unused for Regime C; the
   # dispatch is determined solely by item type inside experiment._construct_regime_c.

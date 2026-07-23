@@ -12,19 +12,19 @@
 run_id: main
 seed: 1729
 
-# Dataset selection — registry-driven (tasks.DATASET_REGISTRY).
+# Dataset selection: registry-driven (tasks.DATASET_REGISTRY).
 # Run tools/build_task_items.py once (with network access) to pre-fetch and pin
 # dataset revisions; it writes data/items/PROVENANCE.json with resolved HuggingFace
 # SHAs. Re-running overwrites cleanly and updates the SHAs (safe and idempotent).
 # To add a dataset, register it in tasks/registry.py and append its key here.
 #
 # Primary confirmatory (N=600, McNemar-powered):
-#   gsm_symbolic_jsonl  — fresh arithmetic reasoning (contamination-controlled)
-#   mmlu_pro_jsonl      — 10-option MCQ, subject-stratified
+#   gsm_symbolic_jsonl  : fresh arithmetic reasoning (contamination-controlled)
+#   mmlu_pro_jsonl      : 10-option MCQ, subject-stratified
 #
 # Contamination contrasts (same N; run on all models; paired directly with primaries):
-#   gsm8k_jsonl         — standard arithmetic reasoning (potential memorisation)
-#   mmlu_jsonl          — standard 4-option MCQ (potential memorisation)
+#   gsm8k_jsonl         : standard arithmetic reasoning (potential memorisation)
+#   mmlu_jsonl          : standard 4-option MCQ (potential memorisation)
 datasets:
   - key: gsm_symbolic_jsonl
     path: data/items/gsm_symbolic.jsonl
@@ -42,7 +42,12 @@ datasets:
 is_confirmatory: true
 
 max_new_tokens_reasoning: 512
-max_new_tokens_multiple_choice: 256
+# MCQ raised from the provisional 256 after the T4 dress rehearsal: at 256 the
+# Llama models truncated 21-38% of MMLU-Pro chains of thought (678/682 truncated
+# rows scored wrong, pinning llama mmlu_pro at the 10% chance floor). One shared
+# budget across families also removes budget as a family confound. Amendment
+# logged in design/00 section 0.5 (2026-07-22).
+max_new_tokens_multiple_choice: 512
 
 # Primary severity per task type (design/06 §6.3 contingency, applied from the
 # pilot's p_d estimates; amendment logged in design/00 §0.5).
@@ -52,8 +57,16 @@ primary_edit_budget_mcq: 4
 # Perturbation conditions (design/11 §11.4): keyboard-neighbor operations
 # across all four Damerau-Levenshtein primitives (substitute, delete, insert,
 # transpose), scope variations (anywhere / content / answer_critical), discourse-
-# particle filler-word insertion (Regime A), real-word shift (Regime B), and
-# deterministic meaning-change (Regime C). ASR is out of scope for this study.
+# particle filler-word insertion (Regime A), whitespace merge (Regime A,
+# "missed-space"), real-word shift (Regime B), homophone-only shift (Regime B),
+# and deterministic meaning-change (Regime C).
+#
+# The ACOUSTIC ASR arm is deferred (design/00 §0.5, 2026-07-09); its text-side
+# proxies run here: homophone-only Regime B (acoustic confusions), filler
+# insertion (disfluency), missed-space (transcription boundary error). Each
+# crosswalks to a HIVE voice-arm operator (fillers ↔ HIVE #9, homophone ↔
+# HIVE #13, missed-space ↔ HIVE #21), giving the cross-modal comparison a
+# shared operator axis.
 conditions:
   - name: regime_a_substitute_keyboard
     semantic_class: A
@@ -91,10 +104,25 @@ conditions:
   # set {"uh", "um", "like", "so"} at eligible inter-word positions. Intent is
   # preserved definitionally (discourse particles carry no propositional content);
   # no rejection sampling is needed. Novel relative to prior typo-robustness work.
+  # H1b lever (design/06 §6.8): fillers inflate token count WITHOUT fragmenting
+  # any word, contrasted against keyboard substitution in the mediation fits.
   - name: regime_a_filler
     semantic_class: A
     operation: insert
     selection_policy: filler_word
+    scope: anywhere
+    edit_budgets: [1, 2]
+    source: synthetic
+
+  # Whitespace merge ("missed-space", exploratory): delete an inter-word space
+  # so two words fuse into one token ("a week" → "aweek"). The merged token
+  # goes through the standard Regime-A nonword rejection sampling (a merge
+  # that lands on a real word, e.g. "a part" → "apart", is resampled).
+  # Crosswalk: HIVE keyboard operator #21.
+  - name: regime_a_missed_space
+    semantic_class: A
+    operation: delete
+    selection_policy: whitespace
     scope: anywhere
     edit_budgets: [1, 2]
     source: synthetic
@@ -116,7 +144,7 @@ conditions:
     source: synthetic
 
   # Method A counterfactual (design/02 §2.5, design/06 §6.8): paired Low/High
-  # fragmentation variants of the same word at the same budget — the primary
+  # fragmentation variants of the same word at the same budget: the primary
   # mediation contrast. Two perturbed requests per item x budget.
   - name: regime_a_fragmentation_matched
     semantic_class: A
@@ -137,12 +165,25 @@ conditions:
     edit_budgets: [2, 3, 4]
     source: synthetic
 
+  # Homophone-only Regime B: candidate pool restricted to CMU exact homophones
+  # ("weather" → "whether"): the pure acoustic-confusion proxy. Items whose
+  # words carry no homophone are excluded via the sidecar (the yield
+  # record). Crosswalk: HIVE voice operator #13 (clean+homophone).
+  - name: regime_b_homophone
+    semantic_class: B
+    operation: substitute
+    selection_policy: homophone
+    scope: anywhere
+    edit_budgets: [1, 2]
+    source: synthetic
+
   # Regime C: deterministic meaning-change perturbations with computationally
   # verifiable gold answers (design/04 §4.7).
-  #   MCQ items:       option-label permutation — gold tracked by content,
-  #                    not by letter (Ko et al. 2020; Pezeshkpour & Hruschka 2023).
-  #   Reasoning items: operand swap on synthetic-template items only — new gold
-  #                    recomputed via the template answer function.
+  #   MCQ items:       option-label permutation, gold tracked by content,
+  #                    not by letter (Pezeshkpour & Hruschka 2023, arXiv:2308.11483).
+  #   Reasoning items: operand swap on synthetic-template items only, new gold
+  #                    recomputed via the template answer function
+  #                    (numeric-edit motivation: Xie et al. 2024, arXiv:2402.17916).
   # The operation/scope/selection_policy fields are unused for Regime C; the
   # dispatch is determined solely by item type inside experiment._construct_regime_c.
   - name: regime_c_meaning_changing

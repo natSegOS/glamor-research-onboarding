@@ -51,7 +51,7 @@ class DatasetSpec:
         The ``TaskFamily`` enum value; determines scorer routing and is passed
         to JSONL loaders as the default when items lack a ``task_family`` field.
         The scorer dispatches on each item's ``task_family`` at runtime via
-        ``enums.REASONING_FAMILIES`` and ``enums.MCQ_FAMILIES`` — those are the
+        ``enums.REASONING_FAMILIES`` and ``enums.MCQ_FAMILIES``. Those are the
         single source of truth for the reasoning/MCQ split.
     default_n:
         Default item count when the config does not override it.
@@ -129,7 +129,7 @@ _DATASET_SPECS: tuple[DatasetSpec, ...] = (
     # ------------------------------------------------------------------
     # Contamination-contrast datasets (standard benchmarks, paired with
     # primaries to show whether degradation is driven by content knowledge
-    # or surface-form brittleness — design/04 §4.8)
+    # or surface-form brittleness, design/04 §4.8)
     # ------------------------------------------------------------------
 
     DatasetSpec(
@@ -206,7 +206,7 @@ def call_loader(
         raise NotImplementedError(
             f"Dataset {spec.key!r} has no loader — add one to registry.py.")
 
-    # JSONL sources — load from pre-exported file; path required.
+    # JSONL sources: load from pre-exported file; path required.
     if spec.key.endswith("_jsonl"):
         if not path:
             raise ValueError(
@@ -220,11 +220,11 @@ def call_loader(
             items = spec.loader(Path(path), spec.task_family)
         return items[:item_count]
 
-    # Synthetic offline generator — positional (item_count, seed).
+    # Synthetic offline generator: positional (item_count, seed).
     if spec.key == "gsm_symbolic_synthetic":
         return spec.loader(item_count, seed)[:item_count]
 
-    # Demo smoke-test — no arguments; repeat to fill item_count.
+    # Demo smoke-test: no arguments; repeat to fill item_count.
     if spec.key == "mcq_demo":
         base = spec.loader()
         repeats = (item_count // max(len(base), 1)) + 1

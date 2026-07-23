@@ -2,10 +2,11 @@
 
 Provenance
 ----------
-The keyboard-neighbor substitution policy follows MulTypo (Liu et al., 2025,
+The keyboard-neighbor substitution policy follows MulTypo (Zhao et al., 2025,
 arXiv:2510.09536), whose "replacement" operation replaces a single character
 with a neighboring key on the language-specific keyboard layout. We implement
-the English QWERTY layout. See docs/PROVENANCE.md §2.2.
+the English QWERTY layout. See docs/PROVENANCE.md §2.2 for the exact fidelity
+statement (which operations follow the paper and which deliberately differ).
 
 This module has no internal dependencies; it is the bottom of the import graph.
 """

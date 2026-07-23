@@ -11,7 +11,7 @@ refuses) is not silently lumped in with a wrong answer:
 
 Clarifications and refusals score as INCORRECT for accuracy (the conservative
 choice) and are also counted separately for the invalid-or-clarification rate
-(design/04 §4.5) — the dual-accounting rule.
+(design/04 §4.5): the dual-accounting rule.
 
 Two parse-status detectors are provided:
 
@@ -26,7 +26,7 @@ Two parse-status detectors are provided:
       during generation (Workstream 5).  No phrase list is loaded at runtime;
       structural dependency criteria detect interrogatives (clarification) and
       first-person negated clauses (refusal).  The phrase lists in data/lexicons/
-      survive as frozen validation oracles — they are not the runtime mechanism.
+      survive as frozen validation oracles. They are not the runtime mechanism.
 
 Both detectors are deliberately conservative: the invalid-or-clarification rate
 is a diagnostic metric (M9), not a primary endpoint.  Under-counting is the
@@ -218,10 +218,10 @@ def _sentence_expresses_first_person_refusal(sentence) -> bool:
     modal with DEP=neg or negating particle)'.
 
     The three sub-checks cover the English surface forms:
-      dep_="neg"   — split contractions ("n't"), "not", "never"
-      cannot       — fused negative auxiliary (morphologically opaque to dep_)
-      unable/...   — predicative inability adjectives
-      refuse/...   — performative refusal verbs (no negation morpheme needed)
+      dep_="neg"   : split contractions ("n't"), "not", "never"
+      cannot       : fused negative auxiliary (morphologically opaque to dep_)
+      unable/...   : predicative inability adjectives
+      refuse/...   : performative refusal verbs (no negation morpheme needed)
     """
     tokens = list(sentence)
     has_first_person_subject = any(

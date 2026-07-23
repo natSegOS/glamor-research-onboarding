@@ -1,0 +1,38 @@
+{
+  "converged": true,
+  "method": "linear_probability_mixed_model",
+  "scale_note": "coefficients are risk differences (probability-scale); not odds ratios",
+  "n_observations": 6653,
+  "fixed_effects": {
+    "is_perturbed": {
+      "coef": -0.02051679829930998,
+      "p": 0.19360633470500332
+    },
+    "token_inflation_excess": {
+      "coef": -0.03820695272638232,
+      "p": 0.8459478632983952
+    },
+    "word_length_before": {
+      "coef": 0.0024637799741910266,
+      "p": 0.03547560611196925
+    },
+    "subword_count_change": {
+      "coef": -0.0038232605861277646,
+      "p": 0.393690537056423
+    },
+    "edit_budget_k": {
+      "coef": -0.010382917924589058,
+      "p": 0.002594181467268205
+    }
+  },
+  "random_effects_variance": {
+    "Group": {
+      "Group": 0.1763409890599794,
+      "is_perturbed": -0.0254913713322905
+    },
+    "is_perturbed": {
+      "Group": -0.0254913713322905,
+      "is_perturbed": 0.003684982612191635
+    }
+  }
+}

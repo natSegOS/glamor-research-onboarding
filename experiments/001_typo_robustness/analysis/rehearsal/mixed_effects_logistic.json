@@ -1,0 +1,62 @@
+{
+  "converged": true,
+  "method": "glmer_intercepts_only",
+  "log_likelihood": -6112.617666285554,
+  "n_observations": 15430,
+  "n_items": 96,
+  "n_models": 5,
+  "fixed_effects": {
+    "is_perturbed": {
+      "coef": -0.11070946695286618,
+      "or": 0.895198795985058,
+      "std_error": 0.21964736768238136,
+      "p": 0.6142383625460461
+    },
+    "token_inflation_excess": {
+      "coef": 0.894853794459884,
+      "or": 2.4469780015672913,
+      "std_error": 1.1525435897086858,
+      "p": 0.4375031389811944
+    },
+    "word_length_before": {
+      "coef": 0.015064645840099162,
+      "or": 1.015178689573744,
+      "std_error": 0.00841143501753087,
+      "p": 0.07329776461525442
+    },
+    "subword_count_change": {
+      "coef": 0.008802828877232967,
+      "or": 1.0088416877142254,
+      "std_error": 0.03245186059421447,
+      "p": 0.7861925577458269
+    },
+    "edit_budget_k": {
+      "coef": -0.10035398150011098,
+      "or": 0.9045171790120556,
+      "std_error": 0.02234229781107297,
+      "p": 7.067053446461708e-06
+    },
+    "precisionfp16": {
+      "coef": -1.910801387292527,
+      "or": 0.14796176439288375,
+      "std_error": 0.6436149381327356,
+      "p": 0.0029890864640240524
+    },
+    "is_perturbed:precisionfp16": {
+      "coef": 0.04272213410611864,
+      "or": 1.0436478604115087,
+      "std_error": 0.27000899282827034,
+      "p": 0.874279617916757
+    }
+  },
+  "random_effects_variance": {
+    "task_id (Intercept)": 7.420115416982521,
+    "model_revision (Intercept)": 0.4117454241828473
+  },
+  "is_singular_fit": false,
+  "ladder_notes": [
+    "glmer_maximal: singular random-effects fit",
+    "glmer_no_random_correlations: singular random-effects fit",
+    "glmer_no_model_slope: singular random-effects fit"
+  ]
+}

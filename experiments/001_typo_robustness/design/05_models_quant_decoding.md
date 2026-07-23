@@ -1,4 +1,4 @@
-# 05 — Models, Quantization, and Decoding
+# 05: Models, Quantization, and Decoding
 
 This document fixes the model roster and the precision/decoding protocol so that nothing about *how the model was run* can be blamed for a result. The quantization choices do double duty: they make 7–8B models fit on small GPUs (Document 07) and they constitute the secondary contribution (RQ2).
 
@@ -6,7 +6,13 @@ This document fixes the model roster and the precision/decoding protocol so that
 
 ## 5.1 Roster-selection principles
 
-A roster must let us make claims about (a) **scale** — so we need at least three sizes; (b) **family** — so we need at least two, ideally three, tokenizer/training lineages, to avoid a single-family overclaim; and (c) **quantization** — so we need models we can run both fp16 and 4-bit. It must also be runnable on the compute we have (Document 07), which caps us at the 1B–8B range for an honest, reproducible, low-cost study. The repo already targets exactly this band (Llama-3.2-1B in Experiment 000; issue 02 explicitly asks for quantized 7–8B), so the roster is continuous with existing lab work.
+The roster must support claims about:
+
+- **Scale:** at least three sizes.
+- **Family:** at least two, ideally three, tokenizer/training lineages, to avoid a single-family overclaim.
+- **Quantization:** models we can run both fp16 and 4-bit.
+
+It must also be runnable on the compute we have (Document 07), which caps us at the 1B–8B range for an honest, reproducible, low-cost study. The repo already targets exactly this band (Llama-3.2-1B in Experiment 000; issue 02 explicitly asks for quantized 7–8B), so the roster is continuous with existing lab work.
 
 ## 5.2 The roster (locked)
 
@@ -18,7 +24,7 @@ A roster must let us make claims about (a) **scale** — so we need at least thr
 | Qwen2.5-7B-Instruct | 7B | Qwen2 (BPE, 152k vocab) | second family | fp16 + AWQ-4bit |
 | Mistral-7B-Instruct-v0.3 | 7B | Mistral (BPE, 32k vocab) | third family, *small vocab* | fp16 + AWQ-4bit |
 
-**Why these five.** The three Llama sizes give a clean within-family scale axis (1B→3B→8B) with the tokenizer held fixed, which is essential for separating scale effects from tokenizer effects. Qwen2.5-7B and Mistral-7B-v0.3 add family diversity at a fixed ~7–8B scale. Crucially, **Mistral's 32k vocabulary versus Qwen's 152k and Llama's 128k** gives a natural contrast in subword granularity — a small-vocab tokenizer fragments words more aggressively, which is directly relevant to the tokenization-mediation contribution (RQ1): if fragmentation drives failure, the small-vocab model should show a steeper fragmentation effect. This turns the roster itself into evidence for the primary contribution.
+**Why these five.** The three Llama sizes give a clean within-family scale axis (1B→3B→8B) with the tokenizer held fixed, which is essential for separating scale effects from tokenizer effects. Qwen2.5-7B and Mistral-7B-v0.3 add family diversity at a fixed ~7–8B scale. **Mistral's 32k vocabulary versus Qwen's 152k and Llama's 128k** gives a natural contrast in subword granularity: a small-vocab tokenizer fragments words more aggressively, which is directly relevant to the tokenization-mediation contribution (RQ1). If fragmentation drives failure, the small-vocab model should show a steeper fragmentation effect, so the roster itself is evidence for the primary contribution.
 
 **Pinned revisions.** Each model is pinned to a specific Hugging Face commit hash, recorded at pre-registration (Document 10) and logged on every output row (Document 08 §8.4). This defends against silent model updates.
 
@@ -29,11 +35,12 @@ Llama-3.2-1B-Instruct is the Stage-2 pilot model (Document 11 §11.2). It is the
 ## 5.4 Quantization in the main sweep (locked: AWQ W4A16)
 
 The main sweep runs 7–8B models in **AWQ 4-bit weight, 16-bit activation (W4A16)**. Rationale:
+
 - AWQ (Activation-aware Weight Quantization) preserves accuracy better than naive round-to-nearest and is well-supported in vLLM, which we use for throughput (Document 07).
 - It fits an 8B model in ~4.5–5 GB, comfortably within a free T4's 16 GB with room for the KV cache (Document 07 §7.3).
 - It is deterministic given fixed weights, so it does not introduce a stochastic confound.
 
-The quantization *method* is held constant within every cell of the main sweep so that any difference attributed to "quantization" is the difference between fp16 and *this one recipe*, not a mix of recipes. This is a confound-control decision (Document 03 §3.3).
+The quantization *method* is held constant within every cell of the main sweep, so any difference attributed to "quantization" is the difference between fp16 and *this one recipe*, not a mix of recipes. This is a confound-control decision (Document 03 §3.3).
 
 ## 5.5 The quantization sub-study (the RQ2 engine)
 
@@ -44,7 +51,7 @@ Holding one recipe constant answers "does AWQ-4bit change robustness," but a rev
 - **Pre-registered direction:** two-sided (H2, Document 01 §1.6). The only prior evidence (Fang et al., 2025, code generation) found quantized models *more* robust in 51.6% vs 42.9% of cases; we do not assume the same direction for nonword typos on reasoning, and saying so is itself a defensible, honest stance.
 - **Recipe caveat in the paper:** we will state plainly that the interaction is characterized for AWQ and GPTQ at 4-bit and is not a universal claim about all quantization. Bounded claims are non-refutable claims (Document 10).
 
-Supporting literature to cite: Fang et al. (2025, arXiv:2506.22776) and the mixed-precision AdvGLUE++ trustworthiness study (arXiv:2511.22483), which finds AWQ generally more robust than GPTQ at low precision — a useful prior for interpreting our sub-study.
+Supporting literature to cite: Fang et al. (2025, arXiv:2506.22776) and the mixed-precision AdvGLUE++ trustworthiness study (arXiv:2511.22483), which finds AWQ generally more robust than GPTQ at low precision, a useful prior for interpreting our sub-study.
 
 ## 5.6 Decoding protocol (locked: greedy)
 
@@ -56,19 +63,19 @@ max_new_tokens = task-specific, frozen (Document 04)
 seed           = fixed and logged
 ```
 
-**Why greedy.** We are studying *input* perturbation, not *sampling* randomness. Greedy decoding makes `f(·)` a deterministic function of the input, so every paired comparison isolates the typo's effect with zero decoding variance. This is the single biggest confound-removal in the study: with sampling, a clean-vs-perturbed difference could be sampling noise; with greedy, it cannot. Note this is a deliberate change from Experiment 000, which used `do_sample=True` with a temperature sweep — appropriate there (the goal was trajectory divergence) but wrong here.
+**Why greedy.** We are studying *input* perturbation, not *sampling* randomness. Greedy decoding makes `f(·)` a deterministic function of the input, so every paired comparison isolates the typo's effect with zero decoding variance. This is the single biggest confound-removal in the study: with sampling, a clean-vs-perturbed difference could be sampling noise; with greedy, it cannot. This is a deliberate change from Experiment 000, which used `do_sample=True` with a temperature sweep; that was appropriate there (the goal was trajectory divergence) but wrong here.
 
-**The exploratory sampling check.** To preempt "your greedy result is a quirk of greedy," we run a small exploratory cell at temperature 0.7, top_p 0.95, with 3 fixed seeds, on one model and one task, and confirm the CCF ranking of conditions is preserved. This lives in the clearly-labeled exploratory section (Document 03 §3.2) and never feeds a confirmatory test.
+**The exploratory sampling check.** To preempt "your greedy result is a quirk of greedy," we run a small exploratory cell at temperature 0.7, top_p 0.95, with 3 fixed seeds, on one model and one task, and confirm the CCF ranking of conditions is preserved. This lives in the clearly labeled exploratory section (Document 03 §3.2) and never feeds a confirmatory test.
 
 ## 5.7 Prompt templates and few-shot setup (held constant)
 
 - Each model uses **its own chat template** (the `tokenizer.apply_chat_template` output), because cross-model prompt formatting differences are a known confound and the fair comparison is "each model in its intended format."
-- Few-shot exemplars (if used) are a **fixed set per task**, identical across all conditions and all models, and are **never perturbed** (only the query is perturbed, except in the instruction-location module which perturbs the instruction text by design).
+- Few-shot exemplars (if used) are a **fixed set per task**, identical across all conditions and all models, and are **never perturbed** (only the query is perturbed, except in the instruction-location module, which perturbs the instruction text by design).
 - A **second paraphrased template** per task is run as a robustness check (Document 03 §3.3) to show results are not an artifact of one phrasing; reported alongside the primary template.
 
 ## 5.8 Tokenizer handling for the mediation metrics
 
-All token-inflation (`τ_tok`) and fragmentation (`Δsub`) quantities are computed with **the model's own tokenizer** (Document 02 §2.5). We never compare token counts across tokenizers as if they were the same unit. Because the roster spans 32k / 128k / 152k vocabularies, the mediation analysis is run per-model and the *pattern* (does more fragmentation predict more failure?) is what is compared across models, not the raw token counts. The small-vocab Mistral model is expected to show the strongest fragmentation effect, which is a built-in cross-check on the mechanism (Document 05 §5.2).
+All token-inflation (`τ_tok`) and fragmentation (`Δsub`) quantities are computed with **the model's own tokenizer** (Document 02 §2.5). We never compare token counts across tokenizers as if they were the same unit. Because the roster spans 32k / 128k / 152k vocabularies, the mediation analysis is run per-model, and the *pattern* (does more fragmentation predict more failure?) is what is compared across models, not the raw token counts. The small-vocab Mistral model is expected to show the strongest fragmentation effect, which is a built-in cross-check on the mechanism (Document 05 §5.2).
 
 ## 5.9 What could still go wrong, and the guard
 

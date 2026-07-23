@@ -43,10 +43,10 @@ annotations; it never calls this module at runtime.
 
 See also
 --------
-data/items/annotation_PROVENANCE.json — records the exact model name, version,
+data/items/annotation_PROVENANCE.json: records the exact model name, version,
     SHA-256 of the model package, the rule identifier, and publication citations.
-design/02 §2.x  — formal definition of K_P(x).
-design/04 §4.6  — literature justification for the choice of spaCy.
+design/02 §2.x  : formal definition of K_P(x).
+design/04 §4.6  : literature justification for the choice of spaCy.
 """
 
 from __future__ import annotations
@@ -287,7 +287,7 @@ def _compute_tfidf_proxy_score(token_text: str, token_count_in_item: int) -> flo
     ``wordfreq`` for full TF-IDF ranking.
     """
     try:
-        import wordfreq  # noqa: PLC0415 — optional heavy dependency, lazy import
+        import wordfreq  # noqa: PLC0415 (optional heavy dependency, lazy import)
         corpus_frequency = wordfreq.word_frequency(token_text.lower(), "en")
     except ImportError:
         corpus_frequency = 1e-4  # moderate-rarity fallback; TF dominates ranking
@@ -305,12 +305,12 @@ def compute_key_term_set(
     The ordering is designed to maximise the relevance of the perturbation
     when only a small edit budget is available:
 
-    1. **Structurally guaranteed** tokens — Named entities, numeric tokens, and
-       negation tokens — appear first, in document order among themselves.
+    1. **Structurally guaranteed** tokens (named entities, numeric tokens, and
+       negation tokens) appear first, in document order among themselves.
        These are guaranteed by the formal rule to be answer-determining
        regardless of their surface frequency.
 
-    2. **TF-IDF ranked** tokens — all remaining structural-filter-passing
+    2. **TF-IDF ranked** tokens: all remaining structural-filter-passing
        tokens, sorted in descending order of TF-IDF proxy score.  Higher-ranked
        (rarer-in-corpus, more-frequent-in-item) tokens appear earlier so that
        a budget-one perturbation targets the most informative key term.
@@ -378,8 +378,8 @@ def compute_key_term_set(
 def _operand_candidate_strings(operand_value: int | float | Fraction) -> set[str]:
     """Every textual form that would count as ``operand_value`` being present
     in the text: the digit string, plus (for ints and fractions) any English
-    word spacy could plausibly have tagged instead — a spelled-out cardinal
-    ("three"), a multiplicative adverb ("thrice", "quadruple" — these are
+    word spacy could plausibly have tagged instead: a spelled-out cardinal
+    ("three"), a multiplicative adverb ("thrice", "quadruple": these are
     grammatically adverbs, not NUM, so spaCy never tags them as a number
     itself, but they still spell out the same operand value), or a fraction
     word ("third", "two thirds").
@@ -399,13 +399,13 @@ def validate_template_operand_coverage(
         key_terms: list[str],
 ) -> list[str]:
     """Assert that every numeric template operand appears in the key-term set,
-    in *some* textual form — digit string, spelled-out cardinal, multiplicative
+    in *some* textual form: digit string, spelled-out cardinal, multiplicative
     adverb ("twice"/"thrice"/"quadruple"), or fraction word ("third").
 
     For synthetic reasoning items (those with a populated ``parameters`` dict),
     the answer-determining operand values are known by construction.  This
     function checks that every *numeric* operand (``int``, ``float``, or
-    ``Fraction`` — ``item.parameters`` must already be deserialised, i.e. run
+    ``Fraction``. ``item.parameters`` must already be deserialised, i.e. run
     through ``deserialize_parameters``, so ``Fraction`` values are real
     ``Fraction`` instances rather than the ``{"__fraction__": [n, d]}`` JSONL
     encoding) is covered by at least one key term, logging violations as
@@ -414,8 +414,8 @@ def validate_template_operand_coverage(
 
     Non-numeric parameters (a color, a name, a currency symbol, a free-text
     phrase) are intentionally skipped: K_P(x) (design/02 §2.x) is not expected
-    to capture them — a plain color adjective, for instance, is not a
-    NOUN/PROPN/NUM or an entity — and Regime C's operand-swap only ever
+    to capture them (a plain color adjective, for instance, is not a
+    NOUN/PROPN/NUM or an entity), and Regime C's operand-swap only ever
     considers ``int``-valued parameters
     (``regimes.make_regime_c_reasoning_operand_swap``), so a non-numeric
     parameter can never be a Regime C swap target regardless of key-term
@@ -630,7 +630,7 @@ def _sha256_of_spacy_model(model_name: str) -> Optional[str]:
         meta_bytes = json.dumps(meta, sort_keys=True, ensure_ascii=False).encode()
         return hashlib.sha256(meta_bytes).hexdigest()
     except (ImportError, OSError):
-        # spaCy absent, or the named model isn't installed — exactly the
+        # spaCy absent, or the named model isn't installed: exactly the
         # "not available" case this function's docstring promises to degrade
         # gracefully on. Anything else (a real bug) still propagates.
         return None

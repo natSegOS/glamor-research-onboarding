@@ -1,0 +1,14 @@
+# The R bridge for the confirmatory statistics (analysis machines and Colab
+# only — NOT part of the offline-test core, which must run with
+# requirements.txt alone; src/analysis/models.py degrades to its loudly
+# labeled pure-Python rungs when this stack is absent).
+#
+# Requires a system R installation (>= 4.x) with the lme4 and MASS packages:
+#   R -e 'install.packages("lme4")'     # MASS ships with base R
+# Colab images ship R; install lme4 once per runtime.
+#
+# rpy2 is used directly rather than through the pymer4 wrapper: pymer4's
+# conversion layer has historically lagged pandas major releases (its current
+# line targets polars), and this project pins pandas 3.x. Pin the exact
+# version at pre-registration after the Colab verification run.
+rpy2>=3.5.16,<4

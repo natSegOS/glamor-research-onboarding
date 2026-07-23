@@ -3,7 +3,7 @@ attach tokenization metrics, run the models, and write generation rows.
 
 A single YAML file fully specifies a run (design/08 §8.2), which is what makes
 the pilot and main study differ only by configuration. The orchestrator is
-deliberately engine-agnostic — it accepts any built engine (or the
+deliberately engine-agnostic: it accepts any built engine (or the
 DeterministicDummyEngine), so the full pipeline is testable without a GPU.
 
 Key guarantees
@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 import yaml
-# loky (not concurrent.futures.ProcessPoolExecutor) — it pickles worker
+# loky (not concurrent.futures.ProcessPoolExecutor): it pickles worker
 # arguments with cloudpickle instead of stdlib pickle, which is required
 # here: real reasoning items carry a `ReasoningTemplate.answer_function`
 # built as a closure over a parsed answer expression
@@ -53,6 +53,7 @@ from pipeline.runner import (
     DUMMY_ENGINE_REVISION,
     GenerationRequest,
     ShardManifest,
+    chat_exemplar_turns_for_family,
     deterministic_row_id,
     run_shard,
 )
@@ -78,7 +79,7 @@ class DatasetConfig:
     Attributes
     ----------
     key:
-        Registry key — must be present in ``tasks.DATASET_REGISTRY``.
+        Registry key. Must be present in ``tasks.DATASET_REGISTRY``.
     item_count:
         Override the registry's ``default_n``; falls back to that default
         if not supplied.
@@ -134,7 +135,7 @@ class ExperimentConfiguration:
     is_confirmatory: bool = False
     # The pre-registered primary severity per task type (design/06 §6.3; the
     # k=2/k=4 amendment is logged in design/00 §0.5). Consumed by the Stage-1
-    # gates computation, not by generation — the sweep runs every budget in
+    # gates computation, not by generation: the sweep runs every budget in
     # ``conditions``.
     primary_edit_budget_reasoning: int = 2
     primary_edit_budget_mcq: int = 4
@@ -180,8 +181,8 @@ def build_exclusion_record(
 
     A pure function rather than a method on ``ExclusionSidecar``: request
     construction runs in parallel worker processes (see ``build_requests``),
-    and a worker must never hold a file handle or write to a shared path —
-    it builds records and returns them, and only the parent process ever
+    and a worker must never hold a file handle or write to a shared path.
+    It builds records and returns them, and only the parent process ever
     writes.
     """
     return {
@@ -204,22 +205,46 @@ class ExclusionSidecar:
     with the same level of provenance as a generated row (design/08 §8.4).
     Records are written immediately on append so a killed job does not lose
     them. Only the parent process ever constructs one of these or calls
-    ``write_all`` — see ``build_exclusion_record``.
+    ``write_all``. See ``build_exclusion_record``.
+
+    Writes are idempotent across resumes: request construction recomputes the
+    identical exclusions on every run, so a record whose timestamp-stripped
+    form is already in the file is skipped rather than appended again (the
+    T4 rehearsal's resumed models each logged every exclusion twice).
     """
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._count = 0
+        self._seen_records: set[str] = set()
+        if self.path.exists():
+            for line in self.path.read_text().splitlines():
+                if line.strip():
+                    self._seen_records.add(self._record_key(json.loads(line)))
+        self._count = len(self._seen_records)
+
+    @staticmethod
+    def _record_key(record: dict) -> str:
+        """A record's identity, ignoring the write-time timestamp."""
+        return json.dumps(
+            {key: value for key, value in record.items() if key != "timestamp"},
+            sort_keys=True)
 
     def write_all(self, records: Sequence[dict]) -> None:
-        """Append every record in ``records``, in order, in one write."""
-        if not records:
+        """Append every not-yet-logged record in ``records``, in order, in
+        one write."""
+        new_records = []
+        for record in records:
+            key = self._record_key(record)
+            if key not in self._seen_records:
+                self._seen_records.add(key)
+                new_records.append(record)
+        if not new_records:
             return
         with self.path.open("a") as fh:
-            for record in records:
+            for record in new_records:
                 fh.write(json.dumps(record) + "\n")
-        self._count += len(records)
+        self._count += len(new_records)
 
     @property
     def count(self) -> int:
@@ -233,7 +258,7 @@ class ExclusionSidecar:
 def load_task_items(configuration: ExperimentConfiguration) -> list:
     """Load task items by dispatching each entry in ``configuration.datasets``
     through the registry. Add or swap datasets by editing the config's
-    ``datasets:`` list — no code changes required."""
+    ``datasets:`` list. No code changes required."""
     if not configuration.datasets:
         raise ValueError(
             "ExperimentConfiguration.datasets is empty; set a 'datasets:' list "
@@ -253,15 +278,15 @@ def load_task_items(configuration: ExperimentConfiguration) -> list:
 
 # Below this many task items, ProcessPoolExecutor's worker-startup overhead
 # (spawning/forking processes, re-pickling shared arguments to each) costs
-# more than the parallel construction saves — run sequentially instead.
+# more than the parallel construction saves, so run sequentially instead.
 _MINIMUM_ITEMS_FOR_PARALLEL_BUILD = 20
 
 
 def _partition_into_slices(sequence: Sequence, slice_count: int) -> list[list]:
     """Split ``sequence`` into ``slice_count`` contiguous, disjoint,
     order-preserving slices (concatenating them in order reproduces
-    ``sequence``). Each slice is an independent unit of work for one worker —
-    disjoint and order-preserving is what lets ``build_requests`` parallelize
+    ``sequence``). Each slice is an independent unit of work for one worker.
+    Disjoint and order-preserving is what lets ``build_requests`` parallelize
     without any cross-worker coordination and still produce byte-identical
     output to the sequential version."""
     slice_count = max(1, slice_count)
@@ -292,8 +317,8 @@ def build_requests(
     it worthwhile (``_MINIMUM_ITEMS_FOR_PARALLEL_BUILD``): ``task_items`` is
     split into disjoint, order-preserving slices (``_partition_into_slices``),
     one per worker, and each worker (``_build_requests_for_item_slice``) is a
-    pure function — no shared file handles, no shared mutable state, nothing
-    to coordinate — that returns its requests and exclusion records rather
+    pure function (no shared file handles, no shared mutable state, nothing
+    to coordinate) that returns its requests and exclusion records rather
     than writing them. Only this (parent) process ever appends to the
     returned list or writes to ``exclusion_sidecar``. Slices are submitted
     and collected in order (``executor.map``, not ``as_completed``), so the
@@ -362,7 +387,11 @@ def _build_requests_for_item_slice(
     for task_item in task_items_slice:
         clean_prompt = task_item.full_prompt
         # ReasoningItem carries gold_answer; MultipleChoiceItem carries gold_letter.
-        gold_answer = getattr(task_item, "gold_answer", None) or getattr(task_item, "gold_letter", None)
+        # `is None` (not truthiness): a legitimate reasoning gold of 0 is falsy
+        # and an `or`-chain would silently discard it.
+        gold_answer = getattr(task_item, "gold_answer", None)
+        if gold_answer is None:
+            gold_answer = getattr(task_item, "gold_letter", None)
 
         if task_item.task_id not in seen_clean_task_ids:
             slice_requests.append(GenerationRequest(
@@ -397,7 +426,7 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
                               ) -> tuple[list[GenerationRequest], list[dict]]:
     """Build engine-perturbed requests for one item under one condition, across
     its edit budgets. Returns ``(requests, exclusion_records)`` rather than
-    writing exclusions directly — see ``build_requests`` for why."""
+    writing exclusions directly. See ``build_requests`` for why."""
     if condition.selection_policy == SelectionPolicy.FRAGMENTATION_MATCHED:
         return _build_fragmentation_matched_requests(
             task_item, condition, gold_answer, clean_prompt, is_word, tokenizer, seed)
@@ -417,10 +446,16 @@ def _build_synthetic_requests(task_item, condition, gold_answer, clean_prompt,
             if condition.semantic_class == SemanticClass.C:
                 perturbed_content, edits, regime_metadata = _construct_regime_c(
                     task_item, item_seed)
-                effective_gold = (
-                    regime_metadata.get("new_gold_letter")
-                    or regime_metadata.get("new_gold_answer")
-                    or gold_answer)
+                # First non-None wins; truthiness would misroute a recomputed
+                # gold of 0 (the operand swap permits new_gold == 0) back to
+                # the OLD gold and score the row against the wrong answer.
+                effective_gold = next(
+                    (candidate_gold for candidate_gold in (
+                        regime_metadata.get("new_gold_letter"),
+                        regime_metadata.get("new_gold_answer"),
+                        gold_answer)
+                     if candidate_gold is not None),
+                    None)
             else:
                 perturbed_content, edits, regime_metadata = _construct_regime(
                     condition, content_text, edit_budget, item_seed, is_word,
@@ -471,7 +506,7 @@ def _content_relative_scope_spans(task_item) -> Optional[dict]:
     """Translate the task loader's full-prompt scope spans into content_text
     coordinates. The regime builders perturb content_text, not the full
     prompt, so full-prompt offsets would point past the end of any question
-    shorter than the instruction — exactly what happened when the reasoning
+    shorter than the instruction, which is what happened when the reasoning
     instruction grew a worked exemplar and content-scope perturbation started
     excluding half of every dataset. Spans are clamped; the instruction span
     collapses to empty (instructions are never perturbed in this design).
@@ -514,17 +549,18 @@ def _build_fragmentation_matched_requests(
         task_item, condition, gold_answer, clean_prompt, is_word, tokenizer, seed,
         ) -> tuple[list[GenerationRequest], list[dict]]:
     """Method A counterfactual requests (design/02 §2.5, design/06 §6.8): per
-    edit budget, TWO Regime-A variants of the same target word — one Low and
-    one High fragmentation — differing only in their tokenization consequence.
+    edit budget, TWO Regime-A variants of the same target word (one Low and
+    one High fragmentation) differing only in their tokenization consequence.
     The stratum is part of the perturbation state vector so the two variants
     get distinct row IDs."""
     requests: list[GenerationRequest] = []
     exclusion_records: list[dict] = []
 
     content_text = content_text_of(task_item)
-    target_word = tokenization.select_counterfactual_target_word(content_text, is_word)
+    candidate_words = tokenization.ordered_counterfactual_candidate_words(
+        content_text, is_word)
 
-    def exclusion(edit_budget: int, failure_reason: str) -> dict:
+    def exclusion(edit_budget: int, failure_reason: str, word: str = "") -> dict:
         return build_exclusion_record(
             task_id=task_item.task_id,
             condition_name=condition.name,
@@ -532,11 +568,11 @@ def _build_fragmentation_matched_requests(
             failure_stage="perturbation",
             failure_reason=failure_reason,
             item_length=len(content_text),
-            word_before=target_word or "",
+            word_before=word,
         )
 
-    if target_word is None:
-        return [], [exclusion(edit_budget, "no eligible counterfactual target word")
+    if not candidate_words:
+        return [], [exclusion(edit_budget, "no eligible counterfactual candidate words")
                     for edit_budget in condition.edit_budgets]
 
     for edit_budget in condition.edit_budgets:
@@ -544,14 +580,26 @@ def _build_fragmentation_matched_requests(
             seed, condition.name, task_item.task_id, edit_budget)
 
         # A PerturbationError on one item must become an exclusion record,
-        # never propagate — an uncaught worker exception aborts the entire
+        # never propagate: an uncaught worker exception aborts the entire
         # parallel build (this killed the first Llama pilot run).
         try:
-            pair = tokenization.build_fragmentation_matched_pair(
-                tokenizer, target_word, edit_budget, item_seed, is_word)
+            # Pair-aware target selection: try candidates best-first until one
+            # admits a Low/High pair, instead of committing to the single
+            # longest word (which excluded 607/740 pilot items).
+            pair = None
+            target_word = ""
+            for candidate_word in candidate_words:
+                pair = tokenization.build_fragmentation_matched_pair(
+                    tokenizer, candidate_word, edit_budget, item_seed, is_word)
+                if pair is not None:
+                    target_word = candidate_word
+                    break
             if pair is None:
                 exclusion_records.append(exclusion(
-                    edit_budget, f"no Low/High fragmentation pair for word {target_word!r}"))
+                    edit_budget,
+                    f"no Low/High fragmentation pair among "
+                    f"{len(candidate_words)} candidate words",
+                    word=candidate_words[0]))
                 continue
 
             stratum_requests = [
@@ -604,7 +652,7 @@ def _fragmentation_stratum_request(
             "token_inflation_ratio": tokenization.token_inflation_ratio(
                 tokenizer, content_text, perturbed_content),
             # Only the target word changed, so whole-text DL equals the
-            # builder-verified word-level DL — exactly the budget.
+            # builder-verified word-level DL: exactly the budget.
             "measured_dl": edit_budget,
             "subword_count_change": subword_change,
             "fragmentation_stratum": stratum,
@@ -677,7 +725,9 @@ def _construct_regime(condition, content_text, edit_budget, item_seed, is_word,
         return regimes.make_regime_b_real_word_shift(
             content_text, item_seed, is_word,
             scope=condition.scope, scope_spans=scope_spans,
-            edit_budget=edit_budget, **regime_b_kwargs)
+            edit_budget=edit_budget,
+            phonetic_only=(condition.selection_policy == SelectionPolicy.HOMOPHONE),
+            **regime_b_kwargs)
 
     raise PerturbationError(
         f"_construct_regime only handles Regime A and B; "
@@ -693,7 +743,7 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits, mea
     analysis contrasts.
 
     Adds (Workstream 3):
-      ``measured_dl``       — actual DL distance between clean and perturbed
+      ``measured_dl``       : actual DL distance between clean and perturbed
                               content strings (verification stat; edit_budget in the
                               PSV is the operational lever). Passed in rather than
                               recomputed here: the regime builder that produced
@@ -703,7 +753,7 @@ def _tokenization_fields(tokenizer, clean_content, perturbed_content, edits, mea
                               text (not single words) is expensive enough that
                               computing it twice per request measurably slows
                               request construction.
-      ``word_length_before`` — character count of the first edited word before the
+      ``word_length_before`` : character count of the first edited word before the
                                edit; controls for length confound in the mixed-effects
                                model (Workstream 9).
     """
@@ -745,7 +795,7 @@ def required_context_length(
     """Return vLLM's ``max_model_len``, sized from the request set a run will
     actually submit rather than trusted to the model's native context window.
 
-    Every request (every clean and perturbed prompt — see ``build_requests``)
+    Every request (every clean and perturbed prompt, see ``build_requests``)
     is chat-templated and tokenized with the model's own tokenizer, then
     paired with its family's completion budget (task families
     in ``REASONING_FAMILIES`` get ``max_new_tokens_reasoning``; everything
@@ -754,7 +804,7 @@ def required_context_length(
 
     ``safety_margin`` and ``round_to`` guard only against tokenizer/version
     drift between this measurement and the tokenizer the engine loads
-    internally — they never discount the measured requirement. Every request
+    internally. They never discount the measured requirement. Every request
     in a run is generated exactly once, so there is nothing to reuse and
     nothing to gain by shrinking below what was measured; the point of this
     function is solely to stop reserving KV-cache/CUDA-graph-capture memory
@@ -768,7 +818,9 @@ def required_context_length(
             completion_budget = (
                 max_new_tokens_reasoning if request.task_family in REASONING_FAMILIES
                 else max_new_tokens_multiple_choice)
-            templated_prompt = apply_chat_template(tokenizer, request.prompt)
+            templated_prompt = apply_chat_template(
+                tokenizer, request.prompt,
+                exemplar_turns=chat_exemplar_turns_for_family(request.task_family))
             prompt_tokens = len(tokenizer.encode(templated_prompt, add_special_tokens=False))
             longest_needed = max(longest_needed, prompt_tokens + completion_budget)
             progress.advance()
@@ -805,12 +857,12 @@ def run_experiment(
 
     ``shard_partition``, when given, is ``(worker_index, worker_count)``: this
     call handles only the subset of requests whose deterministic row_id hashes
-    into ``worker_index`` of ``worker_count`` buckets (design/07 §7.7 — "two
+    into ``worker_index`` of ``worker_count`` buckets (design/07 §7.7: "two
     GPUs can take different shards ... with no coordination beyond the shared
     output store"). Every worker still runs ``build_requests`` over the full
-    item set — partitioning happens only after, since perturbation
-    construction is what determines each request's row_id in the first place
-    — so this trades some redundant CPU-only construction work (cheap and
+    item set. Partitioning happens only after, since perturbation
+    construction is what determines each request's row_id in the first place.
+    This trades some redundant CPU-only construction work (cheap and
     parallelizable on its own) for zero cross-process coordination: each
     worker writes to its own ``..._w{worker_index}of{worker_count}_*`` files,
     so no two workers ever touch the same manifest or output path, and
@@ -852,7 +904,12 @@ def run_experiment(
         [request for request in requests if request.task_family not in REASONING_FAMILIES])
 
     manifest = ShardManifest(
-        output_directory / f"{configuration.run_id}{worker_suffix}_manifest.json")
+        output_directory / f"{configuration.run_id}{worker_suffix}_manifest.json",
+        generation_parameters={
+            "max_new_tokens_reasoning": configuration.max_new_tokens_reasoning,
+            "max_new_tokens_multiple_choice":
+                configuration.max_new_tokens_multiple_choice,
+        })
     output_path = output_directory / f"{configuration.run_id}{worker_suffix}_generations.jsonl"
 
     total_new_rows = 0
