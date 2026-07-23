@@ -106,7 +106,7 @@ class ProgressBar:
         elapsed_seconds = time.monotonic() - self._start_monotonic
         print(
             f"  {self._description}  "
-            f"done — {self._completed} / {self._total}  "
+            f"done: {self._completed} / {self._total}  "
             f"[{elapsed_seconds:.0f}s]",
             flush=True,
         )

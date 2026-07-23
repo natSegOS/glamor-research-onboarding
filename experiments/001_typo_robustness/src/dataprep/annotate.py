@@ -1,21 +1,14 @@
 """Formal linguistic annotation for task items: computing K_P(x) and answer-critical spans.
 
-Background
-----------
-The perturbation engine has two policies that depend on knowing which tokens
-in a question carry semantic weight:
+Two perturbation policies depend on knowing which tokens in a question carry
+semantic weight: answer_critical restricts edits to key-term characters;
+informative_word targets keyboard-neighbour substitutions at key-term words.
+Prior to this module both used a hand-coded heuristic (numeric-token pattern
+plus a curated word-exclusion list per task type) with no formal definition
+and no published accuracy record.
 
-  answer_critical   edits are restricted to characters covered by key terms;
-  informative_word  keyboard-neighbour substitutions target key-term words.
-
-Prior to this module, both policies used a hand-coded heuristic
-(numeric-token pattern plus a curated function-word exclusion list for MCQ;
-numeric-token pattern plus a curated operation-word list for reasoning).
-Those heuristics had no formal definition and no published accuracy record.
-
-This module replaces them with a formally-defined function K_P(x): the set of
-tokens in question x that meet at least one of the following conditions, as
-detected by a pinned spaCy linguistic pipeline P:
+This module replaces them with K_P(x): the set of tokens in question x
+meeting at least one condition below, detected by a pinned spaCy pipeline P:
 
     NOUN, PROPN, or NUM part-of-speech tag     (content and quantity carriers)
     Named-entity membership (ENT_IOB ≠ O)      (referent binders)
@@ -23,30 +16,18 @@ detected by a pinned spaCy linguistic pipeline P:
     Comparative or superlative degree           (scalar language)
     Total-quantifier determiner (PronType=Tot)  (distributive scope)
 
-The rule is grounded in the standard content-word / function-word distinction
-from information retrieval (Manning, Raghavan & Schütze 2008) and the
-dependency grammar of negation and quantification (Tesnière 1959, Huddleston &
-Pullum 2002).  The spaCy pipeline is chosen because:
+Grounded in the content-word/function-word distinction from information
+retrieval (Manning, Raghavan & Schütze 2008) and the dependency grammar of
+negation and quantification (Tesnière 1959, Huddleston & Pullum 2002). spaCy
+is named in the study design (design/04 §4.6), trained on OntoNotes 5.0 /
+Universal Dependencies with published F1 (data/items/annotation_PROVENANCE.json),
+and runs on CPU, matching the project's CPU/GPU split (only generation needs a GPU).
 
-  1. It is already named in the study design (design/04 §4.6).
-  2. Its English models are trained on OntoNotes 5.0 / Universal Dependencies
-     with published F1 scores (cited in data/items/annotation_PROVENANCE.json).
-  3. It runs on CPU without GPU dependencies, consistent with the project's
-     CPU/GPU split: build tools and post-processing run anywhere; only the
-     generation step requires a GPU.
-
-Usage
------
-The annotation is run once by tools/build_annotated_dataset.py and the output
-is committed as a frozen JSONL file.  The experiment reads the frozen
-annotations; it never calls this module at runtime.
-
-See also
---------
-data/items/annotation_PROVENANCE.json: records the exact model name, version,
-    SHA-256 of the model package, the rule identifier, and publication citations.
-design/02 §2.x  : formal definition of K_P(x).
-design/04 §4.6  : literature justification for the choice of spaCy.
+Run once by tools/build_annotated_dataset.py; the output is a frozen JSONL
+file the experiment reads and never calls this module at runtime. See
+data/items/annotation_PROVENANCE.json for the model name, version, SHA-256,
+rule identifier, and citations, and design/02 §2.x for the formal definition
+of K_P(x).
 """
 
 from __future__ import annotations
@@ -110,11 +91,8 @@ _FUNCTION_WORD_POS_TAGS_EXCLUDED_FROM_NER_CONDITION: frozenset[str] = frozenset(
     tag.value for tag in UniversalDependenciesClosedClassPartOfSpeechTag
 )
 
-# Small positive constant added inside the logarithm during Inverse Document
-# Frequency proxy computation to prevent log(0) when a token's corpus
-# frequency rounds to zero in the wordfreq database.  The value 1e-9 is the
-# standard numerical stabilisation epsilon for log-probability computations
-# (see e.g. Manning, Raghavan & Schütze 2008, §6.2 on TF-IDF smoothing).
+# Prevents log(0) when a token's corpus frequency rounds to zero in the
+# wordfreq database; 1e-9 is the standard log-probability stabilisation epsilon.
 _LOG_FREQUENCY_STABILIZATION_EPSILON: float = 1e-9
 
 
@@ -132,19 +110,13 @@ KEY_TERM_IDENTIFICATION_RULE_VERSION: KeyTermRuleVersion = (
 # ---------------------------------------------------------------------------
 
 def load_linguistic_pipeline(model_name: str):
-    """Load and return the named spaCy language model, downloading it if needed.
+    """Load and return the named spaCy language model, downloading it via
+    ``python -m spacy download`` if not yet installed. Raises ImportError
+    only if spaCy itself is not installed.
 
-    If the model is not yet installed it is downloaded automatically via
-    ``python -m spacy download``.  A clear ImportError is raised only if spaCy
-    itself is not installed.
-
-    Parameters
-    ----------
-    model_name :
-        The spaCy model identifier, e.g. ``"en_core_web_sm"``,
-        ``"en_core_web_md"``, or ``"en_core_web_trf"``.  Passed directly to
-        ``spacy.load()``.  The exact value is recorded in annotation_PROVENANCE.json
-        alongside published benchmark numbers so reviewers can verify quality.
+    ``model_name`` (e.g. ``"en_core_web_sm"``, ``"en_core_web_md"``,
+    ``"en_core_web_trf"``) is passed directly to ``spacy.load()`` and
+    recorded in annotation_PROVENANCE.json alongside published benchmarks.
     """
     try:
         import spacy
@@ -222,7 +194,7 @@ def _token_is_key_term(token) -> bool:
         (e.g. "costs", "earns", "exceeds").  Auxiliary and copular verbs
         ("is", "was", "can", "have" as aspect marker) are excluded via their
         Universal Dependencies dependency relation: they carry no propositional
-        content independent of their complement (Nivre et al. 2016).
+        content independent of their complement.
     """
     # Content and quantity carriers: the primary semantic load of a question.
     if token.pos_ in {"NOUN", "PROPN", "NUM"}:
@@ -299,35 +271,22 @@ def compute_key_term_set(
         question_text: str,
         linguistic_pipeline,
 ) -> list[str]:
-    """Apply the K_P(x) rule to ``question_text`` and return all key terms,
-    ordered by perturbation priority.
+    """Apply the K_P(x) rule to ``question_text`` (the raw question string,
+    not the full prompt) and return all key terms, ordered by perturbation
+    priority so a budget-one perturbation targets the most informative term:
 
-    The ordering is designed to maximise the relevance of the perturbation
-    when only a small edit budget is available:
+    1. Structurally guaranteed tokens (named entities, numeric tokens,
+       negation tokens) first, in document order. These are answer-determining
+       by the formal rule regardless of surface frequency.
+    2. TF-IDF ranked tokens: all remaining structural-filter-passing tokens,
+       descending by TF-IDF proxy score (rarer-in-corpus, more-frequent-in-item
+       first).
 
-    1. **Structurally guaranteed** tokens (named entities, numeric tokens, and
-       negation tokens) appear first, in document order among themselves.
-       These are guaranteed by the formal rule to be answer-determining
-       regardless of their surface frequency.
+    No cap on the number of key terms returned: every token satisfying the
+    formal rule is included, and ordering alone decides which is edited first.
 
-    2. **TF-IDF ranked** tokens: all remaining structural-filter-passing
-       tokens, sorted in descending order of TF-IDF proxy score.  Higher-ranked
-       (rarer-in-corpus, more-frequent-in-item) tokens appear earlier so that
-       a budget-one perturbation targets the most informative key term.
-
-    There is no cap on the total number of key terms returned.  All tokens
-    satisfying the formal rule are included; the ordering alone determines
-    which receives the first edit when budget is limited.  A cap would require
-    an arbitrary threshold with no principled justification.
-
-    Parameters
-    ----------
-    question_text :
-        The raw question string (not the full prompt; the instruction span is
-        not perturbed under the ``content`` or ``answer_critical`` scopes).
-    linguistic_pipeline :
-        A loaded spaCy language model object (returned by
-        ``load_linguistic_pipeline``).
+    ``linguistic_pipeline`` is a loaded spaCy model (from
+    ``load_linguistic_pipeline``).
     """
     document = linguistic_pipeline(question_text)
 
@@ -402,34 +361,27 @@ def validate_template_operand_coverage(
     in *some* textual form: digit string, spelled-out cardinal, multiplicative
     adverb ("twice"/"thrice"/"quadruple"), or fraction word ("third").
 
-    For synthetic reasoning items (those with a populated ``parameters`` dict),
-    the answer-determining operand values are known by construction.  This
-    function checks that every *numeric* operand (``int``, ``float``, or
-    ``Fraction``. ``item.parameters`` must already be deserialised, i.e. run
-    through ``deserialize_parameters``, so ``Fraction`` values are real
-    ``Fraction`` instances rather than the ``{"__fraction__": [n, d]}`` JSONL
+    For synthetic reasoning items (a populated ``parameters`` dict), the
+    answer-determining operand values are known by construction. Checks every
+    *numeric* operand (``int``, ``float``, or deserialised ``Fraction``;
+    ``item.parameters`` must already be run through ``deserialize_parameters``
+    so ``Fraction`` values aren't still the ``{"__fraction__": [n, d]}`` JSONL
     encoding) is covered by at least one key term, logging violations as
-    warnings rather than raising so that a single edge case does not abort the
-    full annotation run.
+    warnings rather than raising so one edge case doesn't abort the full run.
 
     Non-numeric parameters (a color, a name, a currency symbol, a free-text
-    phrase) are intentionally skipped: K_P(x) (design/02 §2.x) is not expected
-    to capture them (a plain color adjective, for instance, is not a
-    NOUN/PROPN/NUM or an entity), and Regime C's operand-swap only ever
-    considers ``int``-valued parameters
+    phrase) are intentionally skipped: K_P(x) isn't expected to capture them,
+    and Regime C's operand-swap only ever considers ``int``-valued parameters
     (``regimes.make_regime_c_reasoning_operand_swap``), so a non-numeric
-    parameter can never be a Regime C swap target regardless of key-term
-    coverage. Checking them anyway produced false-positive "violations" for
-    the overwhelming majority of cases (colors, multi-word phrases compared as
-    a whole against a list of single tokens, and undeserialised ``Fraction``
+    parameter can never be a swap target regardless of coverage. Checking
+    them anyway produced false-positive violations for the overwhelming
+    majority of cases (colors, multi-word phrases, undeserialised ``Fraction``
     dict reprs that could never match any text).
 
     Returns a list of violation strings (empty if all numeric operands are
-    covered).
-
-    This cross-check implements the validation oracle described in the plan:
-    the K_P(x) rule is the single definition; template operands are the ground
-    truth confirming coverage (design §1.2 cross-check).
+    covered). Implements the validation oracle described in the plan: K_P(x)
+    is the single definition; template operands are the ground truth
+    confirming coverage (design §1.2 cross-check).
     """
     parameters = getattr(item, "parameters", {})
     if not parameters:
@@ -466,27 +418,17 @@ def annotate_item(
         linguistic_pipeline,
         question_text_attribute: str = "question_text",
 ) -> dict:
-    """Annotate a single task item and return an update dict.
+    """Annotate a single task item and return an update dict with
+    ``key_terms`` (K_P(x) surface forms) and ``linguistic_annotation_rule``
+    (KEY_TERM_IDENTIFICATION_RULE_VERSION). The caller applies this dict to
+    the item's serialised record; the item dataclass itself is not mutated
+    (it may be frozen).
 
-    The update dict contains:
-        ``key_terms``                   List of key-term surface forms (K_P(x)).
-        ``linguistic_annotation_rule``  The rule version string (KEY_TERM_IDENTIFICATION_RULE_VERSION).
-
-    The caller applies this dict to the item's serialised record; the item
-    dataclass itself is not mutated (it may be frozen).
-
-    Parameters
-    ----------
-    item :
-        A ``ReasoningItem`` or ``MultipleChoiceItem`` instance.
-    linguistic_pipeline :
-        The loaded spaCy pipeline.
-    question_text_attribute :
-        The attribute name that holds the bare question text (without options or
-        instruction).  For reasoning items this is ``"question_text"``; for
-        multiple-choice items it is also ``"question"`` in the raw HuggingFace
-        schema but ``"question"`` on the dataclass.  The build tool passes the
-        correct attribute for each task type.
+    ``item`` is a ``ReasoningItem`` or ``MultipleChoiceItem``.
+    ``question_text_attribute`` names the bare-question-text attribute
+    (without options or instruction): ``"question_text"`` for reasoning
+    items, ``"question"`` for multiple-choice; the build tool passes the
+    correct one per task type.
     """
     raw_text = getattr(item, question_text_attribute, "")
     key_terms = compute_key_term_set(raw_text, linguistic_pipeline)
@@ -520,33 +462,19 @@ def annotate_jsonl_file(
         force: bool = False,
 ) -> dict:
     """Read a JSONL item file, annotate every record with K_P(x) key terms,
-    and write the annotated records to ``output_path``.
+    and write the annotated records to ``output_path`` (may equal
+    ``input_path`` for an in-place update).
 
-    If ``output_path`` already contains annotations from the same rule version
-    and ``force`` is False, a ``ValueError`` is raised to prevent accidental
+    Raises ``ValueError`` if ``output_path`` already contains annotations
+    from the same rule version and ``force`` is False, to prevent accidental
     overwrite of a pre-registered frozen dataset.
 
-    Parameters
-    ----------
-    input_path :
-        Path to the source JSONL file produced by tools/build_task_items.py.
-    output_path :
-        Path to write the annotated JSONL.  May be the same as ``input_path``
-        (in-place update).
-    linguistic_pipeline :
-        The loaded spaCy pipeline object.
-    model_name :
-        The spaCy model name string, for provenance recording.
-    question_text_field :
-        The JSON field name that holds the bare question text in each record.
-    force :
-        If True, overwrite existing annotations without raising.
+    ``input_path`` is the source JSONL from tools/build_task_items.py.
+    ``model_name`` is the spaCy model name, recorded for provenance.
+    ``question_text_field`` names the bare-question-text JSON field per record.
 
-    Returns
-    -------
-    dict
-        A summary dict with keys ``annotated_count``, ``skipped_count``,
-        ``violation_count``, and ``rule_version``.
+    Returns a summary dict with ``annotated_count``, ``skipped_count``,
+    ``violation_count``, and ``rule_version``.
     """
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -708,8 +636,8 @@ def build_annotation_provenance_record(
             "model_sha256_of_meta_json": model_sha256,
             "model_accuracy_reference": (
                 "Published accuracy figures are available in the spaCy model documentation "
-                "at https://spacy.io/models/en — see the model card for the specific "
-                "version installed, including F1 scores for part-of-speech tagging, "
+                "at https://spacy.io/models/en (see the model card for the specific "
+                "version installed), including F1 scores for part-of-speech tagging, "
                 "dependency parsing, and named-entity recognition on OntoNotes 5.0."
             ),
         },

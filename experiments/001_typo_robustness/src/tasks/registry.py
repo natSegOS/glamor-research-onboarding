@@ -204,7 +204,7 @@ def call_loader(
     """
     if spec.loader is None:
         raise NotImplementedError(
-            f"Dataset {spec.key!r} has no loader — add one to registry.py.")
+            f"Dataset {spec.key!r} has no loader: add one to registry.py.")
 
     # JSONL sources: load from pre-exported file; path required.
     if spec.key.endswith("_jsonl"):

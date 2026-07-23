@@ -1,38 +1,33 @@
-"""Deterministic answer extraction and binary correctness scoring.
+"""Deterministic answer extraction and binary correctness scoring. Frozen at
+pre-registration: every rule here is exact and never tuned against results
+(design/04 §4.2-4.5).
 
-Provenance
-----------
-Frozen at pre-registration; every rule here is exact and never tuned against
-results (design/04 §4.2–4.5). The parse-status taxonomy distinguishes four
-outcomes so that an interactional failure (the model asks for clarification or
-refuses) is not silently lumped in with a wrong answer:
+Parse status is one of valid, unparseable, clarification, or refusal, so an
+interactional failure (the model asks for clarification or refuses) isn't
+silently lumped in with a wrong answer. Clarifications and refusals score
+INCORRECT for accuracy (the conservative choice) and are also counted
+separately as the invalid-or-clarification rate (design/04 §4.5): the
+dual-accounting rule.
 
-    valid | unparseable | clarification | refusal
-
-Clarifications and refusals score as INCORRECT for accuracy (the conservative
-choice) and are also counted separately for the invalid-or-clarification rate
-(design/04 §4.5): the dual-accounting rule.
-
-Two parse-status detectors are provided:
+Two parse-status detectors:
 
   classify_parse_status
-      Phrase-lexicon-based; fast and CPU-only; used by the generation runner
-      for inline scoring (the smoke / pilot path).  The phrase lists in
-      data/lexicons/ are the mechanism.  This is the detector the test suite
-      exercises.
+      Phrase-lexicon-based (data/lexicons/); fast, CPU-only; used by the
+      generation runner for inline scoring (smoke/pilot path). What the test
+      suite exercises.
 
   classify_parse_status_with_linguistic_pipeline
       spaCy dependency-parse-based; the formal four-way detector used inline
-      during generation (Workstream 5).  No phrase list is loaded at runtime;
-      structural dependency criteria detect interrogatives (clarification) and
-      first-person negated clauses (refusal).  The phrase lists in data/lexicons/
-      survive as frozen validation oracles. They are not the runtime mechanism.
+      during generation (Workstream 5). Structural criteria detect
+      interrogatives (clarification) and first-person negated clauses
+      (refusal); no phrase list at runtime. The data/lexicons/ phrase lists
+      survive only as frozen validation oracles.
 
-Both detectors are deliberately conservative: the invalid-or-clarification rate
-is a diagnostic metric (M9), not a primary endpoint.  Under-counting is the
-safer direction.  See Aliannejadi et al. (2019) for the clarification taxonomy
-and Zou et al. (2023) for the refusal-phrase methodology that the phrase lists
-implement and that the linguistic rule is cross-checked against.
+Both detectors are deliberately conservative: the invalid-or-clarification
+rate is a diagnostic metric (M9), not a primary endpoint, and under-counting
+is the safer direction. Clarification taxonomy: Aliannejadi et al. (2019).
+Refusal-phrase methodology the phrase lists implement and the linguistic
+rule is cross-checked against: Zou et al. (2023).
 """
 
 from __future__ import annotations
@@ -52,16 +47,14 @@ from tasks._shared import OPTION_LETTERS, HASH_DELIMITED_ANSWER_PATTERN
 import re
 
 
-# Extended to include scientific notation (e.g. 1.5e10, 2E-3) so GSM answers
-# expressed as powers of ten are not silently dropped (Workstream 4).
+# Includes scientific notation (1.5e10, 2E-3) so GSM answers expressed as
+# powers of ten aren't silently dropped (Workstream 4).
 _ANY_NUMBER = re.compile(r"-?\$?\d[\d,]*\.?\d*(?:[eE][+-]?\d+)?")
 
-# Re-use the shared hash-delimited answer pattern so the response-side scorer
-# and the gold-side loader parse the same surface forms.
+# Shared with the gold-side loader, so both parse the same surface forms.
 _HASH_DELIMITED_ANSWER = HASH_DELIMITED_ANSWER_PATTERN
 
-# Derive the option-letter character class from the single authoritative source
-# rather than hard-coding "[A-J]" in two independent regex strings.
+# Single authoritative source instead of hard-coding "[A-J]" twice.
 _OPTION_LETTER_CLASS = f"[{OPTION_LETTERS}]"
 
 _MCQ_EXPLICIT_MARKER = re.compile(
@@ -74,24 +67,19 @@ _MCQ_LINE_LEADING_LETTER = re.compile(
 # (used by classify_parse_status_with_linguistic_pipeline)
 # ---------------------------------------------------------------------------
 
-# English negative auxiliary forms that spaCy does not assign dep_="neg" to
-# because the negation is fused with the auxiliary at the orthographic level.
-# "cannot" is the primary member; split contractions (e.g. "ca"+"n't") are
-# handled by the dep_="neg" check on the "n't" token.  See Huddleston &
-# Pullum (2002) CGEL §2.3 on fused negation in English modals.
+# Negative auxiliaries spaCy doesn't tag dep_="neg" (negation fused with the
+# auxiliary orthographically). Split contractions ("ca"+"n't") are caught by
+# the dep_="neg" check on "n't" instead. Huddleston & Pullum (2002) CGEL §2.3.
 _FUSED_NEGATIVE_AUXILIARY_ORTHOGRAPHIC_FORMS: frozenset[str] = frozenset({"cannot"})
 
-# Predicative adjectives that express inability or unwillingness in first-
-# person clauses ("I am unable to ...", "I am incapable of ...").
-# Grounded in modal-semantics terminology: see von Fintel & Iatridou (2006)
-# "Epistemic Containment" §2 for the ability/volition distinction.
+# Predicative adjectives expressing inability/unwillingness in first-person
+# clauses ("I am unable to ..."). von Fintel & Iatridou (2006) §2.
 _INABILITY_PREDICATIVE_ADJECTIVE_LEMMAS: frozenset[str] = frozenset({
     "unable", "unwilling", "incapable",
 })
 
-# Root verbs whose first-person use constitutes a speech act of refusal
-# (performative refusals that carry no negation token of their own).
-# See Searle (1969) "Speech Acts" §3.4 on performative utterances.
+# Root verbs whose first-person use is itself a speech act of refusal, with
+# no negation token needed. Searle (1969) "Speech Acts" §3.4.
 _REFUSAL_PERFORMATIVE_VERB_LEMMAS: frozenset[str] = frozenset({
     "refuse", "decline", "apologize",
 })
@@ -100,14 +88,14 @@ _REFUSAL_PERFORMATIVE_VERB_LEMMAS: frozenset[str] = frozenset({
 @dataclass
 class ScoreResult:
     parsed_answer: Optional[str]
-    is_correct: int                    # 1 or 0
+    is_correct: int
     parse_status: ParseStatus
     extraction_tier: ExtractionTier = ExtractionTier.UNPARSEABLE
 
 
 def normalize_number(raw: str) -> Optional[float]:
-    """Parse a possibly currency- and comma-formatted number into a float, or
-    None if it does not parse."""
+    """Parse a currency/comma-formatted number string to a float, or None if
+    unparseable."""
     cleaned = raw.strip().lstrip("$").replace(",", "")
     if not cleaned:
         return None
@@ -121,8 +109,8 @@ def extract_reasoning_answer(generation: str) -> tuple[Optional[float], Extracti
     """Extract the final numeric answer from a reasoning generation.
 
     Priority (design/04 §4.2, matching the GSM-Symbolic / GSM8K answer format):
-    the number after the LAST '####' delimiter, else the LAST number anywhere in
-    the text. Returns (parsed_answer, extraction_tier).
+    the number after the LAST '####' delimiter, else the LAST number anywhere
+    in the text.
     """
     hash_delimited_matches = _HASH_DELIMITED_ANSWER.findall(generation)
     if hash_delimited_matches:
@@ -148,8 +136,6 @@ def extract_multiple_choice_answer(
       2. line-leading standalone letter
       3. standalone valid letter in the **last sentence only** (restricted from
          the full generation to avoid picking up A–J letters in reasoning chains)
-
-    Returns (letter, extraction_tier).
     """
     valid_letters = OPTION_LETTERS[:option_count]
 
@@ -182,10 +168,10 @@ def classify_parse_status(parsed_answer) -> ParseStatus:
 
     Returns only VALID or UNPARSEABLE: interactional-failure sub-categories
     (CLARIFICATION, REFUSAL) are assigned by the formal post-stage classifier
-    classify_parse_status_with_linguistic_pipeline.  Both outcomes score
-    is_correct=0 for accuracy, so the accuracy primary endpoint is identical
-    between the smoke and post-stage paths; only the diagnostic
-    invalid-or-clarification rate (ICR, metric M9) differs.
+    classify_parse_status_with_linguistic_pipeline. Both outcomes score
+    is_correct=0, so accuracy is identical between the smoke and post-stage
+    paths; only the diagnostic invalid-or-clarification rate (ICR, metric M9)
+    differs.
     """
     if parsed_answer is None:
         return ParseStatus.UNPARSEABLE
@@ -195,10 +181,10 @@ def classify_parse_status(parsed_answer) -> ParseStatus:
 def _sentence_is_interrogative(sentence) -> bool:
     """True if the sentence ends with a '?' punctuation token.
 
-    Implements the clarification criterion from design/04 §4.5 / plan §1.3:
-    'y contains an interrogative root clause'.  A trailing '?' is the
-    canonical surface marker of an interrogative in English orthography (see
-    Huddleston & Pullum, 2002, CGEL §10 on interrogative clauses).
+    Implements the clarification criterion (design/04 §4.5 / plan §1.3):
+    'y contains an interrogative root clause'. A trailing '?' is the
+    canonical surface marker of an interrogative in English orthography
+    (Huddleston & Pullum, 2002, CGEL §10).
     """
     for token in reversed(list(sentence)):
         if token.is_punct:
@@ -212,7 +198,7 @@ def _sentence_expresses_first_person_refusal(sentence) -> bool:
     """True if the sentence has a first-person subject with negation or an
     inability/refusal predicate.
 
-    Implements the refusal criterion from design/04 §4.5 / plan §1.3:
+    Implements the refusal criterion:
     'y contains a first-person subject governing a negated ability/volition
     modal (parser: nsubj = 1st-person PRON, aux/root lemma ∈ ability/volition
     modal with DEP=neg or negating particle)'.
@@ -260,17 +246,14 @@ def classify_parse_status_with_linguistic_pipeline(
 ) -> ParseStatus:
     """Formal parse-status classifier for the post-stage scoring tool.
 
-    Uses spaCy dependency structure to assign the full four-way taxonomy
-    (design/04 §4.5, formal definition in plan §1.3).  No phrase list is
-    loaded; the criteria are structural:
+    Uses spaCy dependency structure to assign the full four-way taxonomy.
+    No phrase list is loaded; the criteria are structural:
 
       - clarification ⇔ any sentence in the output is interrogative
-        (ends with '?' punctuation).  See Aliannejadi et al. (2019) for the
-        clarification taxonomy this formalises.
+        (ends with '?' punctuation).
       - refusal ⇔ no parseable answer AND at least one sentence expresses
-        first-person negation or inability/refusal.  The positive examples
-        in Zou et al. (2023) Appendix A.2 are the frozen validation oracle
-        for this rule (tests/fixtures/refusal_phrases.txt).
+        first-person negation or inability/refusal. The frozen validation
+        oracle for this rule is tests/fixtures/refusal_phrases.txt.
       - unparseable ⇔ no parseable answer and neither of the above.
       - valid ⇔ a parseable answer is present.
 

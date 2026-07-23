@@ -1,36 +1,27 @@
 """Cross-family LLM-as-a-judge for regime classification audit.
 
-The judge independently re-classifies a sample of perturbation pairs to verify
-that the generation engine's structural guarantees (nonword vs real-word) match
-the intended semantic guarantees (intent-preserving vs meaning-changing).
+Independently re-classifies a sample of perturbation pairs to verify that the
+generation engine's structural guarantees (nonword vs real-word) match the
+intended semantic guarantees (intent-preserving vs meaning-changing).
 
-Reproducibility controls
-------------------------
-1. The judge model is a different family from every generation model in the
-   study (Gemma 2 from Google vs Llama/Qwen/Mistral). Cross-family selection
-   reduces correlation between generator tendencies and judge tendencies.
-2. The judge always runs at temperature=0 (greedy decoding) to guarantee that
-   the same (judge_revision, prompt_version, input) always produces the same
-   decision.
-3. Every decision is stored in a content-addressed cache keyed by
-   SHA-256(judge_revision + PROMPT_TEMPLATE_VERSION + input_text). A re-run
-   reads from the cache and never calls the judge twice for the same input.
-4. The judge model revision is subject to the same PIN_ME pinning requirement
-   as generation models in a confirmatory run.
+Reproducibility: the judge model (Gemma 2, Google) is a different family from
+every generation model (Llama/Qwen/Mistral), reducing correlation between
+generator and judge tendencies. It always runs at temperature=0 so the same
+(judge_revision, prompt_version, input) reproduces the same decision, and
+every decision is cached content-addressably (SHA-256 of judge_revision +
+PROMPT_TEMPLATE_VERSION + input_text) so a re-run never calls the judge twice
+for the same input. The judge model revision is subject to the same PIN_ME
+pinning requirement as generation models in a confirmatory run.
 
-Disclosed limitation
---------------------
-The judge is drawn from the same broad ecosystem (Transformer LLMs) as the
-generation models. Despite cross-family selection, shared pretraining data and
-architectural patterns mean the judge is not fully independent. This is
-mitigated by the 200-item human validation step (tools/regime_audit_ui.html),
-whose human-judge agreement (Cohen's κ) is reported in the paper.
+Limitation: despite cross-family selection, the judge shares the broad
+Transformer-LLM ecosystem with the generation models (shared pretraining data,
+architectural patterns), so it is not fully independent. Mitigated by a
+200-item human validation step (tools/regime_audit_ui.html); human-judge
+agreement (Cohen's κ) is reported in the paper.
 
-Structured output
------------------
-The prompt demands a single JSON object. We parse the JSON response and
-validate it against a controlled vocabulary. If parsing fails we record
-parse_failed=True and treat the item as needing human review.
+Output: the prompt demands a single JSON object, parsed and validated against
+a controlled vocabulary. Parse failure sets parse_failed=True and routes the
+item to human review.
 """
 
 from __future__ import annotations

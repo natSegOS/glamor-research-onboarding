@@ -32,7 +32,8 @@ class Operation(_StrEnum):
     INSERT = "insert"
     TRANSPOSE = "transpose"
     WORD_SUBSTITUTE = "word_substitute"   # whole-word swap (Regime B / Regime C)
-    NONE = "none"                         # sentinel for clean (unperturbed) rows
+    NONE = "none"                         # sentinel for clean (unperturbed) rows;
+                                           # other enums reuse this NONE/CLEAN pattern
 
 
 class SelectionPolicy(_StrEnum):
@@ -54,7 +55,7 @@ class SelectionPolicy(_StrEnum):
     # Method A counterfactual (design/02 §2.5, design/06 §6.8): paired Low/High
     # fragmentation variants of the same word at the same edit budget.
     FRAGMENTATION_MATCHED = "fragmentation_matched"
-    NONE = "none"                             # sentinel for clean rows
+    NONE = "none"
 
 
 class Scope(_StrEnum):
@@ -63,7 +64,7 @@ class Scope(_StrEnum):
     CONTENT = "content"
     ANSWER_CRITICAL = "answer_critical"
     ANYWHERE = "anywhere"
-    NONE = "none"     # sentinel for clean rows
+    NONE = "none"
 
 
 class Unit(_StrEnum):
@@ -82,7 +83,7 @@ class SemanticClass(_StrEnum):
     A = "A"       # intent-preserving nonword typo
     B = "B"       # context-recoverable real-word shift
     C = "C"       # meaning-changing control
-    CLEAN = "clean"   # sentinel for the unperturbed baseline row
+    CLEAN = "clean"
 
 
 # ---------------------------------------------------------------------------
@@ -92,25 +93,15 @@ class SemanticClass(_StrEnum):
 class TaskFamily(_StrEnum):
     """Which task / dataset a row belongs to.
 
-    Primary datasets (N=600, confirmatory)
-    --------------------------------------
-    GSM_SYMBOLIC_OFFICIAL    apple/GSM-Symbolic (fresh reasoning)
-    MMLU_PRO                 TIGER-Lab/MMLU-Pro (MCQ)
-
-    Contamination-contrast datasets (standard benchmarks, paired with primaries)
-    ---------------------------------------------------------------------------
-    GSM8K                    openai/gsm8k, standard arithmetic reasoning
-    MMLU                     cais/mmlu, standard MCQ (4-option)
-
-    Offline generators (unit tests / pilot / Regime C operand swap)
-    ---------------------------------------------------------------
-    GSM_SYMBOLIC_SYNTHETIC   offline templated generator
-    MCQ_DEMO                 5-item hardcoded smoke-test set
-
-    Historical (backward-compat with old JSONL output only)
-    --------------------------------------------------------
-    GSM_SYMBOLIC             old tag written by early load_reasoning_jsonl versions;
-                             not in REASONING_FAMILIES. Re-tag on load if present.
+    Primary (N=600, confirmatory): GSM_SYMBOLIC_OFFICIAL (apple/GSM-Symbolic,
+    fresh reasoning), MMLU_PRO (TIGER-Lab/MMLU-Pro, MCQ).
+    Contamination-contrast (standard benchmarks paired with primaries):
+    GSM8K (openai/gsm8k), MMLU (cais/mmlu, 4-option).
+    Offline generators (unit tests / pilot / Regime C operand swap):
+    GSM_SYMBOLIC_SYNTHETIC (templated generator), MCQ_DEMO (5-item smoke set).
+    GSM_SYMBOLIC is a historical, backward-compat tag from early
+    load_reasoning_jsonl versions, not in REASONING_FAMILIES; re-tag on load
+    if present.
     """
     GSM_SYMBOLIC = "gsm_symbolic"               # historical; avoid in new code
     GSM_SYMBOLIC_OFFICIAL = "gsm_symbolic_official"
@@ -312,11 +303,8 @@ class KeyTermRuleVersion(_StrEnum):
 
 class UniversalDependenciesRelationLabel(_StrEnum):
     """Subset of Universal Dependencies syntactic relation labels used in this
-    study's token-classification logic.
-
-    Values match spaCy's ``token.dep_`` attribute strings exactly.
-    The Universal Dependencies standard is published at universaldependencies.org
-    (Nivre et al. 2016; de Marneffe et al. 2021).
+    study's token-classification logic. Values match spaCy's ``token.dep_``
+    attribute strings exactly (universaldependencies.org).
     """
     AUXILIARY = "aux"
     AUXILIARY_PASSIVE = "auxpass"
@@ -326,10 +314,8 @@ class UniversalDependenciesRelationLabel(_StrEnum):
 
 class SpacyMorphologicalDegree(_StrEnum):
     """Values of the Universal Dependencies morphological 'Degree' feature as
-    returned by spaCy's ``token.morph.get("Degree")``.
-
-    Source: universaldependencies.org/u/feat/Degree.html
-    (Universal Dependencies specification, Nivre et al. 2016).
+    returned by spaCy's ``token.morph.get("Degree")``
+    (universaldependencies.org/u/feat/Degree.html).
     """
     COMPARATIVE = "Cmp"
     SUPERLATIVE = "Sup"
@@ -337,43 +323,37 @@ class SpacyMorphologicalDegree(_StrEnum):
 
 class SpacyMorphologicalNumericType(_StrEnum):
     """Values of the Universal Dependencies morphological 'NumType' feature as
-    returned by spaCy's ``token.morph.get("NumType")``.
+    returned by spaCy's ``token.morph.get("NumType")``
+    (universaldependencies.org/u/feat/NumType.html).
 
     Ordinal numerals ("first", "second", "last") directly identify which
     object or rank is in scope, making them answer-critical in both reasoning
     and multiple-choice questions (Huddleston & Pullum 2002, §5.3).
-
-    Source: universaldependencies.org/u/feat/NumType.html
     """
     ORDINAL = "Ord"
 
 
 class SpacyMorphologicalPronounType(_StrEnum):
     """Values of the Universal Dependencies morphological 'PronType' feature as
-    returned by spaCy's ``token.morph.get("PronType")``.
+    returned by spaCy's ``token.morph.get("PronType")``
+    (universaldependencies.org/u/feat/PronType.html).
 
     Total-quantifier determiners ("each", "every", "all", "both") impose
     distributive semantics; a perturbation that changes or removes such a
     quantifier directly changes the counting structure of a problem
     (Barwise & Cooper 1981, generalised quantifiers).
-
-    Source: universaldependencies.org/u/feat/PronType.html
     """
     TOTAL = "Tot"
 
 
 class UniversalDependenciesClosedClassPartOfSpeechTag(_StrEnum):
-    """Closed-class (function-word) POS tags in the Universal Dependencies tagset.
-
-    These tags identify tokens that are grammatically required function material
-    and do not carry independent referential meaning.  They are excluded from
-    the NER condition of the K_P(x) key-term rule: a preposition or article
-    inside a named-entity span (e.g., "the" in "the United States" or "of" in
-    "State of California") is not a meaningful perturbation target: altering it
-    produces ungrammatical output rather than a semantically distinct question.
-
-    Source: Nivre et al. (2016) 'Universal Dependencies v1', LREC;
-    de Marneffe et al. (2021) 'Universal Dependencies', Computational Linguistics.
+    """Closed-class (function-word) POS tags in the Universal Dependencies
+    tagset: grammatically required function material with no independent
+    referential meaning. Excluded from the NER condition of the K_P(x)
+    key-term rule: a preposition or article inside a named-entity span (e.g.
+    "the" in "the United States") is not a meaningful perturbation target,
+    since altering it produces ungrammatical output, not a semantically
+    distinct question.
     """
     ADPOSITION = "ADP"
     AUXILIARY = "AUX"
@@ -392,16 +372,12 @@ class EnglishDiscourseParticle(_StrEnum):
     filler-word insertion perturbations.
 
     Filled pauses (``uh``, ``um``) are the most-studied class of English
-    disfluency markers (Clark & Fox Tree 2002, "Using uh and um in spontaneous
-    speaking", Cognition 84(1):73–111; Shriberg 1994, "Preliminaries to a
-    Theory of Speech Disfluencies", UC Berkeley dissertation).  The pragmatic
-    discourse markers (``like``, ``so``) are the two most frequent English
-    discourse markers used as fillers in informal speech (Jurafsky & Martin
-    2024, Speech and Language Processing, §26.4 on discourse coherence and
-    disfluency).  Together these four tokens are the set studied across the
-    core English disfluency literature and are the canonical minimal set for
-    intent-preserving filler insertion: each carries no propositional content
-    in inter-word positions, so their insertion is intent-preserving by definition.
+    disfluency markers (Clark & Fox Tree 2002, Cognition 84(1):73–111;
+    Shriberg 1994, UC Berkeley dissertation). The pragmatic discourse markers
+    (``like``, ``so``) are the two most frequent English filler markers in
+    informal speech (Jurafsky & Martin 2024, §26.4). Each carries no
+    propositional content in inter-word positions, so insertion is
+    intent-preserving by definition.
     """
     FILLED_PAUSE_UH = "uh"
     FILLED_PAUSE_UM = "um"
