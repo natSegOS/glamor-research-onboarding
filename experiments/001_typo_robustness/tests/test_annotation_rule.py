@@ -1,11 +1,8 @@
 """The pre-registered K_P(x) key-term annotation rule (design/04 §4.6).
 
-Each test guards the frozen annotation contract: which tokens count as
-answer-critical key terms, in what priority order, and the template-operand
-oracle that cross-checks the rule against known ground truth. Breaking any of
-them silently changes which words the informative_word and answer_critical
-policies are allowed to touch, after the datasets were frozen against the
-old rule.
+Guards the frozen annotation contract: which tokens count as answer-critical
+key terms, in what priority order, and the template-operand oracle that
+cross-checks the rule against known ground truth.
 """
 
 from __future__ import annotations
@@ -132,7 +129,7 @@ class TestComputeKeyTermSet:
         tokens = [
             _KeyTermStubToken("dogs", pos_="NOUN"),
             _KeyTermStubToken("and", pos_="CCONJ"),
-            _KeyTermStubToken("dogs", pos_="NOUN"),  # duplicate
+            _KeyTermStubToken("dogs", pos_="NOUN"),
         ]
         key_terms = compute_key_term_set("dogs and dogs", _key_term_pipeline_for(tokens))
         assert key_terms == ["dogs"]
@@ -192,7 +189,7 @@ class TestTemplateOperandCoverage:
 
     def test_missing_operand_returns_violation(self):
         item = self._FakeItem({"a": 99, "b": 3})
-        violations = validate_template_operand_coverage(item, ["3", "boxes"])  # 99 missing
+        violations = validate_template_operand_coverage(item, ["3", "boxes"])
         assert len(violations) == 1
         assert "99" in violations[0]
 

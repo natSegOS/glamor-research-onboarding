@@ -1,11 +1,10 @@
-"""Task items and answer scoring, consolidated: the (str, Enum) contract every
-JSONL/config consumer depends on, the frozen prompt scaffold, the JSONL
-loaders' coercion shims, both extraction-tier priority ladders, the frozen
-scoring rules with their dual-accounting guarantee, and the spaCy-free
+"""Task items and answer scoring: the (str, Enum) contract every JSONL/config
+consumer depends on, the frozen prompt scaffold, JSONL loader coercion,
+extraction-tier priority ladders, scoring rules, and the spaCy-free
 linguistic parse-status classifier.
 
 Consolidates test_enums.py, test_tasks.py, test_answer_scoring.py, and
-test_linguistic_parse_status.py, keeping their strongest invariants.
+test_linguistic_parse_status.py.
 """
 
 from __future__ import annotations

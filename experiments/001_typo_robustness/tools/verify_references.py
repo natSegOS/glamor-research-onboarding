@@ -167,7 +167,7 @@ def verify_row(row: ManifestRow) -> RowVerification:
     if fraction_present < MINIMUM_TITLE_WORD_FRACTION:
         return RowVerification(
             row.key, RowStatus.TITLE_MISMATCH,
-            f"only {fraction_present:.0%} of title words found — "
+            f"only {fraction_present:.0%} of title words found, "
             f"expected: {row.title!r}")
     return RowVerification(row.key, RowStatus.TITLE_MATCHES,
                            f"{fraction_present:.0%} of title words found")
@@ -192,7 +192,7 @@ def main() -> int:
 
     verifications = verify_all_references()
     for verification in verifications:
-        detail = f" — {verification.detail}" if verification.detail else ""
+        detail = f": {verification.detail}" if verification.detail else ""
         print(f"[{verification.status.value}] {verification.key}{detail}")
 
     failures = [v for v in verifications if v.status in FAILING_STATUSES]

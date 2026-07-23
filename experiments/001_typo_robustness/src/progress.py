@@ -1,8 +1,11 @@
 """Uniform progress reporting for long-running pipeline steps.
 
-Uses tqdm when available: it auto-detects a Jupyter / Colab environment and
-renders a rich notebook widget, or falls back to a terminal progress bar on the
-cluster. When tqdm is absent, a plain-text reporter prints one status line every
+Uses tqdm when available and stderr is a terminal: it auto-detects a Jupyter /
+Colab environment and renders a rich notebook widget, or falls back to a
+terminal progress bar on the cluster. When tqdm is absent or stderr is a pipe
+(a subprocess under run_pipeline.py: tqdm's carriage-return redraws never show
+through the nested pipe, which reads as a silent hour on a 7B model), a
+plain-text reporter prints one status line with an ETA every
 ``print_interval_seconds`` seconds so the user always knows something is
 happening.
 
@@ -24,11 +27,12 @@ Or stand-alone (remember to call ``close()`` when done):
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import Optional
 
 
-_PRINT_INTERVAL_SECONDS: float = 5.0
+_PRINT_INTERVAL_SECONDS: float = 30.0
 
 
 class ProgressBar:
@@ -62,13 +66,16 @@ class ProgressBar:
 
         try:
             import tqdm as _tqdm
-            self._tqdm_bar = _tqdm.tqdm(
-                total=total,
-                desc=description,
-                unit="item",
-                dynamic_ncols=True,
-            )
+            if sys.stderr.isatty():
+                self._tqdm_bar = _tqdm.tqdm(
+                    total=total,
+                    desc=description,
+                    unit="item",
+                    dynamic_ncols=True,
+                )
         except ImportError:
+            pass
+        if self._tqdm_bar is None:
             self._print_status_line()
 
     # ------------------------------------------------------------------
@@ -106,7 +113,7 @@ class ProgressBar:
         elapsed_seconds = time.monotonic() - self._start_monotonic
         print(
             f"  {self._description}  "
-            f"done — {self._completed} / {self._total}  "
+            f"done: {self._completed} / {self._total}  "
             f"[{elapsed_seconds:.0f}s]",
             flush=True,
         )
@@ -128,10 +135,16 @@ class ProgressBar:
     def _print_status_line(self) -> None:
         elapsed_seconds = time.monotonic() - self._start_monotonic
         percent_complete = 100 * self._completed / max(1, self._total)
+        if self._completed:
+            remaining_seconds = (
+                elapsed_seconds / self._completed * (self._total - self._completed))
+            eta = f"  eta {remaining_seconds / 60:.0f}m"
+        else:
+            eta = ""
         print(
             f"  {self._description}  "
             f"{self._completed} / {self._total}  "
             f"({percent_complete:.0f}%)  "
-            f"[{elapsed_seconds:.0f}s]",
+            f"[{elapsed_seconds:.0f}s]{eta}",
             flush=True,
         )

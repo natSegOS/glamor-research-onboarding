@@ -1,21 +1,18 @@
-"""Tokenization quantities for the primary contribution: the mediation analysis.
+"""Tokenization quantities for the primary contribution: the tokenization-
+fragmentation mediation analysis (design/01 §1.4, design/06 §6.8).
 
-Provenance
-----------
-The primary contribution is a tokenization-fragmentation mediation analysis
-(design/01 §1.4, design/06 §6.8). The motivation is Chai et al. 2024
-("Tokenization Falling Short", arXiv:2406.11687), which shows a CORRELATION
-between subword tokenization and typo brittleness. We move toward a causal
-statement with a fragmentation-matched counterfactual: among keyboard-plausible
-nonword typos of the SAME word at the SAME edit distance, some fragment the word
-into many more subword pieces than others. Comparing model accuracy on
-high-fragmentation versus low-fragmentation typos of the same word, holding
+Chai et al. 2024 ("Tokenization Falling Short", arXiv:2406.11687) shows a
+CORRELATION between subword tokenization and typo brittleness. We move
+toward a causal statement with a fragmentation-matched counterfactual: among
+keyboard-plausible nonword typos of the SAME word at the SAME edit distance,
+some fragment the word into many more subword pieces than others. Comparing
+model accuracy on high- vs low-fragmentation typos of the same word, holding
 meaning, position, and edit count fixed, isolates the tokenization channel.
 
-All token counts are computed with the MODEL'S OWN tokenizer (design/05 §5.8);
-raw counts are never compared across tokenizers, only the within-model pattern.
-A tokenizer here is any object exposing ``.encode(text) -> list``; tests inject
-a deterministic fake.
+All token counts use the MODEL'S OWN tokenizer (design/05 §5.8); raw counts
+are never compared across tokenizers, only the within-model pattern. A
+tokenizer here is any object exposing ``.encode(text) -> list``; tests
+inject a deterministic fake.
 """
 
 from __future__ import annotations
@@ -51,9 +48,8 @@ def count_tokens(tokenizer, text: str) -> int:
 
 
 def token_inflation_ratio(tokenizer, clean_text: str, perturbed_text: str) -> float:
-    """The token-inflation ratio tau = |Tok(perturbed)| / |Tok(clean)|
-    (design/02 §2.5). Values above 1 mean the perturbation made the text
-    tokenize into more pieces."""
+    """tau = |Tok(perturbed)| / |Tok(clean)| (design/02 §2.5). Above 1 means
+    the perturbation made the text tokenize into more pieces."""
     clean_token_count = count_tokens(tokenizer, clean_text)
     if clean_token_count == 0:
         raise ValueError("clean text tokenizes to zero tokens")
@@ -62,13 +58,11 @@ def token_inflation_ratio(tokenizer, clean_text: str, perturbed_text: str) -> fl
 
 def subword_count_change(tokenizer, word: str, perturbed_word: str,
                          include_leading_space: bool = True) -> int:
-    """The change in subword-piece count for a single edited word,
-    delta_subwords = |Tok(perturbed_word)| - |Tok(word)| (design/02 §2.5).
+    """delta_subwords = |Tok(perturbed_word)| - |Tok(word)|.
 
-    A leading space is included by default because byte-pair-encoding tokenizers
-    treat a word differently at the start of a string versus mid-sentence; the
-    edited word almost always appears mid-sentence, so the leading-space form is
-    the representative one.
+    A leading space is included by default because byte-pair-encoding
+    tokenizers treat a word differently at the start of a string versus
+    mid-sentence, and the edited word almost always appears mid-sentence.
     """
     prefix = " " if include_leading_space else ""
     return (count_tokens(tokenizer, prefix + perturbed_word)
@@ -76,8 +70,6 @@ def subword_count_change(tokenizer, word: str, perturbed_word: str,
 
 
 def fragmentation_stratum(subword_change: int) -> FragmentationStratum:
-    """Bucket a subword-count change into Low (<= 0) or High (>= 1) fragmentation
-    (design/02 §2.5)."""
     return FragmentationStratum.HIGH if subword_change >= 1 else FragmentationStratum.LOW
 
 
@@ -107,8 +99,7 @@ def build_fragmentation_matched_pair(
         # common case cheap.
         candidate_count: int = 96,
 ) -> Optional[FragmentationMatchedPair]:
-    """Build the fragmentation-matched counterfactual for one word (design/02
-    §2.5, design/06 §6.8).
+    """Build the fragmentation-matched counterfactual for one word.
 
     Enumerates keyboard-plausible nonword (Regime A) variants of ``word`` at the
     given edit budget, partitions them by fragmentation stratum, and returns one

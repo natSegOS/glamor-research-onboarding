@@ -130,7 +130,7 @@ If compute forces a smaller study, we shrink by removing *conditions* (cells), n
 3. **Keep next:** Module 2 quantization on a single 7–8B model (Qwen2.5-7B) fp16-vs-AWQ.
 4. **Drop first under pressure:** Module 4's policy and location sweeps; `k=8`; the second task; the fp16 arm of the other 7–8B models; the GPTQ sub-study.
 
-The "worst-case free-T4" study is therefore Module 1 full + Module 3 (A/C, k∈{1,4}) + Module 2 (one model) ≈ 30–40k generations, which Document 07 §7.6 shows fits in a few free Colab sessions and **still supports the primary mediation claim and a bounded selectivity claim** at full per-cell power. That is the floor below which we do not go, because below it the primary contribution loses power.
+The "worst-case free-T4" study is therefore Module 1 full + Module 3 (A/C, k∈{1,4}) + Module 2 (one model) ≈ 30–40k generations (see design/07 §7.6 for the free-T4 budget and what it supports). That is the floor below which we do not go: below it the primary contribution loses power.
 
 ## 3.8 The planned figures (so the design serves the paper)
 
@@ -143,5 +143,3 @@ Designing the figures now ensures every cell we run earns its place. The confirm
 - **Fig 5, severity curves:** CCF vs `k` by operation, with the {1,2,4,8} points showing linear-vs-superlinear shape. Serves RQ4/H4.
 - **Fig 6, location/policy heatmap:** CCF by (location × task) and by (policy × task). Serves RQ4.
 - **Fig 7, keyboard vs ASR profile:** side-by-side CCF and Δ for keyboard-neighbor (Regime A) vs ASR-transcription (Regime B) at matched severity bands, across models. The headline "does the same mechanism explain both noise types?" figure.
-
-Every module in §3.2 maps to at least one figure, and every figure maps to a research question. No cell is run that does not feed a planned figure or a pre-registered test.

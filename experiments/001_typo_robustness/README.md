@@ -25,16 +25,24 @@ python3 tools/verify_references.py # bibliography manifest vs actual PDFs
 
 The suite exercises everything except a real model: perturbation contracts, regime construction, request building, sharding and resume, inline scoring, statistics goldens, the GLMM and mediation estimators on simulated data, and the audit tooling. A deterministic dummy engine stands in for the GPU.
 
-## GPU runs (Colab / USC cluster)
+## GPU runs (Colab / local / USC cluster)
 
-Open `colab_driver.ipynb` and run the cells top to bottom: clone and install, HF auth (Llama and Mistral are gated), build items, build dictionary, generate, analyze, download. Every step resumes instead of recomputing (run manifest plus per-row deterministic IDs). CLI equivalent:
+One entrypoint drives the whole pipeline, the same way on Colab and locally:
 
 ```bash
-python3 tools/run_generation.py --config configs/pilot.yaml --model llama_1b \
-    --output-directory results/pilot --dictionary data/wordlists/en_us_pinned.txt
-python3 tools/run_analysis.py --generations results/pilot/pilot_generations.jsonl \
-    --output-directory analysis/pilot --config configs/pilot.yaml
+python3 tools/run_pipeline.py setup   # install deps
+python3 tools/run_pipeline.py all     # data -> generate -> analyze -> report
 ```
+
+Every user-facing setting (which models, which config, where output goes,
+whether to reuse committed data) lives in `configs/run_profile.yaml`. On
+Colab, open `colab_driver.ipynb` instead: it's the same commands in four
+cells (bootstrap, configure, run, download). Every stage resumes instead of
+recomputing (run manifest plus per-row deterministic IDs), and a model
+that's already fully generated is skipped without even being loaded.
+
+Full walkthrough, including per-stage commands, GPU sharding, and
+parallelizing across accounts: **`RUNBOOK.md`**.
 
 Configs:
 
@@ -43,12 +51,6 @@ Configs:
 | `configs/pilot.yaml` | Stage-1 pilot (frozen; 100 items, one model) |
 | `configs/rehearsal.yaml` | Full-run dress rehearsal: every condition and dataset of the main run at small N, intended for the whole model roster |
 | `configs/main.yaml` | Confirmatory run (600 items per cell; refuses to start with unpinned revisions) |
-
-Before committing cluster time, measure throughput:
-
-```bash
-python3 tools/benchmark_throughput.py --config configs/pilot.yaml --model llama_1b --limit 200
-```
 
 ## Pre-registration gates
 

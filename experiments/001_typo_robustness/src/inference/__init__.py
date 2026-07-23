@@ -11,6 +11,7 @@ from inference.roster import (
     ModelSpecification,
     MODEL_ROSTER,
     get_model_specification,
+    list_models,
     resolve_current_revision,
     assert_revisions_pinned,
 )

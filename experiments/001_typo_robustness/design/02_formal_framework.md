@@ -132,8 +132,6 @@ High(w, k) = { w' ∈ E_k(w) : Δsub(w, w') ≥ 1 }
 ```
 The mediation contrast for word `w` at budget `k` compares model accuracy on `Low` vs `High` realizations of the *same word at the same edit count* (Document 06 §6.8). Because `w`, `k`, position, and semantic regime are held fixed and only the fragmentation consequence varies, a difference in accuracy is attributable to fragmentation within this scope.
 
-This construction is what turns a correlational tokenization story into a controlled one.
-
 ## 2.6 The metric definitions
 
 All probabilities are estimated as empirical means over items within a cell, paired by item where indicated.
@@ -211,5 +209,3 @@ Three deliberate limits keep the formal claims defensible:
 - Correctness `g` is binary and deterministic (greedy decoding + exact-match scoring), so every metric is a Bernoulli mean amenable to McNemar and the binomial. We do not invent soft metrics that invite "your metric is arbitrary" critiques.
 - The mediation claim is scoped to the fragmentation-matched counterfactual of §2.5 and is never stated more broadly than that construction supports.
 - The intent projection `π` is operationalized by *human audit* (Document 09), not asserted by the authors, so "your typo changed the meaning" is answered by data rather than by claim.
-
-The formalization is minimal: every symbol here is used downstream.

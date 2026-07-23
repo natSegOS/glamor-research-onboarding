@@ -106,6 +106,12 @@ def get_model_specification(roster_key: str) -> ModelSpecification:
     return MODEL_ROSTER[roster_key]
 
 
+def list_models() -> tuple[ModelSpecification, ...]:
+    """Every roster entry, in registration order: the full "what can I run"
+    listing for a user-facing command (tools/run_pipeline.py list-models)."""
+    return _MODEL_SPECIFICATIONS
+
+
 def resolve_current_revision(huggingface_identifier: str) -> str:
     """Look up the current main-branch commit SHA of a model on the Hub. Use
     this to fill in the PIN_ME placeholders at pre-registration time. Requires

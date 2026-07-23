@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 
 from dataclasses import dataclass, field
@@ -25,8 +26,8 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional, Sequence
 
 from enums import (
-    Decoding, FinishReason, ParseStatus, Precision, INTERACTIONAL_FAILURE_STATUSES,
-    REASONING_FAMILIES)
+    Decoding, FinishReason, ParseStatus, Precision, ShardType,
+    INTERACTIONAL_FAILURE_STATUSES, REASONING_FAMILIES)
 from inference.engines import StreamedGeneration
 from tasks.reasoning import REASONING_CHAT_EXEMPLAR_TURNS
 import scoring
@@ -39,6 +40,13 @@ SCHEMA_VERSION = "1.1"
 
 _ROW_ID_HASH_HEX_LENGTH = 24
 _MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
+
+# flush() only reaches the Drive FUSE cache on Colab; the cloud copy is
+# uploaded lazily (often not until close), so a hard VM reclaim could lose
+# every cached row. fsync forces the upload, bounding that loss to this many
+# seconds of generation. Kept coarse because fsync on DriveFS blocks on the
+# network.
+_FSYNC_INTERVAL_SECONDS = 60.0
 _MANIFEST_SHARD_STATISTICS_KEY = "shard_statistics"
 _MANIFEST_GENERATION_PARAMETERS_KEY = "generation_parameters"
 
@@ -56,7 +64,7 @@ def deterministic_row_id(
         is_clean: bool,
 ) -> str:
     """A stable 24-hex-character row ID, the SHA-256 hash of everything that
-    defines a unique generation (design/07 §7.7).
+    defines a unique generation.
 
     Two rows share an ID if and only if they would produce the identical
     generation, which is exactly when the second should be skipped.
@@ -150,17 +158,17 @@ class ShardManifest:
     """A per-run record of which shards have completed, plus each completed
     shard's throughput statistics.
 
-    A resumed run loads this file and skips every shard already listed,
-    so progress is never lost across session restarts (design/07 §7.7).
-    The statistics (wall seconds, output tokens, tokens/sec) are what the
-    main-study compute budget is sized from (design/07 §7.5). The per-row
-    request_wall_seconds includes scheduler queue time and must not be summed.
+    A resumed run loads this file and skips every shard already listed, so
+    progress is never lost across session restarts. The statistics (wall
+    seconds, output tokens, tokens/sec) are what the main-study compute
+    budget is sized from (design/07 §7.5); per-row request_wall_seconds
+    includes scheduler queue time and must not be summed.
 
-    ``generation_parameters``, when given, is recorded in the manifest and
-    checked on resume: a row's deterministic row_id does not encode the token
-    budgets, so resuming an output directory after a budget change would
-    silently skip every existing row and leave a file that mixes budgets.
-    A mismatch raises instead; a changed budget requires a fresh directory.
+    ``generation_parameters``, when given, is recorded and checked on
+    resume: row_id doesn't encode the token budgets, so resuming after a
+    budget change would silently skip every existing row and mix budgets in
+    one file. A mismatch raises instead; a changed budget needs a fresh
+    directory.
     """
 
     def __init__(
@@ -217,6 +225,52 @@ class ShardManifest:
             manifest_data[_MANIFEST_GENERATION_PARAMETERS_KEY] = (
                 self.generation_parameters)
         self.manifest_path.write_text(json.dumps(manifest_data, indent=1))
+
+
+def run_is_complete(
+        output_directory: Path,
+        configuration: object,
+        shard_partition: Optional[tuple[int, int]] = None,
+) -> bool:
+    """True iff this run's manifest already records every shard complete, so
+    the caller can skip loading a model entirely (tools/run_generation.py's
+    --skip-if-complete): reads only the manifest file, never the tokenizer,
+    engine, or requests.
+
+    ``configuration`` needs only ``run_id``, ``max_new_tokens_reasoning``, and
+    ``max_new_tokens_multiple_choice`` (an ExperimentConfiguration, or
+    anything duck-typed the same way; not imported by name to avoid a
+    circular import with pipeline.experiment).
+
+    Checks both fixed shard types (ShardType.REASONING,
+    ShardType.MULTIPLE_CHOICE) that run_experiment's shard_schedule always
+    produces for this study's datasets (every config mixes reasoning and MCQ
+    families). A shard type that ends up with zero requests is never marked
+    complete by run_shard (its early-return only fires once a shard has run
+    at least once), so a config that genuinely omits one shard type reports
+    incomplete rather than risking a silent skip of unwritten rows.
+
+    Raises ValueError, same as a real run would, if the manifest's recorded
+    token budgets no longer match ``configuration`` (a fresh output directory
+    is required after a budget change; see ShardManifest).
+    """
+
+    output_directory = Path(output_directory)
+    worker_index, worker_count = shard_partition if shard_partition else (0, 1)
+    worker_suffix = f"_w{worker_index}of{worker_count}" if shard_partition else ""
+    run_id = configuration.run_id  # type: ignore[attr-defined]
+    manifest_path = output_directory / f"{run_id}{worker_suffix}_manifest.json"
+    if not manifest_path.exists():
+        return False
+
+    manifest = ShardManifest(manifest_path, generation_parameters={
+        "max_new_tokens_reasoning": configuration.max_new_tokens_reasoning,  # type: ignore[attr-defined]
+        "max_new_tokens_multiple_choice":
+            configuration.max_new_tokens_multiple_choice,  # type: ignore[attr-defined]
+    })
+    return all(
+        manifest.is_shard_complete(f"{run_id}{worker_suffix}_{shard_type}")
+        for shard_type in (ShardType.REASONING, ShardType.MULTIPLE_CHOICE))
 
 
 def _existing_row_ids(output_path: Path) -> set[str]:
@@ -289,7 +343,7 @@ def run_shard(
     Every request already on disk (by ``row_id``) is skipped before
     generation even starts, so re-running this function (after a crash, or
     as one of several parallel workers each handed a partition of the same
-    request list, design/07 §7.7) never regenerates or duplicates a row.
+    request list) never regenerates or duplicates a row.
 
     Rows are written and flushed to ``output_path`` as soon as each individual
     request finishes decoding (``engine.generate_streaming``), not after a
@@ -348,6 +402,7 @@ def run_shard(
     new_rows_written = 0
     total_output_tokens = 0
     shard_start_time = time.perf_counter()
+    last_fsync_monotonic = time.monotonic()
 
     with output_path.open("a") as output_file:
         for generation in engine.generate_streaming(  # type: ignore[union-attr]
@@ -425,6 +480,9 @@ def run_shard(
             row["extraction_tier"] = score_result.extraction_tier
             output_file.write(json.dumps(row) + "\n")
             output_file.flush()
+            if time.monotonic() - last_fsync_monotonic >= _FSYNC_INTERVAL_SECONDS:
+                os.fsync(output_file.fileno())
+                last_fsync_monotonic = time.monotonic()
             new_rows_written += 1
 
             if progress_callback is not None:

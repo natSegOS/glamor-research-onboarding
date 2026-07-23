@@ -341,14 +341,14 @@ def main() -> None:
             DatasetConfig(key=dataset.key, item_count=args.items, path=dataset.path)
             for dataset in datasets_with_files_on_disk
         ]
-        print("dataset mode:      REAL items — "
+        print("dataset mode:      REAL items, "
               + ", ".join(dataset.path for dataset in datasets_with_files_on_disk))
     else:
         configuration.datasets = [
             DatasetConfig(key="gsm_symbolic_synthetic", item_count=args.items),
             DatasetConfig(key="mcq_demo"),
         ]
-        print("dataset mode:      SYNTHETIC fallback — no configured dataset "
+        print("dataset mode:      SYNTHETIC fallback, no configured dataset "
               "path exists on disk")
 
     print("loading word list ...")
@@ -379,7 +379,7 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(output_html, encoding="utf-8")
     print(f"\ndone → {args.output}  ({args.output.stat().st_size // 1024} KB)")
-    print("open in any browser — no server required")
+    print("open in any browser, no server required")
 
 
 if __name__ == "__main__":

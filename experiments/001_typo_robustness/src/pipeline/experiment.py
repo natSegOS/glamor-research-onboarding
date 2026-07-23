@@ -2,21 +2,17 @@
 attach tokenization metrics, run the models, and write generation rows.
 
 A single YAML file fully specifies a run (design/08 §8.2), which is what makes
-the pilot and main study differ only by configuration. The orchestrator is
-deliberately engine-agnostic: it accepts any built engine (or the
-DeterministicDummyEngine), so the full pipeline is testable without a GPU.
+the pilot and main study differ only by configuration. Engine-agnostic by
+design: accepts any built engine (or the DeterministicDummyEngine), so the
+full pipeline is testable without a GPU.
 
-Key guarantees
---------------
-- Tokenization metrics are logged on every perturbed row: token_inflation_ratio,
-  subword_count_change, and fragmentation_stratum, computed with the model's own
-  tokenizer. These are the inputs to the primary mediation analysis.
-- key_terms are passed to the perturbation engine, so informative_word and
-  answer_critical policies target the correct words.
-- scope is a configurable dimension passed through to the engine via
-  scope_spans, not hardcoded.
-- Confirmatory runs assert every model revision is pinned before generating
-  (design/10 §10.5).
+Guarantees: tokenization metrics (token_inflation_ratio, subword_count_change,
+fragmentation_stratum) are logged on every perturbed row, computed with the
+model's own tokenizer, feeding the primary mediation analysis. key_terms are
+passed to the perturbation engine so informative_word and answer_critical
+policies target the correct words. scope is a configurable dimension passed
+through via scope_spans, not hardcoded. Confirmatory runs assert every model
+revision is pinned before generating (design/10 §10.5).
 """
 
 from __future__ import annotations
@@ -32,12 +28,10 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 import yaml
-# loky (not concurrent.futures.ProcessPoolExecutor): it pickles worker
-# arguments with cloudpickle instead of stdlib pickle, which is required
-# here: real reasoning items carry a `ReasoningTemplate.answer_function`
-# built as a closure over a parsed answer expression
-# (tasks/reasoning.py::_make_answer_function), and stdlib pickle cannot
-# serialize a closure across a process boundary at all.
+# loky (not concurrent.futures.ProcessPoolExecutor): pickles worker arguments
+# with cloudpickle, not stdlib pickle. Required because reasoning items carry
+# a `ReasoningTemplate.answer_function` closure (tasks/reasoning.py::
+# _make_answer_function) that stdlib pickle cannot serialize across processes.
 from loky import ProcessPoolExecutor
 
 from enums import (
@@ -70,22 +64,14 @@ import tokenization
 
 @dataclass
 class DatasetConfig:
-    """One entry in the config's ``datasets:`` list.
+    """One entry in the config's ``datasets:`` list. Specifying datasets by
+    key drives registry-based loading (preferred for new configs); a plain
+    string key uses registry defaults for item_count and sources.
 
-    Specifying datasets by key drives registry-based loading (preferred for
-    new configs).  A plain string key uses registry defaults for item_count
-    and sources.
-
-    Attributes
-    ----------
-    key:
-        Registry key. Must be present in ``tasks.DATASET_REGISTRY``.
-    item_count:
-        Override the registry's ``default_n``; falls back to that default
-        if not supplied.
-    path:
-        Required for ``*_jsonl`` keys; the JSONL file produced by
-        ``tools/build_task_items.py``.
+    ``key`` must be present in ``tasks.DATASET_REGISTRY``. ``item_count``
+    overrides the registry's ``default_n`` if supplied. ``path`` is required
+    for ``*_jsonl`` keys: the JSONL file produced by
+    ``tools/build_task_items.py``.
     """
     key: str
     item_count: Optional[int] = None
@@ -202,7 +188,7 @@ class ExclusionSidecar:
     """Append-only log of items excluded from the generation queue.
 
     Each record carries enough context to reconstruct why an item was dropped,
-    with the same level of provenance as a generated row (design/08 §8.4).
+    with the same level of provenance as a generated row.
     Records are written immediately on append so a killed job does not lose
     them. Only the parent process ever constructs one of these or calls
     ``write_all``. See ``build_exclusion_record``.
@@ -671,8 +657,8 @@ def _construct_regime_c(task_item, item_seed):
       - MCQ items:       option-label permutation with gold tracked by content.
       - Reasoning items: operand swap with template-derived gold recomputation.
         Requires a populated ReasoningTemplate (``item.supports_regime_c_operand_swap``).
-        Items without a template raise PerturbationError → logged to the exclusion
-        sidecar → excluded from primary analysis (never a silent no-op).
+        Items without a template raise PerturbationError, logged to the exclusion
+        sidecar and excluded from primary analysis (never a silent no-op).
     """
     if hasattr(task_item, "options"):
         return regimes.make_regime_c_mcq_option_permutation(task_item, item_seed)
@@ -682,7 +668,7 @@ def _construct_regime_c(task_item, item_seed):
     # construction, not by accident. Checked explicitly, ahead of the generic
     # template-capability check below, so this expected, 100%-of-GSM8K
     # exclusion is distinguishable in the sidecar from a GSM-Symbolic item
-    # that unexpectedly failed template parsing (design/04 §4.7).
+    # that unexpectedly failed template parsing.
     if task_item.task_family == TaskFamily.GSM8K:
         raise PerturbationError(
             f"GSM8K is out of scope for Regime C operand-swap by design "
@@ -857,20 +843,18 @@ def run_experiment(
 
     ``shard_partition``, when given, is ``(worker_index, worker_count)``: this
     call handles only the subset of requests whose deterministic row_id hashes
-    into ``worker_index`` of ``worker_count`` buckets (design/07 §7.7: "two
-    GPUs can take different shards ... with no coordination beyond the shared
-    output store"). Every worker still runs ``build_requests`` over the full
-    item set. Partitioning happens only after, since perturbation
-    construction is what determines each request's row_id in the first place.
-    This trades some redundant CPU-only construction work (cheap and
-    parallelizable on its own) for zero cross-process coordination: each
-    worker writes to its own ``..._w{worker_index}of{worker_count}_*`` files,
-    so no two workers ever touch the same manifest or output path, and
-    concurrent runs need nothing beyond starting them. Only worker 0 writes
+    into ``worker_index`` of ``worker_count`` buckets, so two GPUs can take
+    different shards with no coordination beyond the shared output store.
+    Every worker still runs ``build_requests`` over the full item set;
+    partitioning happens only after, since perturbation construction is what
+    determines each request's row_id. This trades some redundant CPU-only
+    construction work for zero cross-process coordination: each worker
+    writes to its own ``..._w{worker_index}of{worker_count}_*`` files, so no
+    two workers touch the same manifest or output path. Only worker 0 writes
     the exclusion sidecar, since every worker discovers the identical
-    (partition-independent) set of excluded items. Merge worker outputs for
-    analysis with ``load_generation_rows`` (it already accepts a list of
-    paths) or a glob over ``{run_id}_w*_generations.jsonl``.
+    (partition-independent) set of excluded items. Merge worker outputs with
+    ``load_generation_rows`` (accepts a list of paths) or a glob over
+    ``{run_id}_w*_generations.jsonl``.
     """
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)

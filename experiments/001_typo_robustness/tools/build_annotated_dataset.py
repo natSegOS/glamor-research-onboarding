@@ -1,19 +1,19 @@
 """Data-preparation Stage 0: annotate task items with formally-defined key terms.
 
-This tool reads the pinned JSONL files produced by tools/build_task_items.py,
-applies the formal K_P(x) key-term rule (design/02 §2.x) using a pinned spaCy
+Reads the pinned JSONL files produced by tools/build_task_items.py, applies
+the formal K_P(x) key-term rule (design/02 §2.x) using a pinned spaCy
 linguistic pipeline, and writes the annotated records back to the same files
 (or to separate output files if --output-dir is given).
 
-The annotated ``key_terms`` field replaces the old runtime heuristic that
-previously computed key terms inside the generation runner.  After running this
-tool, the experiment is a pure consumer of frozen annotations: no key-term
-computation happens at runtime (design/04 §4.6).
+Prior to this module, key-term computation was a runtime heuristic with no
+formal definition and no published accuracy record; the annotated
+``key_terms`` field replaces it, so after running this tool the experiment
+is a pure consumer of frozen annotations, with no key-term computation at
+runtime (design/04 §4.6).
 
-A provenance record is written to data/items/annotation_PROVENANCE.json,
-recording the exact spaCy model name, its meta.json SHA-256, the rule version,
-and per-file statistics.  This record is committed alongside the JSONL files so
-that a reviewer can verify the annotation is reproducible.
+A provenance record is written to data/items/annotation_PROVENANCE.json:
+the exact spaCy model name, its meta.json SHA-256, the rule version, and
+per-file statistics, so a reviewer can verify the annotation is reproducible.
 
 Usage
 -----
@@ -34,13 +34,13 @@ Pass --dry-run to preview annotation statistics without writing files.
 
 Dependency note
 ---------------
-This tool requires spaCy and a downloaded English model.  Install with:
+Requires spaCy and a downloaded English model:
     pip install spacy
     python -m spacy download en_core_web_sm    # or en_core_web_md / en_core_web_trf
 
-These are BUILD-TOOL dependencies only and are listed in requirements-build.txt,
-not in requirements.txt, so the experiment and analysis layers remain installable
-without spaCy on the GPU cluster nodes (where only requirements.txt is needed).
+Build-tool dependencies only (requirements-build.txt, not requirements.txt),
+so the experiment and analysis layers stay installable without spaCy on the
+GPU cluster nodes.
 """
 
 from __future__ import annotations
@@ -175,7 +175,7 @@ def main(argv=None) -> int:
 
     print(f"  Model loaded.  Processing {len(jsonl_paths)} JSONL file(s) in {items_directory}/")
     if arguments.dry_run:
-        print("  DRY RUN — no files will be written.")
+        print("  DRY RUN: no files will be written.")
 
     result_summaries: list[dict] = []
     total_violations = 0

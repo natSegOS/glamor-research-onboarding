@@ -76,5 +76,3 @@ Humans are the final arbiter on every regime label and on the primary endpoint. 
 - The number of items excluded from the primary endpoint by the audit, and a breakdown of why.
 - The guideline and worked examples (in an appendix), so the audit is reproducible by others.
 - Confirmation that the primary endpoint contains only audited intent-preserving items.
-
-Reporting all of this turns the audit from an invisible assumption into a visible, quantified, reproducible part of the method, which is precisely what makes the "your typos changed the meaning" objection answerable with a number instead of a rebuttal.

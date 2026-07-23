@@ -1,50 +1,27 @@
-"""Semantic-regime construction: turning a clean item into a perturbed one whose
-relationship to the intended meaning is known and controlled.
+"""Semantic-regime construction: turn a clean item into a perturbed one whose
+relationship to the intended meaning is known and controlled. Separates typo
+effects from meaning changes, so a "typo" is never silently changing the
+question (design/01 §1.4, design/02 §2.4, design/04 §4.7).
 
-Provenance
-----------
-The three-regime separation is the framing contribution (design/01 §1.4,
-design/02 §2.4). It exists to prevent the most common critique of typo-
-robustness work (that the "typo" silently changed the question) by separating:
+    Regime A  intent-preserving nonword typo. Edit creates an invalid word;
+              intent preserved. "France" -> "Frnace". Answer should be unchanged.
+    Regime B  context-recoverable real-word shift. Edit creates a different
+              VALID word; context still recovers intent. "France" -> "Finance".
+              Candidate pool spans an orthographic DL band and phonetic
+              homophones, reflecting ASR acoustic confusion as the dominant
+              real-word-shift error type (see make_regime_b_real_word_shift).
+    Regime C  meaning-changing control. Edit changes the intended question, so
+              gold changes too: reasoning swaps a numeric operand and
+              recomputes gold from the template; MCQ permutes option labels so
+              the correct answer maps to a different letter. Tests for
+              over-invariance. Restricted to edits where the new gold is
+              computationally deterministic; arbitrary meaning changes (e.g.
+              swapping named entities) are excluded since the new gold can't
+              be verified without semantic understanding.
 
-    Regime A  intent-preserving nonword typo
-              The edit creates an invalid word; intent is preserved.
-              Example: "France" -> "Frnace". Desired behavior: answer unchanged.
-
-    Regime B  context-recoverable real-word shift
-              The edit creates a different VALID word, but context still recovers
-              the intent. Example: "France" -> "Finance". Motivated by ASR
-              acoustic confusion (the dominant real-world real-word-shift error
-              type), so the candidate pool includes phonetic homophones
-              ("weather"/"whether") alongside the orthographic DL band. See
-              make_regime_b_real_word_shift below.
-
-    Regime C  meaning-changing control
-              The edit changes the intended question, so the gold answer changes
-              too. For reasoning items we swap a numeric operand and RECOMPUTE
-              the gold from the template; for MCQ we permute the option labels
-              deterministically so the correct answer maps to a different letter.
-              This tests for over-invariance (clinging to the old answer when the
-              meaning changed). design/02 §2.4, design/04 §4.7.
-
-Regime C scope limitation
--------------------------
-Regime C is restricted to perturbations where the new gold answer is
-computationally deterministic:
-  - Reasoning: operand swap (synthetic-only, template-derived gold recomputation).
-  - MCQ: option permutation (all items, no annotation required; gold tracked by
-    content, not label).
-
-Arbitrary meaning-changing perturbations (e.g., swapping named entities in
-free-text questions) are excluded because the new gold cannot be verified
-without semantic understanding. This is a scope limitation, documented in
-design/04 §4.7.
-
-Determinism
------------
-Every builder uses rejection sampling over *derived* seeds, so the same
-(item, base_seed) always yields the same output even though it may try several
-candidate edits internally. The engine's determinism guarantee is preserved.
+Every builder rejection-samples over derived seeds, so (item, base_seed)
+deterministically yields the same output despite trying several candidate
+edits internally.
 """
 
 from __future__ import annotations
@@ -96,14 +73,12 @@ PUNCTUATION_TO_STRIP = ".,;:!?()'\""
 @dataclass(frozen=True)
 class WordSetPredicate:
     """A picklable, hashable ``is_word(token) -> bool`` predicate over a fixed
-    vocabulary.
-
-    A plain closure (the prior implementation) can't cross into a worker
-    process via ``pickle`` (only module-level callables can), which is what
-    makes ``build_requests`` (``pipeline/experiment.py``) parallelizable
-    across a ``ProcessPoolExecutor``. Frozen + a ``frozenset`` field also
-    keeps it hashable, which every ``lru_cache``-decorated function in
-    ``perturbation.engine`` that takes ``is_word`` as an argument relies on.
+    vocabulary. A plain closure can't cross into a worker process via
+    ``pickle`` (only module-level callables can), which is what lets
+    ``build_requests`` (``pipeline/experiment.py``) parallelize across a
+    ``ProcessPoolExecutor``. Frozen + ``frozenset`` also keeps it hashable,
+    which every ``lru_cache``-decorated function in ``perturbation.engine``
+    that takes ``is_word`` relies on.
     """
     vocabulary: frozenset[str]
 
@@ -118,7 +93,7 @@ def make_is_word(words: Optional[set[str]] = None) -> Callable[[str], bool]:
     bundled demo wordlist, which is for pipeline smoke tests only. For the real
     study, build the predicate from a pinned full dictionary (for example
     hunspell en_US, or the `wordfreq` vocabulary) so that "is this a real word?"
-    is decided by a real lexicon (design/04 §4.7).
+    is decided by a real lexicon.
     """
     vocabulary = words if words is not None else load_wordlist()
     return WordSetPredicate(frozenset(vocabulary))
@@ -210,12 +185,9 @@ def make_regime_a_filler_insertion(
     {"uh", "um", "like", "so"}) at eligible inter-word positions.
 
     Intent-preservation is definitional (particles carry no propositional
-    content), so no rejection sampling or is_word check is needed.  The
-    nonword test is explicitly bypassed: filler tokens ARE valid English words
-    but are treated as Regime A because they cannot change the question's meaning
-    by construction.
-
-    Returns (perturbed_text, edits, metadata).
+    content), so no rejection sampling or is_word check is needed. The
+    nonword test is bypassed: filler tokens ARE valid English words but count
+    as Regime A because they cannot change the question's meaning.
     """
     attempt_seed = derived_seed(seed, SemanticClass.A, "filler", 0)
     perturbed_text, edits = perturb(
@@ -319,8 +291,7 @@ def make_regime_c_reasoning_operand_swap(
 ) -> tuple[str, list[Edit], dict]:
     """Swap one numeric operand in a templated reasoning item and RECOMPUTE the
     gold answer from the template's own answer function, so the new gold is
-    known exactly (design/04 §4.7). ``reasoning_item`` is a
-    tasks.reasoning.ReasoningItem.
+    known exactly. ``reasoning_item`` is a tasks.reasoning.ReasoningItem.
 
     Only an operand whose digit string appears exactly once in the text is
     swapped, so the textual replacement is guaranteed to hit the intended
@@ -420,7 +391,7 @@ def make_regime_c_mcq_option_permutation(
     relies on option position rather than content will fail this control.
 
     Only permutations that move the gold content to a different label are
-    accepted, so the gold letter is guaranteed to change (design/04 §4.7).
+    accepted, so the gold letter is guaranteed to change.
 
     ``mcq_item`` is a tasks.multiple_choice.MultipleChoiceItem. It must have
     at least two options; single-option items raise PerturbationError.

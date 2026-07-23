@@ -1,6 +1,6 @@
 # 01: Scientific Framing, Novelty, and Hypotheses
 
-**Read this first.** This document states what the study does, what is novel versus already known, and the research questions and hypotheses the rest of the design serves. A reviewer who rejects the paper will most likely do so on the grounds covered here, so the claims below are deliberately conservative.
+This document states what the study does, what is novel versus already known, and the research questions and hypotheses the rest of the design serves. A reviewer who rejects the paper will most likely do so on the grounds covered here, so the claims below are deliberately conservative.
 
 ---
 
@@ -27,7 +27,7 @@ We keep the selective-invariance vocabulary because it organizes the experiment 
 
 > ASR transcription introduces systematic noise into voice-LLM pipelines. We provide the first matched-pair, statistically disciplined decomposition of noise-induced accuracy loss into a tokenization-fragmentation channel and a residual channel (using both controlled keyboard-adjacency typos and realistic ASR-transcription errors) and the first controlled test of whether 4-bit quantization changes robustness to transcription noise on reasoning tasks. A three-regime design separates intent-preserving noise from meaning-changing edits throughout, so robustness is never confused with altered task definition.
 
-Everything defensible in this study lives in three words: **matched-pair, mechanism, controlled.**
+The three words that carry the defense: **matched-pair, mechanism, controlled.**
 
 ## 1.4 The three contributions, ranked
 
@@ -45,7 +45,7 @@ We lead with the contribution that is both genuinely open and hard to refute, an
 **Claim:** "Holding clean accuracy and the perturbation fixed, 4-bit AWQ quantization changes typo robustness by [measured amount], in [direction]."
 
 - **Why it is open.** The only adjacent result is Fang et al. (2025, arXiv:2506.22776, "Smaller = Weaker?"), which found quantized code-generation models *more* adversarially robust in 51.6% of cases versus 42.9%, a surprising direction. Whether that generalizes to nonword typos on math/MCQ reasoning is unknown. The lab already cares about quantized 7–8B models (repo issue 02), so this contribution reuses the `quant_bits` plumbing already in `experiments/000_trajectory_divergence/model.py`.
-- **How we make it non-refutable.** We hold the quantization *method* constant (AWQ) within the main sweep, and run a dedicated sub-study (Document 05 §5.5) comparing fp16 vs AWQ vs GPTQ on a fixed model subset, so any interaction is not an artifact of one quantization recipe. We always condition on clean accuracy, because a quantized model that is simply worse overall is not the same as one that is *less typo-robust*.
+- **How we make it non-refutable.** We hold the quantization *method* constant (AWQ) within the main sweep, and run a dedicated sub-study (Document 05 §5.5) comparing fp16 vs AWQ vs GPTQ on a fixed model subset, so any interaction is not an artifact of one quantization recipe. We always condition on clean accuracy (see design/05 §5.5 for why).
 
 ### Contribution 3 (framing / hygiene): Three-regime selective-invariance audit with paired statistics
 

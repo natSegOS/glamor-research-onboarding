@@ -1,32 +1,29 @@
 """Run the cross-family LLM-as-judge on a perturbation-pairs file.
 
-This is Step 2 of the pre-generation validity pipeline (Workstream 8,
-design/09 §9.2).  It reads the ``{run_id}_pairs.jsonl`` file written by
-``tools/build_perturbations.py``, calls the cross-family judge (Gemma 2 9B-IT,
-temperature=0, cached) on each pair, and writes a summary JSONL.
+Step 2 of the pre-generation validity pipeline (Workstream 8, design/09
+§9.2). Reads the ``{run_id}_pairs.jsonl`` file written by
+``tools/build_perturbations.py``, calls the cross-family judge (Gemma 2
+9B-IT, temperature=0, cached) on each pair, and writes a summary JSONL.
 
 Design constraints:
-  - **Cross-family judge**: Gemma 2 (Google) judging Llama/Qwen/Mistral outputs.
-    Cross-family selection reduces correlation between generator tendencies and
-    judge tendencies (see judge.py module docstring).
-  - **Temperature 0**: all judge calls use greedy decoding.  Same (judge_revision,
-    prompt_version, input) → same output, always.
-  - **Content-addressed cache**: already-decided pairs are served from cache without
-    calling the judge again, so partial runs and reruns are cheap.
-  - **Agree/disagree flag**: if the judge classifies a pair as a different regime
-    from the claimed regime (e.g. "C" when the engine claimed "A"), the pair is
-    flagged and written to ``--output-flagged`` with its ``task_id`` attached.
-  - **Fleiss' κ calibration**: the judge's agreement with human annotations is
-    reported as a calibration statistic only; the judge is NEVER the final authority.
+  - Cross-family judge: Gemma 2 (Google) judging Llama/Qwen/Mistral output,
+    reducing correlation between generator and judge tendencies (see judge.py).
+  - Temperature 0: greedy decoding, so (judge_revision, prompt_version, input)
+    always maps to the same output.
+  - Content-addressed cache: already-decided pairs are served from cache, so
+    partial runs and reruns are cheap.
+  - Agree/disagree flag: if the judge's regime classification differs from the
+    claimed regime (e.g. "C" when the engine claimed "A"), the pair is flagged
+    and written to ``--output-flagged`` with its ``task_id`` attached.
+  - Fleiss' κ calibration: judge agreement with human annotations is reported
+    as a calibration statistic only. The judge is never the final authority.
 
-What happens to flagged pairs (the analysis-time exclusion path):
-    Flagged pairs are NOT removed from the generation queue: removing them
-    there would change deterministic row IDs and break resume semantics, and
-    it would let an LLM judge silently veto items, which design/09 §9.7
-    forbids. Instead, flagged pairs are routed to the human audit with
-    priority (tools/sample_for_audit.py); items the HUMAN audit fails are
-    excluded from the primary endpoint at analysis time via the
-    ``audit_outcomes`` gate of ``analysis.results.summarize_all_cells``.
+Flagged pairs are not removed from the generation queue: that would change
+deterministic row IDs, break resume semantics, and let an LLM judge silently
+veto items (design/09 §9.7 forbids this). Instead they're routed to the human
+audit with priority (tools/sample_for_audit.py); items the human audit fails
+are excluded at analysis time via the ``audit_outcomes`` gate in
+``analysis.results.summarize_all_cells``.
 
 Usage:
 
@@ -76,7 +73,7 @@ def parse_arguments() -> argparse.Namespace:
                         default=Path("data/perturbations/flagged.jsonl"),
                         help="JSONL of pairs flagged by the judge (regime disagreement or "
                              "parse_failed), with task_id attached; routed to the human "
-                             "audit — exclusion happens at analysis time, never here")
+                             "audit (exclusion happens at analysis time, never here)")
     parser.add_argument("--sample", type=int, default=None,
                         help="only judge this many pairs (for quick pilot screening)")
     parser.add_argument("--dry-run", action="store_true",

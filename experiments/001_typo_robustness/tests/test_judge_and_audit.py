@@ -1,13 +1,12 @@
 """LLM-judge and human-audit contracts (src/judge.py, src/analysis/audit.py).
 
 Consolidates tests/test_human_audit.py's strongest invariants with the judge
-contracts that tools/sample_for_audit.py depends on, one test per failure
-class: response parsing, cache round-trips, the Stage-2-critical 1:1 row
-alignment of run_judge_on_sample, perturbed-text schema tolerance, Fleiss'
-kappa goldens, audit resolution/exclusion, and stratified sampling.
-Also resurrects the dead (never-collected) test
-`test_confirmed_items_are_kept_only_excluded_ones_drop` from
-tests/test_analysis_results.py, which was nested after a return statement.
+contracts that tools/sample_for_audit.py depends on: response parsing, cache
+round-trips, the Stage-2-critical 1:1 row alignment of run_judge_on_sample,
+perturbed-text schema tolerance, Fleiss' kappa goldens, audit
+resolution/exclusion, and stratified sampling. Also resurrects
+`test_confirmed_items_are_kept_only_excluded_ones_drop`, dead until now
+because it was nested after a return statement.
 """
 
 from __future__ import annotations
@@ -136,7 +135,7 @@ class TestJudgeResponseParsing:
             edited_word_before="cat", edited_word_after="cot", cache=cache)
 
         assert decision.parse_failed is False
-        assert decision.classification == JudgeClassification.B  # first block, regex contract
+        assert decision.classification == JudgeClassification.B
         assert decision.raw_response == ADVERSARIAL_JUDGE_RESPONSE
 
 
@@ -161,7 +160,7 @@ class TestJudgeDecisionCache:
                                 cache=judge.JudgeDecisionCache(cache_path),
                                 **self.JUDGE_ONE_INPUTS)
         second = judge.judge_one(engine=engine, judge_revision=JUDGE_REVISION,
-                                 cache=judge.JudgeDecisionCache(cache_path),  # fresh load from disk
+                                 cache=judge.JudgeDecisionCache(cache_path),
                                  **self.JUDGE_ONE_INPUTS)
 
         assert engine.generate_call_count == 1
@@ -214,7 +213,7 @@ REGIME_C_MCQ_ROW_INDEX = 2
 ALIGNMENT_SAMPLE_ROWS = [
     _generation_row(0, SemanticClass.A, FREEFORM_TASK_FAMILY),
     _generation_row(1, SemanticClass.B, FREEFORM_TASK_FAMILY),
-    _generation_row(2, SemanticClass.C, MCQ_TASK_FAMILY),        # the only skipped row
+    _generation_row(2, SemanticClass.C, MCQ_TASK_FAMILY),
     _generation_row(3, SemanticClass.A, FREEFORM_TASK_FAMILY),
     _generation_row(4, SemanticClass.C, FREEFORM_TASK_FAMILY),   # Regime C but NOT MCQ: judged
 ]
@@ -244,7 +243,7 @@ class TestRunJudgeOnSampleAlignment:
                 JUDGE_REVISION, f"clean content {index}", f"perturbed content {index}",
                 f"before{index}", f"after{index}")
             assert decisions[index].cache_key == expected_key
-        assert len(progress_events) == len(ALIGNMENT_SAMPLE_ROWS)  # skips advance progress too
+        assert len(progress_events) == len(ALIGNMENT_SAMPLE_ROWS)
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +391,7 @@ class TestAuditResolution:
             pairs, resamples=BOOTSTRAP_RESAMPLES_FOR_TEST, audit_outcomes=audit_outcomes)[0]
 
         assert summary["n_audit_excluded"] == 1
-        assert summary["n"] == 3  # t1 (confirmed) and the unaudited t2, t3 are kept
+        assert summary["n"] == 3
 
     def test_report_gate_requires_both_intent_and_gold_kappas(self):
         """Breaking this means the audit can pass on intent agreement alone

@@ -1,19 +1,14 @@
-"""The pre-registered statistical machinery.
-
-Provenance
-----------
-Every choice here is justified in design/06 and backed by a reference (see
-docs/PROVENANCE.md §6):
+"""The pre-registered statistical machinery. Every choice is justified in
+design/06 and backed by a reference (docs/PROVENANCE.md §6):
 
   - Paired 2x2 table and McNemar's test (mid-p exact when discordant pairs are
     few, asymptotic chi-square otherwise) for per-cell paired binary comparison.
   - The Connor (1987) McNemar sample-size formula and its planning approximation.
   - BCa item-paired bootstrap confidence intervals at B = 10,000 resamples
-    (Bestgen 2022; the 10,000-resample convention in NLP evaluation).
+    (Bestgen 2022; the 10,000-resample convention in NLP evaluation). 10,000
+    is a registered quantity, matching the pre-registration exactly, not
+    approximated.
   - Every paired metric defined in design/02 §2.6.
-
-The number of bootstrap resamples is 10,000 exactly, matching the design and the
-pre-registration; this is a registered quantity, so it is not approximated.
 """
 
 from __future__ import annotations
@@ -80,7 +75,7 @@ def build_paired_table(clean_correctness: Sequence[int],
 
 
 # ---------------------------------------------------------------------------
-# McNemar's test (design/06 §6.4).
+# McNemar's test.
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -99,8 +94,7 @@ def mcnemar_test(broke: int, recovered: int,
 
     Uses the mid-p exact binomial test when the number of discordant pairs is
     below ``exact_threshold`` and the asymptotic chi-square otherwise. The rule
-    is fixed in advance and never chosen after seeing the p-value (design/06
-    §6.4).
+    is fixed in advance and never chosen after seeing the p-value.
     """
     discordant_count = broke + recovered
 
@@ -211,7 +205,7 @@ def holm_adjusted_p_values(p_values: Sequence) -> list:
 
 
 # ---------------------------------------------------------------------------
-# BCa item-paired bootstrap confidence intervals (design/06 §6.5).
+# BCa item-paired bootstrap confidence intervals.
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -249,8 +243,8 @@ def bootstrap_confidence_interval_paired(
         confidence: float = 0.95,
         seed: int = 1729) -> ConfidenceInterval:
     """A BCa bootstrap confidence interval for a paired statistic. Items are
-    resampled WITH their clean/perturbed pair kept together (paired=True), so the
-    matching structure is preserved (design/06 §6.5).
+    resampled WITH their clean/perturbed pair kept together (paired=True), so
+    the matching structure is preserved.
 
     Degenerate-distribution guard: if BCa cannot be computed (for example when
     every item has the same outcome), fall back to a percentile interval, and if
@@ -306,7 +300,7 @@ def bootstrap_confidence_interval_paired(
 
 
 # ---------------------------------------------------------------------------
-# The metric set (design/02 §2.6). Each is a pure function of matched arrays.
+# The metric set. Each is a pure function of matched arrays.
 # ---------------------------------------------------------------------------
 
 def clean_accuracy(clean_correctness: Sequence[int]) -> float:
@@ -318,8 +312,7 @@ def perturbed_accuracy(perturbed_correctness: Sequence[int]) -> float:
 
 
 def paired_degradation(clean_correctness, perturbed_correctness) -> float:
-    """The headline endpoint: absolute paired accuracy drop A0 - A1 (design/02
-    §2.6)."""
+    """The headline endpoint: absolute paired accuracy drop A0 - A1."""
     return clean_accuracy(clean_correctness) - perturbed_accuracy(perturbed_correctness)
 
 
@@ -349,7 +342,7 @@ def answer_flip_rate(clean_answers: Sequence, perturbed_answers: Sequence) -> fl
 def appropriate_change_rate(perturbed_answers: Sequence, new_gold_answers: Sequence,
                             matches=lambda answer, gold: answer == gold) -> float:
     """For Regime C: the fraction of items where the model correctly updated to
-    the new gold answer after the meaning changed (design/02 §2.6)."""
+    the new gold answer after the meaning changed."""
     pairs = list(zip(perturbed_answers, new_gold_answers))
     return sum(matches(answer, gold) for answer, gold in pairs) / len(pairs) if pairs else float("nan")
 
@@ -357,14 +350,14 @@ def appropriate_change_rate(perturbed_answers: Sequence, new_gold_answers: Seque
 def over_robustness_rate(perturbed_answers: Sequence, old_gold_answers: Sequence,
                          matches=lambda answer, gold: answer == gold) -> float:
     """For Regime C: the fraction of items where the model clung to the OLD gold
-    answer after the meaning changed (over-invariance; design/02 §2.6)."""
+    answer after the meaning changed (over-invariance)."""
     pairs = list(zip(perturbed_answers, old_gold_answers))
     return sum(matches(answer, gold) for answer, gold in pairs) / len(pairs) if pairs else float("nan")
 
 
 def invalid_or_clarification_rate(parse_statuses: Sequence[str]) -> float:
     """The fraction of items that failed interactionally (unparseable,
-    clarification, or refusal) rather than answering (design/02 §2.6)."""
+    clarification, or refusal) rather than answering."""
     statuses = list(parse_statuses)
     return (sum(status in INTERACTIONAL_FAILURE_STATUSES for status in statuses) / len(statuses)
             if statuses else float("nan"))
@@ -372,7 +365,7 @@ def invalid_or_clarification_rate(parse_statuses: Sequence[str]) -> float:
 
 def discordant_rate(clean_correctness, perturbed_correctness) -> float:
     """The discordant-pair rate (broke + recovered) / total: the quantity the
-    Stage-2 pilot measures to fix the per-cell sample size (design/06 §6.3)."""
+    Stage-2 pilot measures to fix the per-cell sample size."""
     table = build_paired_table(clean_correctness, perturbed_correctness)
     return (table.broke + table.recovered) / table.total if table.total else float("nan")
 

@@ -717,7 +717,7 @@ def _fit_offline_fallback_decomposition(
     treatment_variance = float(treatment @ treatment)
     if treatment_variance <= _TOTAL_EFFECT_NUMERICALLY_ZERO:
         raise ValueError(
-            "no within-item treatment variation — every item is all-clean or "
+            "no within-item treatment variation: every item is all-clean or "
             "all-perturbed, so the within estimator is undefined")
     treatment_on_mediator = float(treatment @ mediator) / treatment_variance
 

@@ -1,11 +1,9 @@
 """Perturbation-engine contract tests: every clause of the engine's contract,
 for every selection policy, under correct, degenerate, and adversarial inputs.
 
-Each test guards a CLASS of failures. Breaking any of them invalidates the
-perturbation provenance story of the paper: edits that don't replay, budgets
-that drift, policies that draw outside their advertised pools, or protected
-numeric spans that get corrupted (which would silently turn intent-preserving
-Regime-A items into meaning-changing ones).
+Each test guards a CLASS of failures: edits that don't replay, budgets that
+drift, policies that draw outside their advertised pools, or protected
+numeric spans that get corrupted.
 """
 
 from __future__ import annotations

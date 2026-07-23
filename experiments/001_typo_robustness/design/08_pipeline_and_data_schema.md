@@ -122,7 +122,7 @@ correct (0|1), parse_status ("valid"|"unparseable"|"clarification"|"refusal")
 latency_sec, output_token_count, tokens_per_second
 ```
 
-Rule: **if it is not logged, it cannot be analyzed.** Anything a reviewer might ask to slice by must be a column. The matched-pair join is `row_clean ↔ row_perturbed` on `(model_revision, task_id, item_template_id)` with `is_clean` distinguishing them.
+Anything a reviewer might ask to slice by must be a column. The matched-pair join is `row_clean ↔ row_perturbed` on `(model_revision, task_id, item_template_id)` with `is_clean` distinguishing them.
 
 ## 8.5 Tokenization-metric module (`tokenize_metrics.py`)
 
@@ -134,7 +134,7 @@ Implements Document 04 §4.7: Regime A via nonword keyboard typos on non-key wor
 
 ## 8.7 The test plan (`tests/`)
 
-Unit tests are non-negotiable; they are what let us claim the instrument is sound. Minimum coverage:
+Minimum coverage:
 
 `test_perturb.py`
 - determinism (same seed → identical output), idempotent k=0, exact budget, protected-span inviolability, edit-script reconstruction, each operation type, each policy's fidelity (keyboard_neighbor only QWERTY neighbors, real_word always valid, etc.).
@@ -164,7 +164,3 @@ CI runs the non-GPU tests on every commit; the reproducibility test runs on the 
 - Where a dataset license blocks redistributing source text, the **generation scripts + seeds** that reconstruct identical items (Document 04 §4.8).
 - **TTS audio files** for the ASR arm (machine-generated, not copyrightable), so the Whisper transcription step is reproducible without re-running TTS. Stored as 16 kHz mono WAV, one file per item per noise condition.
 This is the concrete content behind the reproducibility claim in Document 10.
-
-## 8.9 Why this pipeline is auditable end to end
-
-The chain clean item → `r` → edit script → perturbed text → audit label → tokenizer metrics → generation → parsed answer → correctness is fully logged at every link, and every transformation is either deterministic (perturbation, scoring, token metrics) or human-recorded (audit). A skeptic can take any single row and verify: that the edit script reproduces the perturbed text, that the perturbed word is (non)word as claimed, that the regime label came from human audit, that the token counts are correct for that tokenizer, and that the parsed answer matches the scorer's rule. There is no step where the reader must trust an unverifiable judgment, which is exactly the property Document 10 needs.

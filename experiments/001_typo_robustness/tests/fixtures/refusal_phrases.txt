@@ -12,9 +12,9 @@
 # is 19" from being misclassified. The proxy is conservative (under-counts)
 # for the same reasons as clarification_phrases.txt.
 #
-# Implements: design/04 §4.5 — ParseStatus.REFUSAL detection
+# Implements: design/04 §4.5, ParseStatus.REFUSAL detection
 
-# --- Strong modal negations — Zou et al. (2023) Appendix A.2 ---
+# --- Strong modal negations, Zou et al. (2023) Appendix A.2 ---
 i'm sorry
 i am sorry
 i apologize

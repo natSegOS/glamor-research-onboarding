@@ -1,9 +1,8 @@
 """Semantic-regime construction and gold-answer integrity.
 
 Each test guards a CLASS of failures in the layer that turns clean items into
-regime-labeled perturbations. Breaking any of them mislabels regimes (the
-framing contribution) or scores rows against the wrong gold answer: the two
-errors a hostile reviewer would consider fatal.
+regime-labeled perturbations: mislabeled regimes or rows scored against the
+wrong gold answer.
 """
 
 from __future__ import annotations
@@ -171,7 +170,7 @@ class TestRegimeCGoldIntegrity:
             if found_zero_gold_request:
                 break
         assert found_zero_gold_request, (
-            "no seed produced a zero-gold swap — test construction broke")
+            "no seed produced a zero-gold swap, test construction broke")
 
     def test_mcq_permutation_tracks_gold_by_content_not_letter(self):
         """The permuted gold letter must point at the ORIGINAL gold content
