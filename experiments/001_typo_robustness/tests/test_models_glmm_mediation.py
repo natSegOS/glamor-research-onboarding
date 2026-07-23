@@ -1,11 +1,9 @@
 """Confirmatory GLMM ladder and mediation estimators: simulated-recovery tests.
 
-These tests hold the statistical layer to KNOWN GROUND TRUTH built into
-simulated data. Breaking them means the paper's headline models either
-mislabel their estimator (the pre-2026-07-20 "linear model called logistic"
-failure), leak variance components into fixed-effect tables, or (the failure
-class that actually bit on the pilot) let between-item confounding flip the
-mediation coefficient's sign.
+Holds the statistical layer to known ground truth in simulated data, guarding
+against estimator mislabeling, variance components leaking into fixed-effect
+tables, and between-item confounding flipping the mediation coefficient's
+sign.
 """
 
 from __future__ import annotations

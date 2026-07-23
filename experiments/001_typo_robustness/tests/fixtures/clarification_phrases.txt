@@ -12,7 +12,7 @@
 # ICR is a diagnostic metric (design/04 §4.5), not a primary endpoint.
 # The UNPARSEABLE bucket absorbs any missed cases; accuracy is unaffected.
 #
-# Implements: design/04 §4.5 — ParseStatus.CLARIFICATION detection
+# Implements: design/04 §4.5, ParseStatus.CLARIFICATION detection
 
 # --- Direct requests for clarification or specification (Aliannejadi §3.1) ---
 could you clarify

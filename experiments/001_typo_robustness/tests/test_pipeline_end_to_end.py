@@ -1,11 +1,7 @@
-"""Full offline pipeline runs with the dummy engine over a configuration that
-exercises every condition class (Regime A keyboard substitute/delete, filler
-insertion, whitespace merge, fragmentation-matched, Regime B real-word and
-homophone, Regime C), asserting the rows-or-exclusions accounting identity,
+"""Full offline pipeline runs with the dummy engine across every condition
+class (Regime A, B, C), checking the rows-or-exclusions accounting identity,
 clean-row uniqueness, parallel-build determinism, shard-partition coverage,
-and that the analysis layer summarises the produced rows.
-
-Replaces test_end_to_end.py.
+and analysis-layer summarization. Replaces test_end_to_end.py.
 """
 
 from __future__ import annotations
