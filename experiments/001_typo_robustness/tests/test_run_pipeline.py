@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from pipeline import ExperimentConfiguration
+
 
 def _load_run_pipeline_tool_module():
     tool_path = Path(__file__).resolve().parent.parent / "tools" / "run_pipeline.py"
@@ -156,7 +158,7 @@ class TestExistingGenerationPaths:
     def test_raises_when_nothing_is_found(self, tmp_path):
         run_pipeline = _load_run_pipeline_tool_module()
         profile = {**_MINIMAL_PROFILE, "output_root": str(tmp_path), "models": ["llama_1b"]}
-        configuration = run_pipeline.ExperimentConfiguration(run_id="pilot", seed=1, conditions=[])
+        configuration = ExperimentConfiguration(run_id="pilot", seed=1, conditions=[])
         with pytest.raises(FileNotFoundError, match="run 'generate' first"):
             run_pipeline._existing_generation_paths(profile, configuration)
 
@@ -169,7 +171,7 @@ class TestExistingGenerationPaths:
         profile = {
             **_MINIMAL_PROFILE, "output_root": str(tmp_path),
             "models": ["llama_1b", "llama_3b"]}
-        configuration = run_pipeline.ExperimentConfiguration(run_id="pilot", seed=1, conditions=[])
+        configuration = ExperimentConfiguration(run_id="pilot", seed=1, conditions=[])
 
         paths = run_pipeline._existing_generation_paths(profile, configuration)
 

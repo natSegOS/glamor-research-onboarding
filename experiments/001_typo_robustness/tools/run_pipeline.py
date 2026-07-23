@@ -36,8 +36,8 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from inference import list_models  # noqa: E402
-from pipeline import ExperimentConfiguration, run_is_complete  # noqa: E402
+# src imports (inference, pipeline) are deferred into the commands that need
+# them: `setup` must run on a bare interpreter before any dependency exists.
 
 _DEFAULT_PROFILE_PATH = _REPO_ROOT / "configs" / "run_profile.yaml"
 _DEFAULT_DICTIONARY_PATH = _REPO_ROOT / "data" / "wordlists" / "en_us_pinned.txt"
@@ -81,7 +81,8 @@ def load_run_profile(profile_path: Path, models_override: str | None = None) -> 
     return profile
 
 
-def _experiment_configuration(profile: dict) -> ExperimentConfiguration:
+def _experiment_configuration(profile: dict):
+    from pipeline import ExperimentConfiguration
     return ExperimentConfiguration.from_yaml(_REPO_ROOT / profile["experiment_config"])
 
 
@@ -217,6 +218,7 @@ def _output_root(profile: dict) -> Path:
 
 
 def cmd_generate(profile: dict) -> None:
+    from pipeline import run_is_complete
     configuration = _experiment_configuration(profile)
     output_root = _output_root(profile)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -256,7 +258,7 @@ def cmd_generate(profile: dict) -> None:
 # analyze / report.
 # ---------------------------------------------------------------------------
 
-def _existing_generation_paths(profile: dict, configuration: ExperimentConfiguration) -> list:
+def _existing_generation_paths(profile: dict, configuration) -> list:
     output_root = _output_root(profile)
     paths = sorted(output_root.glob(f"*/{configuration.run_id}*_generations.jsonl"))
     if not paths:
@@ -301,6 +303,7 @@ def cmd_report(profile: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _print_plan_summary(profile: dict) -> None:
+    from pipeline import run_is_complete
     configuration = _experiment_configuration(profile)
     output_root = _output_root(profile)
     data_status = "reuse committed" if (
@@ -332,6 +335,7 @@ def cmd_all(profile: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_list_models(_profile: dict) -> None:
+    from inference import list_models
     for specification in list_models():
         print(f"{specification.roster_key:<18} {specification.huggingface_identifier:<48} "
               f"{specification.precision}")

@@ -203,6 +203,36 @@ class TestCrashRecovery:
 
 
 # ---------------------------------------------------------------------------
+# Periodic fsync.  On Colab, flush() only reaches the Drive FUSE cache; the
+# cloud copy uploads lazily (often at close), so a hard VM reclaim loses the
+# whole cached stretch unless the runner fsyncs on an interval.
+# ---------------------------------------------------------------------------
+
+class TestPeriodicFsyncBoundsDriveCacheLoss:
+
+    def _count_fsyncs(self, tmp_path, monkeypatch, interval_seconds):
+        import pipeline.runner as runner_module
+        fsync_calls = []
+        monkeypatch.setattr(
+            runner_module.os, "fsync", lambda fd: fsync_calls.append(fd))
+        monkeypatch.setattr(
+            runner_module, "_FSYNC_INTERVAL_SECONDS", interval_seconds)
+        requests = [_make_request(f"t{index}") for index in range(4)]
+        _run_default_shard(tmp_path, requests)
+        return fsync_calls
+
+    def test_rows_are_fsynced_once_per_elapsed_interval(self, tmp_path, monkeypatch):
+        """Breaking this (flush without fsync) leaves every row of a shard in
+        the DriveFS cache, so a hard VM reclaim silently loses all of them."""
+        assert len(self._count_fsyncs(tmp_path, monkeypatch, 0.0)) == 4
+
+    def test_fsync_is_rate_limited_to_the_interval(self, tmp_path, monkeypatch):
+        """Breaking this (fsync every row) blocks generation on a network
+        round-trip per row; DriveFS fsync is orders slower than the write."""
+        assert len(self._count_fsyncs(tmp_path, monkeypatch, 3600.0)) == 0
+
+
+# ---------------------------------------------------------------------------
 # Stale-manifest schema guard.  A committed manifest from an older schema
 # once made a fresh clone generate nothing; the guard must ignore it.
 # ---------------------------------------------------------------------------

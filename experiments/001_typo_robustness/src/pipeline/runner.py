@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 
 from dataclasses import dataclass, field
@@ -39,6 +40,13 @@ SCHEMA_VERSION = "1.1"
 
 _ROW_ID_HASH_HEX_LENGTH = 24
 _MANIFEST_COMPLETED_SHARDS_KEY = "completed_shards"
+
+# flush() only reaches the Drive FUSE cache on Colab; the cloud copy is
+# uploaded lazily (often not until close), so a hard VM reclaim could lose
+# every cached row. fsync forces the upload, bounding that loss to this many
+# seconds of generation. Kept coarse because fsync on DriveFS blocks on the
+# network.
+_FSYNC_INTERVAL_SECONDS = 60.0
 _MANIFEST_SHARD_STATISTICS_KEY = "shard_statistics"
 _MANIFEST_GENERATION_PARAMETERS_KEY = "generation_parameters"
 
@@ -394,6 +402,7 @@ def run_shard(
     new_rows_written = 0
     total_output_tokens = 0
     shard_start_time = time.perf_counter()
+    last_fsync_monotonic = time.monotonic()
 
     with output_path.open("a") as output_file:
         for generation in engine.generate_streaming(  # type: ignore[union-attr]
@@ -471,6 +480,9 @@ def run_shard(
             row["extraction_tier"] = score_result.extraction_tier
             output_file.write(json.dumps(row) + "\n")
             output_file.flush()
+            if time.monotonic() - last_fsync_monotonic >= _FSYNC_INTERVAL_SECONDS:
+                os.fsync(output_file.fileno())
+                last_fsync_monotonic = time.monotonic()
             new_rows_written += 1
 
             if progress_callback is not None:
