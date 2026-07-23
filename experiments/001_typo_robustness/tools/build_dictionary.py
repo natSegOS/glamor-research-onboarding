@@ -1,81 +1,37 @@
 """Fetch and pin the English lexicon used for the is_word predicate.
 
-This is a one-time pre-processing step (design/04 §4.7, design/10 §10).
-It builds the vocabulary that ``regimes.make_is_word`` uses to decide whether a
-candidate perturbation lands on a real English word, which determines whether a
-Regime A (nonword) typo accidentally becomes a Regime B (real-word shift) item.
-The script records the SCOWL version, dialect, size band, and file SHA-256 in a
-provenance sidecar so the is_word boundary is reproducible and auditable.
+One-time pre-processing step (design/04 §4.7, design/10 §10). Builds the
+vocabulary ``regimes.make_is_word`` uses to decide whether a perturbed token
+is a real word, which separates Regime A (nonword typo) from Regime B
+(real-word shift). Writes the SCOWL version, dialect, size band, and file
+SHA-256 to ``PROVENANCE.json`` so the is_word boundary is reproducible.
 
-Lexicon source: SCOWL (Spell-Checker Oriented Word Lists)
-----------------------------------------------------------
-SCOWL is used exclusively.  It is the standard citable English spell-checker
-lexicon (Kevin Atkinson; wordlist.aspell.net), widely used in academic research
-precisely because its membership criterion is dictionary-based rather than
-corpus-frequency-based.  A frequency-based list (e.g. wordfreq) would introduce
-a confound: the is_word boundary would shift with corpus sampling decisions,
-making the Regime A / Regime B classification non-reproducible.  SCOWL's
-membership is determined by editorial dictionary sources; the boundary is stable,
-pre-registrable, and citable.
+Source: SCOWL (Spell-Checker Oriented Word Lists; Kevin Atkinson,
+wordlist.aspell.net). Membership is dictionary-based, not corpus-frequency-
+based, so the is_word boundary can't drift with corpus sampling the way a
+frequency list (e.g. wordfreq) would. Pinned to version 2020.12.07: the
+newest SCOWL release with a prebuilt ``final/`` word-list archive (later
+releases ship built Hunspell/Aspell dictionaries only, not the flat lists
+this script needs).
 
-The recommended SCOWL size band is 60 (``--scowl-max-size 60``), which covers
-the full standard English vocabulary without rare, archaic, or technical
-vocabulary that falls outside native-speaker competence.  Atkinson (SCOWL
-documentation) describes size 60 as "standard dictionary coverage".
+Size band: 60 (``--scowl-max-size``, default), what Atkinson calls "standard
+dictionary coverage": full standard vocabulary, no rare/archaic/technical terms.
 
-Category scoping: ``words`` only (not the full ``mk-list`` bundle)
---------------------------------------------------------------------
-SCOWL's own list-building tool, ``mk-list``, packages a dialect's
-``abbreviations``/``contractions``/``proper-names``/``upper``/``words``
-sub-categories together with the ``special`` category (``hacker`` jargon,
-``roman-numerals``). This script deliberately does **not** reproduce that
-full bundle: it merges only the ``words`` sub-category, for ``english`` (the
-dialect-neutral core) plus the one requested dialect.
+Category: only the ``words`` sub-category (``english`` plus one dialect), not
+SCOWL's full ``mk-list`` bundle (abbreviations/contractions/proper-names/
+upper/special). Those exist so a spell-checker doesn't flag "Mr." or "TCP",
+not because they're "real words" in the reader-recognition sense is_word
+needs. At size 60 the full bundle counts 100% of single letters, 51.8% of
+two-letter strings, and 7.3% of three-letter strings as "real words," which
+would wrongly reject Regime A candidates and wrongly accept abbreviation/
+proper-name hits as Regime B shifts.
 
-The reason is what ``is_word`` is *for*: deciding whether an edited token is
-a real word a reader would recognise as a distinct, meaningful word: the
-distinction that separates Regime A (nonword typo) from Regime B (context-recoverable
-real-word shift). ``abbreviations``/``upper``/``proper-names`` and the
-``special`` category exist in SCOWL to keep a *spell-checker* from flagging
-"Mr.", "TCP", or "IV" as misspelled: a different question, and one whose
-entries (mostly short, lower-cased abbreviations and roman numerals) are not
-"real words" in the reader-recognition sense this predicate needs. Measured
-effect of including them anyway: at size band 60, the full ``mk-list`` bundle
-counts 100% of all single letters, 51.8% of two-letter strings, and 7.3% of
-three-letter strings as "real words", which would (a) inflate false "landed
-on a real word" rejections when constructing Regime A items, and (b) let
-Regime B accept a substitution into an abbreviation or proper name as if it
-were a context-recoverable real-word shift, which it is not. ``contractions``
-is dropped too, though its practical effect is nil: entries contain an
-apostrophe, which fails the ``str.isalpha()`` filter below and would never
-enter the vocabulary regardless.
+Dialect: exactly one (``--scowl-dialect``, default american), per SCOWL's own
+documented usage. An earlier version of this script merged every dialect by
+matching the numeric size suffix alone and ignoring the file-name prefix,
+silently mixing spelling variants (color/colour, ...) into one list.
 
-This still keeps every citability/reproducibility property the SCOWL choice
-was made for: SCOWL is still the sole source, ``--scowl-dialect`` (default:
-``american``) still selects exactly one dialect category (never merged with
-others, see below), and the exact files plus their SHA-256 are still
-recorded in ``PROVENANCE.json``. It is simply a narrower, and more construct-
-valid, slice of SCOWL than the stock ``mk-list`` bundle.
-
-Dialect scoping (single dialect only)
---------------------------------------
-SCOWL's own documentation (``scowl/README.in``) is explicit that files should
-be combined as the ``english`` spelling category plus **one** dialect category
-("american", "british", "british_z", "canadian", or "australian"), never
-several dialects at once. Merging multiple dialects together (e.g. american +
-british + canadian + australian, as an earlier version of this script did by
-filtering on the numeric size suffix alone, ignoring the file-name prefix) is
-not SCOWL's documented usage: it silently pulls in every dialect's spelling
-variants (color/colour, realize/realise, ...) into a single is_word boundary
-and is not something a reader familiar with SCOWL would recognize as "the
-size-60 SCOWL list", undermining exactly the citability/reproducibility
-argument for using SCOWL in the first place.
-
-Download
---------
-Download the prebuilt SCOWL release from SourceForge (the same word-list
-build to which http://wordlist.aspell.net/ points) and extract it to a local
-directory:
+Download the prebuilt SCOWL release from SourceForge and extract it:
 
     wget -O /tmp/scowl.tar.gz \\
       "https://sourceforge.net/projects/wordlist/files/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz/download"
@@ -83,15 +39,6 @@ directory:
 
 Then pass the extracted ``final/`` directory (or a single word-list file such
 as ``english-words.60``) via ``--scowl-path``.
-
-Note: as of this writing, 2020.12.07 is the newest version for which SCOWL
-publishes a prebuilt word-list archive in this format.  The upstream project's
-newer releases (tracked at github.com/en-wl/wordlist) ship built Hunspell/
-Aspell dictionaries only, not the flat SCOWL ``final/`` word lists this script
-consumes, so pinning to 2020.12.07 is not staleness, it is the latest
-available prebuilt SCOWL release.  Re-check SourceForge
-(https://sourceforge.net/projects/wordlist/files/SCOWL/) before a real study
-run in case that has changed.
 
 Usage:
 
@@ -123,33 +70,9 @@ def _matching_word_list_files(
     """Return the SCOWL ``final/`` ``words`` files for ``dialect`` at size <=
     ``maximum_size_band``.
 
-    Restricted to the ``words`` sub-category only, for ``english`` (the
-    dialect-neutral core) and the requested ``dialect`` (e.g. ``american``).
-
-    This is a deliberate departure from SCOWL's own ``mk-list`` default
-    packaging, which additionally pulls in ``upper`` (capitalised/proper-noun
-    forms), ``proper-names``, ``abbreviations``, ``contractions``, and the
-    ``special`` category (``hacker`` jargon, ``roman-numerals``). Those
-    sub-categories exist in SCOWL so a *spell-checker* doesn't flag "Mr.",
-    "TCP", or "IV" as misspelled: a different question from the one
-    ``regimes.make_is_word`` asks, which is whether an edited token is a real
-    word a reader would recognise as a distinct, meaningful English word
-    (this decides the Regime A/Regime B boundary; design/04 §4.7). Measured
-    effect of including them: at SCOWL's size-60 band, the full ``mk-list``
-    bundle counts 100% of all single letters, 51.8% of all two-letter
-    strings, and 7.3% of all three-letter strings as "real words" (mostly
-    lower-cased abbreviations and roman numerals), which inflates false
-    "landed on a real word" rejections in Regime A's construction and would,
-    if used the other way, let Regime B accept a substitution into an
-    abbreviation or proper name as a "context-recoverable real-word shift,"
-    which it is not. ``words`` alone does not have this problem while
-    remaining exactly as citable/reproducible (SCOWL is still the sole
-    source; the exact files and their SHA-256 are still recorded in
-    ``PROVENANCE.json``).
-
-    Other dialect categories (e.g. ``british`` when ``dialect="american"``)
-    are excluded so the vocabulary reflects one coherent spelling convention
-    rather than a merge of several.
+    Restricted to the ``words`` sub-category, for ``english`` (the
+    dialect-neutral core) plus the requested ``dialect`` only (see module
+    docstring for why: not the full ``mk-list`` bundle, not other dialects).
     """
     if scowl_path.is_dir():
         candidates = sorted(scowl_path.iterdir())

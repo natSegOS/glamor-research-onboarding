@@ -93,7 +93,7 @@ def main() -> None:
         except Exception as fetch_error:
             error_message = str(fetch_error)
             errors.append(f"{roster_key}: {error_message}")
-            print(f"FAILED — {error_message}")
+            print(f"FAILED: {error_message}")
 
     # Write the YAML output even if some models failed; the file records what
     # was successfully resolved so partial progress is not lost.

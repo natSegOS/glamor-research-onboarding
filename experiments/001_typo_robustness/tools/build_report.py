@@ -278,7 +278,7 @@ def main() -> None:
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(page, encoding="utf-8")
     print(f"\ndone → {arguments.output}  ({arguments.output.stat().st_size // 1024} KB)")
-    print("open in any browser — no server or network required")
+    print("open in any browser, no server or network required")
 
 
 # ---------------------------------------------------------------------------

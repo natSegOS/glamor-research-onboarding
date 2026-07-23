@@ -1,40 +1,30 @@
 """Fetch, pin, and export the official task items for a confirmatory run.
 
-This is a one-time pre-processing step (safely re-runnable) that must run on a
-networked machine with HuggingFace access before the main sweep. It resolves
-each dataset's commit SHA at fetch time, downloads the official items, exports
-them to JSONL, and records full provenance. The exported JSONL files are what
-the pipeline reads during generation via the config's ``datasets:`` list.
+One-time pre-processing step (safely re-runnable) that must run on a
+networked machine with HuggingFace access before the main sweep. Resolves
+each dataset's commit SHA at fetch time, downloads the official items,
+exports them to JSONL, and records full provenance. The pipeline reads
+these files during generation via the config's ``datasets:`` list.
+Re-running fetches fresh revisions and overwrites the JSONL cleanly.
 
-Re-running this script fetches fresh revisions and overwrites the JSONL files
-cleanly. It is safe to re-run when you want updated dataset hashes.
-
-GSM-Symbolic template enrichment (--gsm-templates-dir)
--------------------------------------------------------
-The ``question_annotated`` field that enables Regime C reasoning operand-swap
-is not exposed in the Apple/GSM-Symbolic HuggingFace dataset.  It is available
-in the companion GitHub repository (github.com/apple/ml-gsm-symbolic) under
-``templates/p1/*.json``.
-
-When ``--gsm-templates-dir`` points to a local clone of that repository, this
-tool joins each fetched HF item against the template via:
-
-    generated_data/GSM_p1.jsonl   HF question text  →  original_id
-    templates/p1/{id_orig}.json   original_id        →  question_annotated
-
-The template provides the STRUCTURE (parameter names, types, answer formula).
-The HF question text provides the INSTANCE'S actual parameter values.
-``extract_instance_parameters`` matches the template's format string against the
-HF question text to recover the real values, then validates
-``answer_function(**extracted) == gold_answer``.  Items that pass validation
-get ``parameters`` set to the extracted instance values (fully Regime C capable).
-Items that fail validation get ``parameters = {}`` and will be excluded
-gracefully at perturbation time.
-
-The stored ``question_annotated`` string uses the template's default values in
-its ``{param,value}`` syntax (as written in the Apple repo), but the separate
-``parameters`` field in the JSONL holds the validated instance values that
-``load_reasoning_jsonl`` will use at run time.
+GSM-Symbolic template enrichment (--gsm-templates-dir): the
+``question_annotated`` field that enables Regime C reasoning operand-swap
+isn't exposed in the Apple/GSM-Symbolic HuggingFace dataset, only in the
+companion GitHub repo (github.com/apple/ml-gsm-symbolic, ``templates/p1/*.json``).
+When --gsm-templates-dir points to a local clone, this tool joins each HF
+item to its template via ``generated_data/GSM_p1.jsonl`` (question text to
+original_id), then ``templates/p1/{id_orig}.json`` (original_id to
+question_annotated). The template supplies structure (parameter names,
+types, answer formula); the HF question text supplies the instance's actual
+values. ``extract_instance_parameters`` matches the template's format
+string against the HF question text to recover those values and validates
+``answer_function(**extracted) == gold_answer``. Items that pass get
+``parameters`` set to the validated values (fully Regime C capable); items
+that fail get ``parameters = {}`` and are excluded gracefully at
+perturbation time. ``question_annotated`` keeps the template's default
+``{param,value}`` values as written upstream; the separate ``parameters``
+field holds the validated instance values ``load_reasoning_jsonl`` uses at
+run time.
 
 Usage:
 
@@ -131,27 +121,14 @@ def _enrich_gsm_items_with_apple_templates(
 ) -> tuple[int, int]:
     """Enrich each item with question_annotated and validated instance parameters.
 
-    The HF dataset exposes the instantiated question text but not the symbolic
-    template.  The Apple GitHub repo provides the template.  This function joins
-    each HF item against the template repo in two stages:
-
-    PRIMARY path (preferred, no dependency on generated_data/):
-        item.id_orig  →  templates/{config}/{id_orig_key}.json
-        Uses the ``original_id`` field that the HF apple/GSM-Symbolic dataset
-        exposes directly in each record.  This path is robust to a missing or
-        partially-downloaded generated_data/ file.
-
-    FALLBACK path (when item.id_orig is not set):
-        generated_data/GSM_{config}.jsonl  question text → original_id
-        templates/{config}/{id_orig_key}.json  original_id → question_annotated
-        Used when the HF record did not include original_id.
-
-    After finding the template, uses extract_instance_parameters to match the
-    template's format string against the HF question text (structure from the
-    template, values from the HF question) and validates the result against
-    gold_answer.  Items that pass have parameters set to validated instance
-    values; items that fail keep parameters={} and will be excluded gracefully
-    at Regime C perturbation time.
+    Joins each HF item against the Apple template repo. Primary path:
+    item.id_orig → templates/{config}/{id_orig}.json (robust to a missing or
+    partial generated_data/). Fallback, when id_orig is absent: look up
+    original_id via generated_data/GSM_{config}.jsonl question text, then the
+    same template lookup. Matches the template's format string against the HF
+    question text via extract_instance_parameters and validates against
+    gold_answer; items that pass get validated parameters, items that fail
+    keep parameters={} and are excluded at Regime C perturbation time.
 
     Returns (joined_count, extracted_count).
     """
@@ -281,7 +258,7 @@ def parse_arguments() -> argparse.Namespace:
         "--gsm-config",
         default=_DEFAULT_GSM_CONFIG,
         choices=["main", "p1", "p2"],
-        help="GSM-Symbolic difficulty variant: p1 (+1 clause, default — has Apple "
+        help="GSM-Symbolic difficulty variant: p1 (+1 clause, default; has Apple "
              "templates, enabling Regime C), p2 (+2 clauses), main (no templates "
              "published: Regime C reasoning will be empty)",
     )
