@@ -97,7 +97,3 @@ These turn the paper from "here is a problem" into "here is a mechanism *and* wh
 - **Annotators:** if labmates/peers, acknowledge; if paid, report compensation at or above local norms.
 - **Compute:** report GPU type, GPU-hours, and approximate cost (the study is < $50 of burst compute, Doc 07 §7.5), a transparency point reviewers increasingly expect.
 - **Risk:** the study reveals a brittleness that could be misused to craft adversarial typos, but the effect is already public (R²ATA et al.); the mitigation analysis (§10.6) is the responsible counterweight. State this briefly.
-
-## 10.8 The standard we are holding ourselves to
-
-A paper of this kind is "respectable and hard to disagree with" when a skeptical reader, having read the methods, cannot point to a single claim that outruns its evidence, a single confound that was left free, or a single central judgment that rests on the authors' say-so. The combination of (1) bounded claims, (2) the confound register, (3) human-audited regimes and deterministic scoring, (4) pre-registration, and (5) full reproducibility is designed to leave no such pointer. Where the data are genuinely uncertain (most importantly the *direction* of the quantization effect) we say so and test two-sided, because an honest "we don't know yet, here's the bounded measurement" is itself unrefutable in a way that an overclaim never is.

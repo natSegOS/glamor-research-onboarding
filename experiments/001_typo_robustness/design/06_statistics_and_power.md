@@ -71,8 +71,6 @@ Only discordant pairs carry information, so the *effective* sample is `N · p_d`
 - If `0.19 < p_d ≤ 0.30`: raise `N` to ≈ 942 for the primary cells, or accept a slightly larger MDE (~6 pp) at `N = 600`, decision recorded in Document 00 §0.5.
 - If `p_d < 0.05`: the effect is so small that McNemar is underpowered at any feasible `N`; we then make the *primary* condition a higher budget (`k=3` or `k=4`) where `p_d` is larger, rather than chase an undetectable single-typo effect. This is a pre-registered contingency, not a post-hoc move.
 
-This pilot-gated derivation is the answer to "why 600 and not 1000 or 100": 600 is the smallest N that detects the smallest practically-meaningful effect at the discordance rate we will measure, and the rule for revising it is fixed in advance.
-
 **Power literature.** Card et al. (EMNLP 2020, "With Little Power Comes Great Responsibility," arXiv:2010.06595) document that most NLP comparisons are underpowered and suffer Type-M (magnitude exaggeration) and Type-S (sign-error) inflation; their power-analysis tooling (github.com/dallascard/NLP-power-analysis) is the reference. Dror et al. (ACL 2018, "The Hitchhiker's Guide to Testing Statistical Significance in NLP," P18-1128) give the test-selection decision tree that lands us on McNemar for paired binary data. Citing both pre-empts the "underpowered NLP study" critique.
 
 ## 6.4 Primary test: McNemar, mid-p exact

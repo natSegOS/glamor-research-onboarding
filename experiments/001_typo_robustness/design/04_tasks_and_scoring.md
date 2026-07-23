@@ -1,6 +1,6 @@
 # 04: Tasks, Datasets, and Scoring
 
-The statistical edifice rests on `g(·)` being a deterministic, defensible, exact-match correctness judgment. This document pins down which tasks, which data, how contamination is neutralized, and exactly how answers are extracted and scored, to the level that a second engineer could implement the scorer without asking a question.
+The statistical edifice rests on `g(·)` being a deterministic, defensible, exact-match correctness judgment. This document pins down which tasks, which data, how contamination is neutralized, and exactly how answers are extracted and scored.
 
 ---
 

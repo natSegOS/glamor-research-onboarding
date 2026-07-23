@@ -19,11 +19,11 @@ The design suite lives in `design/` (13 documents, start at
   Bengio, Farajtabar. ICLR 2025. arXiv:2410.05229.
 - **Why this dataset:** The paper's central method generates reasoning
   questions from symbolic templates, with names and numeric values sampled
-  under explicit constraints. This provides (a) contamination-free items (the
+  under explicit constraints, giving (a) contamination-free items (the
   paper notes "the popularity and prevalence of GSM8K can increase the risk of
   inadvertent data contamination") and (b) exact recomputation of the gold
-  answer after a numeric edit, which Regime C (the meaning-changing control)
-  requires. Design rationale: `design/04_tasks_and_scoring.md` §4.2.
+  answer after a numeric edit, needed for Regime C (the meaning-changing
+  control). Design rationale: `design/04_tasks_and_scoring.md` §4.2.
 - **Official sources (verified June 2026):**
   - HuggingFace dataset: `apple/GSM-Symbolic`, configs `main`, `p1`, `p2`
     (p1/p2 add 1/2 extra clauses → harder). License: see dataset card.
@@ -55,13 +55,12 @@ The design suite lives in `design/` (13 documents, start at
 - **Paper:** "MMLU-Pro: A More Robust and Challenging Multi-Task Language
   Understanding Benchmark", Wang et al. NeurIPS 2024 Datasets & Benchmarks.
   arXiv:2406.01574.
-- **Why this dataset:** Ten options instead of four (reduces the guess-rate
-  confound), reasoning-focused, and, most important for a robustness study,
-  markedly more prompt-stable than MMLU ("the sensitivity of model scores to
-  prompt variations decreased from 4-5% in MMLU to just 2% in MMLU-Pro"). A
-  stable clean baseline means observed degradation is attributable to the
-  perturbation, not to baseline prompt brittleness. Design rationale:
-  `design/04_tasks_and_scoring.md` §4.3.
+- **Why this dataset:** Ten options instead of four reduces the guess-rate
+  confound; MMLU-Pro is also reasoning-focused and markedly more prompt-stable
+  than MMLU ("the sensitivity of model scores to prompt variations decreased
+  from 4-5% in MMLU to just 2% in MMLU-Pro"), so observed degradation is
+  attributable to the perturbation rather than baseline prompt brittleness.
+  Design rationale: `design/04_tasks_and_scoring.md` §4.3.
 - **Official source (verified June 2026):**
   - HuggingFace dataset: `TIGER-Lab/MMLU-Pro`. License: MIT.
   - Test split: 12,032 examples. Fields: `question_id`, `question`,

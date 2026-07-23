@@ -3,7 +3,7 @@
 ## `demo_wordlist.txt`
 
 A small (~490-word) English word list bundled only so the test suite and offline
-smoke runs are hermetic — `regimes.make_is_word()` defaults to it when no
+smoke runs are hermetic: `regimes.make_is_word()` defaults to it when no
 dictionary is supplied.  It is **not** adequate for real runs, where
 "is this a real word?" determines whether a Regime A typo accidentally produced
 a Regime B item.
@@ -21,16 +21,16 @@ in `PROVENANCE.json`).
 
 The vocabulary is scoped to a single dialect (`english` + `american`,
 `build_dictionary.py`'s default) rather than merging every SCOWL dialect
-together — never several dialects at once, per SCOWL's own `mk-list` tool.
+together: never several dialects at once, per SCOWL's own `mk-list` tool.
 
 Unlike `mk-list`'s default packaging, only the **`words`** sub-category is
-merged — not `upper` (capitalised/proper-noun forms), `proper-names`,
+merged, not `upper` (capitalised/proper-noun forms), `proper-names`,
 `abbreviations`, `contractions`, or the `special` category (`hacker` jargon,
 `roman-numerals`). Those sub-categories exist in SCOWL so a spell-checker
-doesn't flag "Mr.", "TCP", or "IV" as misspelled — a different question from
-what `is_word` needs to answer (is this edited token a real word a reader
+doesn't flag "Mr.", "TCP", or "IV" as misspelled, a different question from
+what `is_word` needs to answer: is this edited token a real word a reader
 would recognise as distinct and meaningful, the check that separates Regime A
-from Regime B). Including them inflates false "landed on a real word"
+from Regime B. Including them inflates false "landed on a real word"
 rejections in Regime A and would let Regime B accept a shift into an
 abbreviation or proper name as if it were a context-recoverable real-word
 substitution: at size band 60, the full `mk-list` bundle counts 100% of all
@@ -42,7 +42,7 @@ SHA-pinned in `PROVENANCE.json`) while matching the actual construct.
 
 ### Build the pinned dictionary (one-time step)
 
-**Step 1** — Download the prebuilt SCOWL release.  On Linux / Colab:
+**Step 1**: download the prebuilt SCOWL release.  On Linux / Colab:
 
 ```bash
 wget -q -O /tmp/scowl.tar.gz \
@@ -52,15 +52,15 @@ tar -xzf /tmp/scowl.tar.gz -C /tmp/
 ```
 
 Note: this is downloaded from SourceForge, not the `en-wl/wordlist` GitHub
-repo — that repo's tags are SCOWL *source* (raw ingredients + a Makefile, no
+repo. That repo's tags are SCOWL *source* (raw ingredients + a Makefile, no
 prebuilt `final/` directory), not the built word lists this script consumes.
 As of this writing, 2020.12.07 is also the newest version for which a
 prebuilt SCOWL archive exists in this format (check
 https://sourceforge.net/projects/wordlist/files/SCOWL/ for a newer one before
-a real study run) — newer upstream releases ship built Hunspell/Aspell
+a real study run); newer upstream releases ship built Hunspell/Aspell
 dictionaries only.
 
-**Step 2** — Build the pinned vocabulary:
+**Step 2**: build the pinned vocabulary:
 
 ```bash
 python tools/build_dictionary.py \
