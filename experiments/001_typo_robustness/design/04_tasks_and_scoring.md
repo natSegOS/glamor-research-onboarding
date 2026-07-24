@@ -38,7 +38,7 @@ A third optional task (BBH subset, for cross-replication with R²ATA) is include
 
 The reference implementation in Apple's `ml-gsm-symbolic` repo uses exactly this `####`/last-number regex; we match it so our scoring is comparable to published numbers.
 
-**max_new_tokens.** Set to cover >99% of clean-correct chain-of-thought lengths empirically measured in the pilot (provisionally 512). Logged and frozen.
+**max_new_tokens.** 768, uniform across both task families (raised from the provisional 512 after rehearsal v2; §0.5 2026-07-23). The measured p99 output length of correct clean answers is 440 tokens, so 768 ≈ 1.75× p99; greedy decoding stops at EOS, so the cap costs decode time only on rows that would otherwise truncate. Logged and frozen.
 
 ## 4.3 MCQ task: MMLU-Pro
 
@@ -52,7 +52,7 @@ The reference implementation in Apple's `ml-gsm-symbolic` repo uses exactly this
 
 The prompt template instructs the model to answer with a single letter, which maximizes parseability. The instruction itself is part of the held-constant template (Document 03 §3.3) and, except in the instruction-location module, is never perturbed.
 
-**max_new_tokens.** 512, equal to the reasoning budget (raised from the provisional 256 after the T4 dress rehearsal; §0.5 2026-07-22). At 256 the Llama models truncated 21–38% of MMLU-Pro chains of thought and 678/682 truncated rows scored wrong, pinning their MMLU-Pro accuracy at the 10-option chance floor; a single budget across task families also removes the budget itself as a family confound. Greedy decoding stops at EOS, so the higher cap costs extra decode time only on rows that would otherwise have truncated. Logged and frozen.
+**max_new_tokens.** 768, equal to the reasoning budget (raised 256 → 512 after the T4 dress rehearsal, §0.5 2026-07-22, then 512 → 768 after rehearsal v2, §0.5 2026-07-23). At 256 the Llama models truncated 21–38% of MMLU-Pro chains of thought and 678/682 truncated rows scored wrong, pinning their MMLU-Pro accuracy at the 10-option chance floor; at 512 they still truncated 11–25%. A single budget across task families also removes the budget itself as a family confound. Greedy decoding stops at EOS, so the higher cap costs extra decode time only on rows that would otherwise have truncated. Logged and frozen.
 
 ## 4.4 Why deterministic scoring matters for the statistics
 
@@ -106,7 +106,7 @@ Templated reasoning data letting us recompute `y'*` exactly for Regime C is a se
 
 These are set in the Stage-2 pilot (Document 11) and then frozen:
 
-- `max_new_tokens` per task (512 for both families; set from pilot + rehearsal truncation evidence, §0.5 2026-07-22).
+- `max_new_tokens` per task (768 for both families; set from pilot + rehearsal truncation evidence, §0.5 2026-07-22 and 2026-07-23).
 - The exact subject-stratified MMLU-Pro subsample size and composition.
 - The wordlist and POS-tagger versions for nonword and key-term checks.
 - The empirical clean accuracy `A₀` per model, used to (a) validate fresh-instance comparability and (b) condition the quantization analysis.

@@ -102,7 +102,9 @@ We use **real ASR output errors** rather than synthetic acoustic-confusion model
 
 ## 3.6 The design matrix and cell counts
 
-A "cell" is one (module condition × model × task) combination for which we report a metric. Per-cell sample size `N` (paired items) is fixed by the power analysis in Document 06 §6.3; the provisional value is **600** (5 pp minimum detectable effect, expected discordant rate ≈ 0.2), to be confirmed by the Stage-2 pilot. We tabulate the generation count, since that is what the compute budget consumes. Clean baselines are shared across all conditions for the same (model, task), so they are counted once per (model, task), not once per cell.
+A "cell" is one (module condition × model × task) combination for which we report a metric. Per-cell sample size `N` (paired items) is fixed by the power analysis in Document 06 §6.3; the provisional planning value was **600** (5 pp minimum detectable effect, expected discordant rate ≈ 0.2), confirmed and raised by the pilot/rehearsal gate to **720 items per dataset, uniform** (Document 00 §0.5, 2026-07-23). We tabulate the generation count, since that is what the compute budget consumes. Clean baselines are shared across all conditions for the same (model, task), so they are counted once per (model, task), not once per cell.
+
+> **Superseded planning arithmetic.** The tabulation below is the original planning footprint at the provisional `N = 600` (and `N = 400` for Module 4) and the pre-hardening condition grid; it is retained as the derivation of the design's shape. The implemented grid (`configs/main.yaml`: 12 conditions, uniform `item_count: 720`, no per-module N reduction) is measured and re-baselined in Document 07 §7.5 at ≈ **660k generations**.
 
 Let `N = 600` paired items per cell, two tasks, and the model roster of Document 05 (five models; the 7–8B trio doubles under the quantization module). Generations = perturbed runs + shared clean runs.
 

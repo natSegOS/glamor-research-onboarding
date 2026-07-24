@@ -33,9 +33,9 @@ Usage:
 Or with explicit options:
 
     python tools/build_task_items.py \\
-        --reasoning-items 600 \\
+        --reasoning-items 720 \\
         --gsm-config p1 \\
-        --mcq-items 600 \\
+        --mcq-items 720 \\
         --seed 1729 \\
         --output-directory data/items \\
         --gsm-templates-dir /tmp/ml-gsm-symbolic
@@ -79,7 +79,7 @@ _DEFAULT_OUTPUT_DIRECTORY  = Path("data/items")
 # no question_annotated fields are written, and Regime C reasoning silently
 # produces zero items. p1 is what the pilot used (data/items/PROVENANCE.json).
 _DEFAULT_GSM_CONFIG        = "p1"
-_DEFAULT_ITEMS_PER_DATASET = 600
+_DEFAULT_ITEMS_PER_DATASET = 720
 _DEFAULT_SAMPLING_SEED     = 1729
 
 _GSM_SYMBOLIC_REPO_ID = "apple/GSM-Symbolic"

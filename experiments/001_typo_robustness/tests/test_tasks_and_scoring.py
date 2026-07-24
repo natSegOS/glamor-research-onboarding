@@ -35,6 +35,7 @@ from enums import (
 )
 from tasks import multiple_choice, reasoning
 from tasks.reasoning import ReasoningItem, load_reasoning_jsonl
+from tasks.registry import call_loader, get_spec
 
 try:
     from tests.conftest import FakeTokenizer
@@ -200,6 +201,14 @@ class TestJsonlLoaders:
         jsonl_path = _write_reasoning_jsonl(tmp_path, records)
         loaded = load_reasoning_jsonl(jsonl_path, item_count=2)
         assert [item.task_id for item in loaded] == ["t0", "t1"]
+
+    def test_a_pool_shorter_than_item_count_fails_loudly(self, tmp_path):
+        """Breaking this means a confirmatory config asking for item_count=720
+        against a stale 100-item pool silently runs the whole study at N=100."""
+        records = [_minimal_reasoning_record(f"t{index}") for index in range(3)]
+        jsonl_path = _write_reasoning_jsonl(tmp_path, records)
+        with pytest.raises(ValueError, match="holds only 3 items"):
+            call_loader(get_spec("gsm8k_jsonl"), 5, seed=1729, path=str(jsonl_path))
 
     def test_multiple_choice_loader_preserves_options_and_coerces_the_family(self, tmp_path):
         """Breaking this scrambles option letters or leaves task_family a bare

@@ -3,7 +3,7 @@
 # Byte-for-byte the main study configuration except three fields, so the run
 # behaves exactly like the confirmatory sweep at a fraction of the cost:
 #   run_id: rehearsal        (separate output namespace)
-#   item_count: 24 per dataset  (main: 600; 24 keeps every condition cell
+#   item_count: 24 per dataset  (main: 720; 24 keeps every condition cell
 #                                non-empty while a full model sweep stays
 #                                within a single Colab session)
 #   is_confirmatory: false   (revisions are not yet pinned; pinning is a
@@ -24,7 +24,7 @@ seed: 1729
 # SHAs. Re-running overwrites cleanly and updates the SHAs (safe and idempotent).
 # To add a dataset, register it in tasks/registry.py and append its key here.
 #
-# Primary confirmatory (N=600, McNemar-powered):
+# Primary confirmatory (N=720, McNemar-powered):
 #   gsm_symbolic_jsonl  : fresh arithmetic reasoning (contamination-controlled)
 #   mmlu_pro_jsonl      : 10-option MCQ, subject-stratified
 #

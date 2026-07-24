@@ -71,6 +71,8 @@ Only discordant pairs carry information, so the *effective* sample is `N · p_d`
 - If `0.19 < p_d ≤ 0.30`: raise `N` to ≈ 942 for the primary cells, or accept a slightly larger MDE (~6 pp) at `N = 600`, decision recorded in Document 00 §0.5.
 - If `p_d < 0.05`: the effect is so small that McNemar is underpowered at any feasible `N`; we then make the *primary* condition a higher budget (`k=3` or `k=4`) where `p_d` is larger, rather than chase an undetectable single-typo effect. This is a pre-registered contingency, not a post-hoc move.
 
+**Gate outcome (2026-07-23; full record in Document 00 §0.5).** The pilot and rehearsal v2 measured implied N of 338–600 across the four families (mmlu at exactly 600; the pilot's GSM8K readout implied 720). `N` is set to **720 items per dataset, uniform**: this covers the worst measured family with ≥20% margin against the sampling error of the implied-N estimates and satisfies the standing GSM8K contingency. The uniform value applies to every condition — the provisional Module-4 `N = 400` economy was not carried into the implemented grid (`configs/main.yaml` sets a single `item_count: 720` per dataset).
+
 **Power literature.** Card et al. (EMNLP 2020, "With Little Power Comes Great Responsibility," arXiv:2010.06595) document that most NLP comparisons are underpowered and suffer Type-M (magnitude exaggeration) and Type-S (sign-error) inflation; their power-analysis tooling (github.com/dallascard/NLP-power-analysis) is the reference. Dror et al. (ACL 2018, "The Hitchhiker's Guide to Testing Statistical Significance in NLP," P18-1128) give the test-selection decision tree that lands us on McNemar for paired binary data. Citing both pre-empts the "underpowered NLP study" critique.
 
 ## 6.4 Primary test: McNemar, mid-p exact
@@ -159,8 +161,8 @@ Every reported metric carries: point estimate, BCa 95% CI, the raw discordant co
 
 | Number | Value | Justified by |
 |---|---|---|
-| Per-cell N (primary) | 600 (pilot-gated) | 5 pp MDE, 80% power, α=0.05, p_d≤0.19 (§6.3) |
-| Per-cell N (descriptive) | 400 | 6–7 pp MDE acceptable for RQ4 (§6.3) |
+| Per-cell N (primary) | 720 (gate outcome; provisional 600) | 5 pp MDE, 80% power, α=0.05; ≥20% margin over worst measured implied N (§6.3, 00 §0.5) |
+| Per-cell N (descriptive) | 720 (uniform; provisional 400 superseded) | single `item_count` in the implemented grid (§6.3 gate outcome) |
 | Bootstrap resamples | 10,000 | BCa stability + NLP standard (§6.5) |
 | MDE | 5 pp | smallest practically-meaningful brittleness (§6.3) |
 | Power | 0.80 | field convention; explicitly stated |

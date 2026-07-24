@@ -59,7 +59,7 @@ The rule: every sentence in the abstract and conclusion must be checkable agains
 
 Released with the paper:
 - [ ] Code: perturbation engine, regime construction, scorers, vLLM runner, stats, audit harness.
-- [ ] Configs: `pilot.yaml`, `main.yaml`, `fallback_t4.yaml`.
+- [ ] Configs: `pilot.yaml`, `rehearsal.yaml`, `main.yaml`, `run_profile.yaml`.
 - [ ] Pinned versions: `transformers`, `vllm`, `torch`, tokenizer, spaCy, wordlist, all in a lockfile.
 - [ ] Model commit hashes (HF revision) per model.
 - [ ] Seeds: per perturbation `ρ`, per run, per bootstrap.
