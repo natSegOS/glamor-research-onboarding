@@ -1,0 +1,64 @@
+{
+  "overall": {
+    "clean_floor_pct": 9.06321243523316,
+    "keyboard_churn_on_same_items_pct": 15.146288488565224,
+    "keyboard_churn_all_items_pct": 15.144902634593358
+  },
+  "per_model": {
+    "Qwen_Qwen2.5-7B-Instruct": {
+      "clean_floor_pct": 9.146804835924007,
+      "items_measured": 965,
+      "keyboard_churn_on_same_items_pct": 15.689280695030025
+    },
+    "Qwen_Qwen3-8B": {
+      "clean_floor_pct": 7.402417962003454,
+      "items_measured": 965,
+      "keyboard_churn_on_same_items_pct": 15.318768365912867
+    },
+    "meta-llama_Llama-3.1-8B-Instruct": {
+      "clean_floor_pct": 8.797927461139896,
+      "items_measured": 965,
+      "keyboard_churn_on_same_items_pct": 14.60968442570589
+    },
+    "microsoft_phi-4": {
+      "clean_floor_pct": 7.274611398963731,
+      "items_measured": 965,
+      "keyboard_churn_on_same_items_pct": 12.054426983518589
+    },
+    "mistralai_Mistral-7B-Instruct-v0.3": {
+      "clean_floor_pct": 12.694300518134716,
+      "items_measured": 965,
+      "keyboard_churn_on_same_items_pct": 18.059281972658745
+    }
+  },
+  "per_benchmark": {
+    "gsm1k": {
+      "clean_floor_pct": 5.406162464985994,
+      "items_measured": 1190,
+      "keyboard_churn_on_same_items_pct": 14.537922243467177
+    },
+    "gsm8k": {
+      "clean_floor_pct": 4.868217054263566,
+      "items_measured": 1075,
+      "keyboard_churn_on_same_items_pct": 17.20567375886525
+    },
+    "humaneval": {
+      "clean_floor_pct": 2.6585365853658534,
+      "items_measured": 820,
+      "keyboard_churn_on_same_items_pct": 12.418699186991871
+    },
+    "mmlu_pro": {
+      "clean_floor_pct": 3.8596491228070176,
+      "items_measured": 285,
+      "keyboard_churn_on_same_items_pct": 11.461988304093568
+    },
+    "truthfulqa": {
+      "clean_floor_pct": 19.782359679266897,
+      "items_measured": 1455,
+      "keyboard_churn_on_same_items_pct": 18.08895405669599
+    }
+  },
+  "model_benchmark_items_with_2plus_seeds": 4825,
+  "model_benchmark_items_total": 20880,
+  "items_scored_on_all_five_seeds": 820
+}

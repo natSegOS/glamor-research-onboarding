@@ -1,0 +1,35 @@
+{
+  "note": "Same model, same benchmark, same item, identical clean prompt, different seed. Greedy decoding would make completion text identical.",
+  "overall": {
+    "multi_seed_triples": 4825,
+    "completion_text_differs_pct": 70.7,
+    "score_differs_pct": 10.7
+  },
+  "per_model": {
+    "Qwen_Qwen2.5-7B-Instruct": {
+      "multi_seed_triples": 965,
+      "completion_text_differs_pct": 72.7,
+      "score_differs_pct": 10.4
+    },
+    "Qwen_Qwen3-8B": {
+      "multi_seed_triples": 965,
+      "completion_text_differs_pct": 71.1,
+      "score_differs_pct": 8.9
+    },
+    "meta-llama_Llama-3.1-8B-Instruct": {
+      "multi_seed_triples": 965,
+      "completion_text_differs_pct": 71.3,
+      "score_differs_pct": 10.5
+    },
+    "microsoft_phi-4": {
+      "multi_seed_triples": 965,
+      "completion_text_differs_pct": 65.1,
+      "score_differs_pct": 8.9
+    },
+    "mistralai_Mistral-7B-Instruct-v0.3": {
+      "multi_seed_triples": 965,
+      "completion_text_differs_pct": 73.1,
+      "score_differs_pct": 14.8
+    }
+  }
+}

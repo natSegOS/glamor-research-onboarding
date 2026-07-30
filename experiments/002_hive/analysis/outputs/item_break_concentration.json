@@ -1,0 +1,9 @@
+{
+  "items_with_at_least_10_clean_correct_exposures": 3291,
+  "pooled_break_rate_pct": 13.353535353535353,
+  "share_of_breaks_in_top_decile_of_items_pct": 27.512427058569266,
+  "share_of_items_with_zero_breaks_pct": 25.281069583713155,
+  "overdispersion_index": 7.587070914942227,
+  "median_item_break_rate_pct": 10.0,
+  "p90_item_break_rate_pct": 38.88888888888889
+}
