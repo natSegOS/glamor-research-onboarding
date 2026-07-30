@@ -1,0 +1,131 @@
+{
+  "mmlu_pro_clean_per_model": {
+    "Qwen_Qwen2.5-7B-Instruct": {
+      "rows": 1000,
+      "accuracy_pct": 33.2,
+      "no_answer_marker_pct": 53.2,
+      "marker_agrees_gold_pct": 32.4,
+      "agrees_but_scored_0_rows": 25
+    },
+    "Qwen_Qwen3-8B": {
+      "rows": 1000,
+      "accuracy_pct": 48.5,
+      "no_answer_marker_pct": 35.7,
+      "marker_agrees_gold_pct": 46.4,
+      "agrees_but_scored_0_rows": 7
+    },
+    "meta-llama_Llama-3.1-8B-Instruct": {
+      "rows": 1000,
+      "accuracy_pct": 37.4,
+      "no_answer_marker_pct": 45.5,
+      "marker_agrees_gold_pct": 35.0,
+      "agrees_but_scored_0_rows": 17
+    },
+    "microsoft_phi-4": {
+      "rows": 1000,
+      "accuracy_pct": 23.0,
+      "no_answer_marker_pct": 75.1,
+      "marker_agrees_gold_pct": 21.4,
+      "agrees_but_scored_0_rows": 34
+    },
+    "mistralai_Mistral-7B-Instruct-v0.3": {
+      "rows": 1000,
+      "accuracy_pct": 20.9,
+      "no_answer_marker_pct": 84.0,
+      "marker_agrees_gold_pct": 6.6,
+      "agrees_but_scored_0_rows": 40
+    }
+  },
+  "gsm_clean_per_model_benchmark": {
+    "Qwen_Qwen2.5-7B-Instruct::gsm1k": {
+      "rows": 1000,
+      "accuracy_pct": 76.2,
+      "no_terminal_marker_pct": 15.2,
+      "no_marker_and_scored_0_pct": 12.3
+    },
+    "Qwen_Qwen2.5-7B-Instruct::gsm8k": {
+      "rows": 1000,
+      "accuracy_pct": 83.3,
+      "no_terminal_marker_pct": 8.4,
+      "no_marker_and_scored_0_pct": 4.9
+    },
+    "Qwen_Qwen2.5-7B-Instruct::gsm_symbolic": {
+      "rows": 1000,
+      "accuracy_pct": 82.6,
+      "no_terminal_marker_pct": 11.5,
+      "no_marker_and_scored_0_pct": 9.1
+    },
+    "Qwen_Qwen3-8B::gsm1k": {
+      "rows": 1000,
+      "accuracy_pct": 71.7,
+      "no_terminal_marker_pct": 16.8,
+      "no_marker_and_scored_0_pct": 14.8
+    },
+    "Qwen_Qwen3-8B::gsm8k": {
+      "rows": 1000,
+      "accuracy_pct": 80.2,
+      "no_terminal_marker_pct": 9.1,
+      "no_marker_and_scored_0_pct": 7.9
+    },
+    "Qwen_Qwen3-8B::gsm_symbolic": {
+      "rows": 1000,
+      "accuracy_pct": 78.7,
+      "no_terminal_marker_pct": 11.2,
+      "no_marker_and_scored_0_pct": 9.8
+    },
+    "meta-llama_Llama-3.1-8B-Instruct::gsm1k": {
+      "rows": 1000,
+      "accuracy_pct": 79.2,
+      "no_terminal_marker_pct": 38.9,
+      "no_marker_and_scored_0_pct": 12.0
+    },
+    "meta-llama_Llama-3.1-8B-Instruct::gsm8k": {
+      "rows": 1000,
+      "accuracy_pct": 86.0,
+      "no_terminal_marker_pct": 34.8,
+      "no_marker_and_scored_0_pct": 5.7
+    },
+    "meta-llama_Llama-3.1-8B-Instruct::gsm_symbolic": {
+      "rows": 1000,
+      "accuracy_pct": 78.4,
+      "no_terminal_marker_pct": 41.1,
+      "no_marker_and_scored_0_pct": 13.3
+    },
+    "microsoft_phi-4::gsm1k": {
+      "rows": 1000,
+      "accuracy_pct": 77.6,
+      "no_terminal_marker_pct": 82.5,
+      "no_marker_and_scored_0_pct": 19.2
+    },
+    "microsoft_phi-4::gsm8k": {
+      "rows": 1000,
+      "accuracy_pct": 85.4,
+      "no_terminal_marker_pct": 78.1,
+      "no_marker_and_scored_0_pct": 10.9
+    },
+    "microsoft_phi-4::gsm_symbolic": {
+      "rows": 1000,
+      "accuracy_pct": 83.4,
+      "no_terminal_marker_pct": 90.0,
+      "no_marker_and_scored_0_pct": 14.5
+    },
+    "mistralai_Mistral-7B-Instruct-v0.3::gsm1k": {
+      "rows": 1000,
+      "accuracy_pct": 20.7,
+      "no_terminal_marker_pct": 49.4,
+      "no_marker_and_scored_0_pct": 29.4
+    },
+    "mistralai_Mistral-7B-Instruct-v0.3::gsm8k": {
+      "rows": 1000,
+      "accuracy_pct": 24.1,
+      "no_terminal_marker_pct": 50.2,
+      "no_marker_and_scored_0_pct": 26.2
+    },
+    "mistralai_Mistral-7B-Instruct-v0.3::gsm_symbolic": {
+      "rows": 1000,
+      "accuracy_pct": 16.3,
+      "no_terminal_marker_pct": 45.6,
+      "no_marker_and_scored_0_pct": 29.5
+    }
+  }
+}

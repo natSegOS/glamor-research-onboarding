@@ -1,0 +1,53 @@
+{
+  "total_rows": 550370,
+  "rows_per_benchmark": {
+    "gsm1k": 94920,
+    "gsm8k": 94700,
+    "gsm_symbolic": 94740,
+    "humaneval": 73825,
+    "mmlu_pro": 96755,
+    "truthfulqa": 95430
+  },
+  "rows_per_model": {
+    "Qwen_Qwen2.5-7B-Instruct": 110074,
+    "Qwen_Qwen3-8B": 110074,
+    "meta-llama_Llama-3.1-8B-Instruct": 110074,
+    "microsoft_phi-4": 110074,
+    "mistralai_Mistral-7B-Instruct-v0.3": 110074
+  },
+  "rows_per_condition": {
+    "clean": 29100,
+    "spoken_casual": 29100,
+    "spoken_formal": 29100,
+    "spoken_filler_stripped": 29100,
+    "spoken_recast": 29100,
+    "clean_fillers": 29100,
+    "clean_numwords": 29100,
+    "clean_nofunc": 29100,
+    "clean_nocase": 29100,
+    "clean_homophone": 29100,
+    "clean_qfirst": 16570,
+    "spoken_reflow": 29100,
+    "spoken_reflow_llama": 29100,
+    "kbd_neighbor": 29100,
+    "kbd_random": 29100,
+    "kbd_swap": 29100,
+    "kbd_repeat": 29100,
+    "kbd_fatfinger": 29100,
+    "kbd_nospace": 29100,
+    "ctrl_option_perm": 10000
+  },
+  "seeds": [
+    "seed0",
+    "seed1",
+    "seed2",
+    "seed3",
+    "seed4"
+  ],
+  "duplicate_model_seed_benchmark_qid_condition_rows": 0,
+  "flip_field_mismatches": 0,
+  "clean_rows_with_non_same_flip": 0,
+  "clean_question_text_conflicts": 0,
+  "keyboard_rows_total": 174600,
+  "keyboard_rows_with_alignable_edit_features": 145475
+}
